@@ -3,12 +3,13 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from backend.app.api import health, router
 from backend.app.core.config import settings
 from backend.app.core.logging import setup_logging
 from backend.app.core.safety import get_safety_report
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 
 @asynccontextmanager

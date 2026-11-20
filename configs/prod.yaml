@@ -1,0 +1,27 @@
+# PowerTwin Production Configuration Template
+project_name: "PowerTwin BESS Simulator (Prod)"
+environment: "production"
+debug: false
+
+safety:
+  application_mode: "SIMULATION ONLY"
+  simulation_only: true
+  hardware_integration_enabled: false
+  allow_external_modbus_writes: false
+  automatic_device_discovery_enabled: false
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+database:
+  server: "timescaledb"
+  port: 5432
+  user: "powertwin"
+  password: "powertwin_prod_secure_password"
+  db_name: "powertwin_prod_db"
+
+simulation_defaults:
+  tick_rate_hz: 100
+  default_step_ms: 10
+  random_seed: 42

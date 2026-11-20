@@ -2,8 +2,9 @@
 
 from typing import Any
 
-from backend.app.core.safety import get_safety_report
 from fastapi import APIRouter, Response, status
+
+from backend.app.core.safety import get_safety_report
 
 router = APIRouter(tags=["Health"])
 

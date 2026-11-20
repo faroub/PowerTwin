@@ -1,0 +1,60 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: powertwin_timescaledb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-powertwin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-powertwin_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-powertwin_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-powertwin} -d ${POSTGRES_DB:-powertwin_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.backend
+    container_name: powertwin_backend
+    environment:
+      POSTGRES_SERVER: timescaledb
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-powertwin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-powertwin_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-powertwin_db}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-True}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/liveness"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.frontend
+    container_name: powertwin_frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
