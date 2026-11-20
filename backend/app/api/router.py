@@ -2,7 +2,9 @@
 
 from fastapi import APIRouter
 
-from backend.app.api.v1 import info
+from backend.app.api.v1 import info, overview, simulation_ctrl
 
 api_v1_router = APIRouter()
 api_v1_router.include_router(info.router, prefix="", tags=["System Info"])
+api_v1_router.include_router(overview.router, prefix="", tags=["Plant Overview"])
+api_v1_router.include_router(simulation_ctrl.router, prefix="", tags=["Simulation Control"])
