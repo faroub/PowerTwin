@@ -4,24 +4,21 @@ export const PPCView: React.FC = () => {
   return (
     <div>
       <div className="view-header">
-        <h1 className="view-title">Power Plant Controller (PPC)</h1>
-        <p className="view-subtitle">Active/Reactive Power Regulation, Frequency Droop, and Volt-VAR</p>
-      </div>
-
-      <div className="notice-box">
-        <strong>PPC CONTROL SHELL:</strong> Closed-loop P-f droop, Volt-VAR curves, and POI ramp rate limiters will be implemented in WP02+.
+        <h1 className="view-title">Power Plant Controller (PPC - Layer B)</h1>
+        <p className="view-subtitle">POI Power Regulation & Unit Power Allocation</p>
       </div>
 
       <div className="grid-cards">
         <div className="card">
-          <div className="card-title">PPC Mode</div>
-          <div className="card-value">MANUAL</div>
-          <div className="card-note">Direct Operator Target</div>
+          <div className="card-title">Priority Mode</div>
+          <div className="card-value" style={{ color: '#38bdf8' }}>ACTIVE_POWER_PRIORITY</div>
+          <div className="card-note">P Priority over Q</div>
         </div>
+
         <div className="card">
-          <div className="card-title">Frequency Droop</div>
-          <div className="card-value">5.0 %</div>
-          <div className="card-note">Standard Grid Code Spec</div>
+          <div className="card-title">Ramp Rate Limit</div>
+          <div className="card-value">10.0 MW/s</div>
+          <div className="card-note">Active Power Ramp Bound</div>
         </div>
       </div>
     </div>

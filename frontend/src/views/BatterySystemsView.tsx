@@ -5,29 +5,26 @@ export const BatterySystemsView: React.FC = () => {
     <div>
       <div className="view-header">
         <h1 className="view-title">Battery Systems</h1>
-        <p className="view-subtitle">Cell, Module, Rack, and Container Electro-Thermal Models</p>
+        <p className="view-subtitle">Container & Rack Electro-Thermal Telemetry</p>
       </div>
 
       <div className="notice-box">
-        <strong>BATTERY DOMAIN SHELL:</strong> Equivalent circuit models (ECM), thermal diffusion, cell balancing, and degradation algorithms will be implemented in WP02+.
+        <strong>CONTAINER TELEMETRY MONITORING:</strong> Operating parameters for reference battery containers.
       </div>
 
       <div className="grid-cards">
-        <div className="card">
-          <div className="card-title">Battery Containers</div>
-          <div className="card-value">0 / 4 Active</div>
-          <div className="card-note">Configured via YAML</div>
-        </div>
-        <div className="card">
-          <div className="card-title">Total Racks</div>
-          <div className="card-value">0 Racks</div>
-          <div className="card-note">16 Racks/Container Spec</div>
-        </div>
-        <div className="card">
-          <div className="card-title">Max Cell Temp</div>
-          <div className="card-value">25.0 °C</div>
-          <div className="card-note">Ambient Baseline</div>
-        </div>
+        {[1, 2, 3, 4].map((id) => (
+          <div key={id} className="card">
+            <div className="card-title">Container {String(id).padStart(2, '0')}</div>
+            <div className="card-value" style={{ color: '#22c55e' }}>64.5 % SoC</div>
+            <div style={{ marginTop: '12px', fontSize: '0.85rem', color: '#94a3b8' }}>
+              <div>Voltage: 1000.0 V DC</div>
+              <div>Current: +250.0 A</div>
+              <div>Temperature: 25.4 °C</div>
+              <div>Racks: 16 / 16 Operational</div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
