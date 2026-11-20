@@ -19,14 +19,18 @@ dependencies = [
     "psycopg2-binary>=2.9.9",
     "httpx>=0.27.0",
     "pyyaml>=6.0.1",
+    "greenlet>=3.0.3",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.1.0",
     "pytest-asyncio>=0.23.5",
+    "pytest-cov>=4.1.0",
+    "hypothesis>=6.100.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",
+    "types-PyYAML>=6.0.12.20240311",
 ]
 
 [tool.ruff]
@@ -47,3 +51,12 @@ minversion = "8.0"
 testpaths = ["../tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
+addopts = "--cov=backend/app --cov=plugins --cov-branch --cov-report=term-missing"
+
+[tool.coverage.run]
+branch = true
+source = ["backend/app", "plugins"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2

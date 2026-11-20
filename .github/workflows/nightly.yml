@@ -1,0 +1,68 @@
+name: Nightly Engineering Regression
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # Run daily at 01:00 UTC
+  workflow_dispatch:
+    inputs:
+      random_seed:
+        description: 'Seeded random number generator seed'
+        required: false
+        default: '42'
+
+permissions:
+  contents: read
+
+jobs:
+  nightly-regression-suite:
+    name: Nightly Long-Duration & High-Stress Regression Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Large Plant Topology Regression (50 MW / 200 MWh Variant)
+        run: |
+          PYTHONPATH=. pytest tests/test_plant_topology.py -k "test_variant_50mw_200mwh"
+
+      - name: Long-Duration Battery Charge/Discharge Cycles Regression
+        run: |
+          PYTHONPATH=. pytest tests/test_battery_bms.py
+
+      - name: Full Grid Services & Disturbances Regression
+        run: |
+          PYTHONPATH=. pytest tests/test_grid_services.py tests/test_grid_poi.py
+
+      - name: Comprehensive Fault Injection & Recovery Scenarios
+        run: |
+          PYTHONPATH=. pytest tests/test_scenarios_fault_injection.py
+
+      - name: High-Throughput Historian Ingestion Regression
+        run: |
+          PYTHONPATH=. pytest tests/test_historian_db.py
+
+      - name: Full 20-Step End-to-End Demonstration Regression (Seed=42)
+        run: |
+          PYTHONPATH=. pytest tests/test_e2e_integration_demo.py
+
+      - name: Upload Nightly Regression Reports
+        if: always()
+        uses: actions/upload-artifact@505410076e65609755f672099f712d96e7d083b8 # v4.0.0
+        with:
+          name: nightly-regression-artifacts
+          path: |
+            backend/app/historian/overflow/
+            tests/
+          retention-days: 30

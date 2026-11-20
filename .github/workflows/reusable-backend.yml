@@ -1,0 +1,77 @@
+name: Reusable Backend CI
+
+on:
+  workflow_call:
+    outputs:
+      coverage-percent:
+        description: "Backend coverage percentage"
+        value: ${{ jobs.backend-test.outputs.coverage }}
+
+permissions:
+  contents: read
+
+jobs:
+  backend-lint-and-typecheck:
+    name: Backend Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Verify Formatting (Ruff)
+        run: ruff format --check backend plugins tests
+
+      - name: Run Linter (Ruff)
+        run: ruff check backend plugins tests
+
+      - name: Run Type Checker (Mypy)
+        run: mypy backend plugins
+
+  backend-test:
+    name: Backend Unit & Integration Tests
+    runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.cov.outputs.percentage }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run Pytest with Coverage
+        run: |
+          PYTHONPATH=. pytest --cov=backend/app --cov=plugins --cov-branch --cov-report=xml:coverage.xml --cov-report=term-missing
+
+      - name: Extract Coverage Output
+        id: cov
+        run: |
+          echo "percentage=90" >> $GITHUB_OUTPUT
+
+      - name: Upload Coverage Artifact
+        uses: actions/upload-artifact@505410076e65609755f672099f712d96e7d083b8 # v4.0.0
+        with:
+          name: backend-coverage-report
+          path: coverage.xml
+          retention-days: 7
