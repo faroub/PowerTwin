@@ -32,6 +32,15 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
     ]
 
+    # Protocol Gateway & CIL Settings (Safety Invariants)
+    ALLOW_EXTERNAL_MODBUS_WRITES: bool = Field(
+        default=False, description="Disabled by default; requires explicit CIL configuration"
+    )
+    PROTOCOL_GATEWAY_HOST: str = Field(
+        default="127.0.0.1", description="Bound strictly to loopback by default"
+    )
+    PROTOCOL_GATEWAY_PORT: int = Field(default=5020, description="Modbus TCP Server port")
+
     # Database Settings
     POSTGRES_SERVER: str = Field(default_factory=lambda: os.getenv("POSTGRES_SERVER", "localhost"))
     POSTGRES_PORT: int = Field(default_factory=lambda: int(os.getenv("POSTGRES_PORT", "5432")))

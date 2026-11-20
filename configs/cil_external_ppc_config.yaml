@@ -1,0 +1,61 @@
+# PowerTwin Controller-in-the-Loop (CIL) Integration Configuration
+# Configures isolated protocol gateway for external PPC / EMS controller testing.
+
+cil_mode: "CONTROLLER_IN_THE_LOOP"
+safety_guardrails:
+  application_mode: "SIMULATION ONLY"
+  hardware_integration_enabled: false
+  allow_external_modbus_writes: true   # Explicitly enabled for CIL simulation testing
+  bind_host: "127.0.0.1"               # Strictly bound to loopback
+
+gateway:
+  protocol: "MODBUS_TCP"
+  host: "127.0.0.1"
+  port: 5020
+  watchdog_timeout_ms: 5000
+  register_map_version: "1.0.0"
+
+modbus_register_mappings:
+  - address: 0
+    name: "PLANT_ACTIVE_POWER_MW"
+    type: "FLOAT32"
+    access: "READ_ONLY"
+
+  - address: 2
+    name: "PLANT_REACTIVE_POWER_MVAR"
+    type: "FLOAT32"
+    access: "READ_ONLY"
+
+  - address: 4
+    name: "POI_VOLTAGE_KV"
+    type: "FLOAT32"
+    access: "READ_ONLY"
+
+  - address: 6
+    name: "GRID_FREQUENCY_HZ"
+    type: "FLOAT32"
+    access: "READ_ONLY"
+
+  - address: 8
+    name: "AVERAGE_SOC_PCT"
+    type: "FLOAT32"
+    access: "READ_ONLY"
+
+  - address: 100
+    name: "COMMAND_ACTIVE_POWER_W"
+    type: "FLOAT32"
+    access: "READ_WRITE"
+    min_value: -50000000.0
+    max_value: 50000000.0
+
+  - address: 102
+    name: "COMMAND_REACTIVE_POWER_VAR"
+    type: "FLOAT32"
+    access: "READ_WRITE"
+    min_value: -50000000.0
+    max_value: 50000000.0
+
+  - address: 104
+    name: "WATCHDOG_HEARTBEAT_COUNTER"
+    type: "UINT32"
+    access: "READ_WRITE"
