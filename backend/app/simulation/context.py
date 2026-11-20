@@ -1,6 +1,7 @@
 """Simulation Context passed to tasks during tick execution."""
 
 from typing import Any
+
 from backend.app.simulation.clock import NANOSECONDS_PER_SECOND, SimulationClock
 from backend.app.simulation.event import EventDispatcher, SimulationEvent
 from backend.app.simulation.random_manager import SeededRandomManager

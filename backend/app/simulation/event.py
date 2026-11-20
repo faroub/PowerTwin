@@ -3,6 +3,7 @@
 import uuid
 from collections.abc import Callable
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -57,7 +58,6 @@ class EventDispatcher:
         for handler in self._global_listeners:
             handler(event)
 
-    def get_history(() -> list[SimulationEvent]: ...
     def clear(self) -> None:
         """Clear listeners and event history."""
         self._listeners.clear()

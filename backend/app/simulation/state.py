@@ -1,9 +1,9 @@
 """Simulation Engine Lifecycle State."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class SimulationState(str, Enum):
+class SimulationState(StrEnum):
     """Lifecycle operational state of the simulation engine."""
 
     STOPPED = "STOPPED"

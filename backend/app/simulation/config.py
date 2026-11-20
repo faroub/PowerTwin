@@ -1,6 +1,7 @@
 """Simulation Engine Configuration Model."""
 
 from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -9,7 +10,7 @@ class SimulationConfiguration(BaseModel):
 
     tick_step_ns: int = Field(
         default=10_000_000,
-        description="Fixed simulation step size in nanoseconds (default: 10ms = 10,000,000 ns = 100 Hz)",
+        description="Fixed step in nanoseconds (default: 10ms = 10,000,000 ns = 100 Hz)",
     )
     speed_factor: float = Field(
         default=1.0,
@@ -21,7 +22,7 @@ class SimulationConfiguration(BaseModel):
     )
     error_policy: Literal["FAIL_FAST", "CONTINUE_WITH_FAULT_LOG"] = Field(
         default="FAIL_FAST",
-        description="Policy when a task raises an exception: FAIL_FAST aborts, CONTINUE_WITH_FAULT_LOG safe-parks task.",
+        description="Policy when task raises exception: FAIL_FAST or CONTINUE_WITH_FAULT_LOG.",
     )
     max_ticks: int | None = Field(
         default=None,

@@ -4,6 +4,7 @@ Schedules and executes SimulationTasks in strict DAG Phase and Priority order.
 """
 
 import logging
+
 from backend.app.simulation.context import SimulationContext
 from backend.app.simulation.exceptions import InitializationError, TaskExecutionError
 from backend.app.simulation.task import SimulationTask
@@ -84,8 +85,7 @@ class SimulationScheduler:
             if not task.enabled:
                 continue
 
-            # Evaluate interval schedule (e.g. interval=1 runs every step, interval=10 runs every 10th step)
-            # Step number starts at 1 for the first advance()
+            # Evaluate interval schedule (e.g. interval=1 every step, interval=10 every 10th step)
             if (step_number - 1) % task.interval_ticks != 0:
                 continue
 

@@ -4,12 +4,12 @@ import logging
 import time
 import uuid
 from typing import Any
+
 from backend.app.simulation.clock import NANOSECONDS_PER_SECOND, SimulationClock
 from backend.app.simulation.config import SimulationConfiguration
 from backend.app.simulation.context import SimulationContext
 from backend.app.simulation.event import EventDispatcher
 from backend.app.simulation.exceptions import (
-    InitializationError,
     SimulationError,
 )
 from backend.app.simulation.random_manager import SeededRandomManager
@@ -105,7 +105,7 @@ class SimulationRunManager:
             payload={"run_id": self.simulation_run_id, "timestamp_ns": self.clock.time_ns},
         )
 
-    def single_step((self) -> list[str]:
+    def single_step(self) -> list[str]:
         """Execute exactly one simulation tick step.
 
         Returns:
@@ -128,12 +128,18 @@ class SimulationRunManager:
         executed_summary: list[str] = []
 
         for _ in range(num_ticks):
-            if self.config.max_ticks is not None and self.clock.total_steps >= self.config.max_ticks:
+            if (
+                self.config.max_ticks is not None
+                and self.clock.total_steps >= self.config.max_ticks
+            ):
                 self.state = SimulationState.COMPLETED
                 self.context.emit_event(
                     name="SIMULATION_COMPLETED",
                     source="SIMULATION_ENGINE",
-                    payload={"run_id": self.simulation_run_id, "timestamp_ns": self.clock.time_ns},
+                    payload={
+                        "run_id": self.simulation_run_id,
+                        "timestamp_ns": self.clock.time_ns,
+                    },
                 )
                 break
 
@@ -149,7 +155,10 @@ class SimulationRunManager:
                 self.context.emit_event(
                     name="SIMULATION_FAULTED",
                     source="SIMULATION_ENGINE",
-                    payload={"run_id": self.simulation_run_id, "timestamp_ns": self.clock.time_ns},
+                    payload={
+                        "run_id": self.simulation_run_id,
+                        "timestamp_ns": self.clock.time_ns,
+                    },
                 )
                 raise
 
@@ -179,7 +188,9 @@ class SimulationRunManager:
         if self.config.speed_factor <= 0.0:
             return
 
-        target_duration_s = (self.clock.step_ns / NANOSECONDS_PER_SECOND) / self.config.speed_factor
+        target_duration_s = (
+            self.clock.step_ns / NANOSECONDS_PER_SECOND
+        ) / self.config.speed_factor
         elapsed_s = time.perf_counter() - start_wall_s
         sleep_needed_s = target_duration_s - elapsed_s
 
@@ -214,9 +225,6 @@ class SimulationRunManager:
             task.last_execution_tick_ns = None
 
         self.state = SimulationState.STOPPED
-
-    def create_snapshot(() -> SimulationSnapshot:
-        """Capture engine state snapshot."""
 
     def create_snapshot(self) -> SimulationSnapshot:
         """Capture engine state snapshot."""
