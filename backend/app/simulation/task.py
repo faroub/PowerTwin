@@ -42,7 +42,7 @@ class SimulationTask(ABC):
         """
         pass
 
-    def get_state(self) -> dict[str, Any]:
+    def get_task_state(self) -> dict[str, Any]:
         """Return task internal state dictionary for snapshot serialization."""
         return {
             "name": self.name,
@@ -54,7 +54,7 @@ class SimulationTask(ABC):
             "last_execution_tick_ns": self.last_execution_tick_ns,
         }
 
-    def set_state(self, state: dict[str, Any]) -> None:
+    def set_task_state(self, state: dict[str, Any]) -> None:
         """Restore task internal state from snapshot state dictionary."""
         self.enabled = state.get("enabled", True)
         self.execution_count = state.get("execution_count", 0)

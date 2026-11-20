@@ -1,6 +1,7 @@
 """Dummy Grid Equipment Plugin."""
 
 from typing import Any
+
 from backend.app.equipment.interfaces.grid import GridModelConfig, GridModelInterface
 from backend.app.equipment.models import (
     EquipmentMetadata,
@@ -46,7 +47,7 @@ class DummyGridPlugin(BasePlugin, GridModelInterface):
         try:
             GridModelConfig(**config)
             return True
-        except Exception:
+        except ValueError:
             return False
 
     def initialize(self, config: dict[str, Any]) -> None:
@@ -58,7 +59,6 @@ class DummyGridPlugin(BasePlugin, GridModelInterface):
         self._is_initialized = True
 
     def step_plugin(self, ctx: SimulationContext, delta_t_s: float) -> None:
-        # Generate small deterministic frequency jitter
         jitter = ctx.random.gauss(mu=0.0, sigma=0.005)
         self.frequency_hz = self._config.nominal_frequency_hz + jitter
 

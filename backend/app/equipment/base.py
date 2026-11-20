@@ -1,7 +1,7 @@
 """Abstract Base Interface for All PowerTwin Equipment Models."""
 
-from abc import ABC, abstractmethod
 from typing import Any
+
 from backend.app.equipment.models import (
     AlarmRecord,
     EquipmentMetadata,
@@ -12,8 +12,8 @@ from backend.app.equipment.models import (
 from backend.app.simulation.context import SimulationContext
 
 
-class BaseEquipmentInterface(ABC):
-    """Abstract base class for all equipment, model, and controller interfaces."""
+class BaseEquipmentInterface:
+    """Base class for all equipment, model, and controller interfaces."""
 
     def __init__(
         self,
@@ -31,46 +31,34 @@ class BaseEquipmentInterface(ABC):
         self._active_alarms: list[AlarmRecord] = []
         self._is_initialized: bool = False
 
-    @abstractmethod
     def initialize(self, config: dict[str, Any]) -> None:
-        """Initialize equipment model state and parameters.
+        """Initialize equipment model state and parameters."""
+        self._is_initialized = True
+        self._is_available = True
+        self._operating_state = OperatingState.STANDBY
 
-        Args:
-            config: Equipment-specific configuration dictionary.
-        """
-        pass
-
-    @abstractmethod
     def step(self, ctx: SimulationContext, delta_t_s: float) -> None:
-        """Execute physical model step for a single simulation tick.
-
-        Args:
-            ctx: SimulationContext for current tick step.
-            delta_t_s: Step duration in seconds.
-        """
+        """Execute physical model step for a single simulation tick."""
         pass
 
-    @abstractmethod
     def process_command(self, cmd: dict[str, Any]) -> bool:
-        """Process an inbound command payload.
+        """Process an inbound command payload."""
+        return True
 
-        Args:
-            cmd: Command dictionary.
-
-        Returns:
-            True if command accepted, False if rejected.
-        """
-        pass
-
-    @abstractmethod
     def get_state(self) -> UniversalEquipmentState:
         """Return universal equipment state snapshot."""
-        pass
+        return UniversalEquipmentState(
+            equipment_id=self.equipment_id,
+            equipment_type=self.equipment_type,
+            metadata=self.metadata,
+            operating_state=self._operating_state,
+            is_available=self._is_available,
+            alarms=self.get_alarms(),
+        )
 
-    @abstractmethod
     def get_capabilities(self) -> dict[str, Any]:
         """Return dictionary of equipment technical capabilities."""
-        pass
+        return {}
 
     def get_alarms(self) -> list[AlarmRecord]:
         """Return active alarms list."""
@@ -87,7 +75,7 @@ class BaseEquipmentInterface(ABC):
             "active_alarms_count": len(self.get_alarms()),
         }
 
-    @abstractmethod
     def shutdown(self) -> None:
         """Clean up equipment model resources safely."""
-        pass
+        self._operating_state = OperatingState.OFF
+        self._is_available = False

@@ -1,7 +1,11 @@
 """Dummy Auxiliary Systems Equipment Plugin."""
 
 from typing import Any
-from backend.app.equipment.interfaces.auxiliary import AuxiliaryConfig, AuxiliarySystemInterface
+
+from backend.app.equipment.interfaces.auxiliary import (
+    AuxiliaryConfig,
+    AuxiliarySystemInterface,
+)
 from backend.app.equipment.models import (
     EquipmentMetadata,
     OperatingState,
@@ -47,7 +51,7 @@ class DummyAuxiliaryPlugin(BasePlugin, AuxiliarySystemInterface):
         try:
             AuxiliaryConfig(**config)
             return True
-        except Exception:
+        except ValueError:
             return False
 
     def initialize(self, config: dict[str, Any]) -> None:
@@ -58,7 +62,6 @@ class DummyAuxiliaryPlugin(BasePlugin, AuxiliarySystemInterface):
         self._is_initialized = True
 
     def step_plugin(self, ctx: SimulationContext, delta_t_s: float) -> None:
-        # Thermal diffusion approximation: cool container towards target temperature
         temp_diff = self.container_temp_c - self.target_temp_c
         self.container_temp_c -= temp_diff * (0.1 * delta_t_s)
 

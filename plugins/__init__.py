@@ -9,14 +9,14 @@ from plugins.manifest import PluginCategory, PluginHealthStatus, PluginManifest
 from plugins.registry import CURRENT_API_VERSION, PluginRegistry
 
 __all__ = [
-    "BasePlugin",
-    "PluginManifest",
-    "PluginCategory",
-    "PluginHealthStatus",
-    "PluginRegistry",
     "CURRENT_API_VERSION",
+    "BasePlugin",
+    "DummyAuxiliaryPlugin",
+    "DummyGridPlugin",
     "GenericBatteryPlugin",
     "GenericPCSPlugin",
-    "DummyGridPlugin",
-    "DummyAuxiliaryPlugin",
+    "PluginCategory",
+    "PluginHealthStatus",
+    "PluginManifest",
+    "PluginRegistry",
 ]

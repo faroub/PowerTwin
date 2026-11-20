@@ -1,6 +1,7 @@
 """Auxiliary Systems (HVAC, Fire Suppression, Controls) Interface."""
 
 from pydantic import BaseModel, Field
+
 from backend.app.equipment.base import BaseEquipmentInterface
 from backend.app.equipment.models import EquipmentType
 
@@ -8,8 +9,8 @@ from backend.app.equipment.models import EquipmentType
 class AuxiliaryConfig(BaseModel):
     """Configuration schema for HVAC and Auxiliary Container loads."""
 
-    cooling_capacity_w: float = Field(default=50_000.0, description="HVAC cooling capacity in Watts")
-    aux_base_power_w: float = Field(default=5000.0, description="Baseline auxiliary electrical power draw")
+    cooling_capacity_w: float = Field(default=50_000.0, description="HVAC cooling capacity (W)")
+    aux_base_power_w: float = Field(default=5000.0, description="Baseline aux power draw (W)")
 
 
 class AuxiliaryCommand(BaseModel):

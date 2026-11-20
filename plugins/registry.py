@@ -6,6 +6,7 @@ and safety boundaries. Loading arbitrary Python files from untrusted user paths 
 
 import logging
 from typing import Any
+
 from backend.app.simulation.exceptions import InitializationError
 from plugins.base import BasePlugin
 from plugins.manifest import PluginHealthStatus, PluginManifest
@@ -29,7 +30,6 @@ class PluginRegistry:
         Args:
             plugin_cls: Subclass of BasePlugin.
         """
-        # Instantiate dummy instance to read manifest
         dummy = plugin_cls()
         manifest = dummy.manifest
 
@@ -40,14 +40,15 @@ class PluginRegistry:
             )
 
         if manifest.plugin_id in self._registered_classes:
-            logger.warning("Overwriting existing plugin class registration: '%s'", manifest.plugin_id)
+            logger.warning(
+                "Overwriting existing plugin class registration: '%s'", manifest.plugin_id
+            )
 
         self._registered_classes[manifest.plugin_id] = plugin_cls
         logger.info("Registered plugin class '%s' (v%s)", manifest.plugin_id, manifest.version)
 
     def validate_api_compatibility(self, manifest: PluginManifest) -> bool:
         """Validate if plugin API version matches registry API version."""
-        # Simple SemVer major.minor match check
         manifest_major = manifest.api_version.split(".")[0]
         supported_major = self.api_version.split(".")[0]
         return manifest_major == supported_major
@@ -138,6 +139,6 @@ class PluginRegistry:
             try:
                 plugin.enabled = False
                 plugin.shutdown()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.error("Error shutting down plugin '%s': %s", plugin.name, e)
         self._active_plugins.clear()

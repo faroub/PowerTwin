@@ -1,6 +1,7 @@
 """Power Plant Controller (PPC) Interface."""
 
 from pydantic import BaseModel, Field
+
 from backend.app.equipment.base import BaseEquipmentInterface
 from backend.app.equipment.models import EquipmentType
 

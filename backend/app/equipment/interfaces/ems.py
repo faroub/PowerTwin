@@ -1,6 +1,7 @@
 """Energy Management System (EMS) Interface."""
 
 from pydantic import BaseModel
+
 from backend.app.equipment.base import BaseEquipmentInterface
 from backend.app.equipment.models import EquipmentType
 

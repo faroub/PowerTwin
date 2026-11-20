@@ -229,7 +229,7 @@ class SimulationRunManager:
     def create_snapshot(self) -> SimulationSnapshot:
         """Capture engine state snapshot."""
         task_states = {
-            name: task.get_state() for name, task in self.scheduler._tasks.items()
+            name: task.get_task_state() for name, task in self.scheduler._tasks.items()
         }
         return SimulationSnapshot(
             simulation_run_id=self.simulation_run_id,
@@ -270,6 +270,6 @@ class SimulationRunManager:
         # Restore task states
         for name, task in self.scheduler._tasks.items():
             if name in snapshot.task_states:
-                task.set_state(snapshot.task_states[name])
+                task.set_task_state(snapshot.task_states[name])
 
         self.state = SimulationState.PAUSED

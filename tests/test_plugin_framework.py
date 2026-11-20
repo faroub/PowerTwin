@@ -1,15 +1,14 @@
 """Automated Test Suite for Plugin Framework and Reference Plugins."""
 
 from typing import Any
+
 import pytest
+
 from backend.app.equipment.models import OperatingState
 from backend.app.simulation.context import SimulationContext
 from backend.app.simulation.exceptions import InitializationError
 from backend.app.simulation.manager import SimulationRunManager
-from backend.app.simulation.task import SimulationTask
 from plugins.base import BasePlugin
-from plugins.dummy_auxiliary import DummyAuxiliaryPlugin
-from plugins.dummy_grid import DummyGridPlugin
 from plugins.generic_battery import GenericBatteryPlugin
 from plugins.generic_pcs import GenericPCSPlugin
 from plugins.manifest import PluginCategory, PluginHealthStatus, PluginManifest
@@ -111,13 +110,11 @@ def test_plugin_registration_and_api_compatibility() -> None:
     """Test registration and API compatibility validation."""
     registry = PluginRegistry(api_version="0.1.0")
 
-    # Register valid plugin
     registry.register_plugin_class(GenericBatteryPlugin)
     manifests = registry.get_registered_manifests()
     assert len(manifests) == 1
     assert manifests[0].plugin_id == "generic_battery_v1"
 
-    # Incompatible plugin registration fails
     with pytest.raises(InitializationError):
         registry.register_plugin_class(IncompatiblePlugin)
 
@@ -138,10 +135,8 @@ def test_missing_dependency_validation() -> None:
     registry.register_plugin_class(DependentPlugin)
     registry.register_plugin_class(GenericBatteryPlugin)
 
-    # Instantiate dependent plugin
-    dep_inst = registry.create_and_initialize("dependent_plugin", {})
+    registry.create_and_initialize("dependent_plugin", {})
 
-    # Enable fails because generic_battery_v1 is not instantiated/enabled
     with pytest.raises(InitializationError):
         registry.enable_plugin("dependent_plugin")
 
@@ -161,18 +156,18 @@ def test_plugin_lifecycle_and_execution() -> None:
     assert battery.enabled is True
     assert pcs.enabled is True
 
-    # Connect to SimulationRunManager
     runner = SimulationRunManager()
     runner.register_task(battery)
     runner.register_task(pcs)
 
-    # Set discharge demand setpoint
     runner.shared_state["pcs_cmd_active_power_w"] = 1_000_000.0  # 1 MW discharge
 
     runner.step(10)  # Run 10 steps (100ms)
 
     assert runner.shared_state["battery_current_a"] > 0  # Discharging
-    assert battery.get_equipment_state().operating_state == OperatingState.RUNNING
+    eq_state = battery.get_equipment_state()
+    assert eq_state is not None
+    assert eq_state.operating_state == OperatingState.RUNNING
 
     registry.shutdown_all()
     assert battery.enabled is False
@@ -183,14 +178,14 @@ def test_engine_independence_with_new_custom_plugin() -> None:
     registry = PluginRegistry()
     registry.register_plugin_class(CustomSolarPVPlugin)
 
-    solar_plugin = registry.create_and_initialize("custom_solar_pv_v1", {"peak_capacity_w": 25_000_000.0})
+    solar_plugin = registry.create_and_initialize(
+        "custom_solar_pv_v1", {"peak_capacity_w": 25_000_000.0}
+    )
     registry.enable_plugin("custom_solar_pv_v1")
 
-    # Pure simulation engine without modifications
     engine = SimulationRunManager()
     engine.register_task(solar_plugin)
 
     engine.step(1)
 
-    # State updated cleanly by custom solar plugin
     assert engine.shared_state["solar_output_w"] == 25_000_000.0

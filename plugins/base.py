@@ -3,6 +3,7 @@
 import logging
 from abc import ABC, abstractmethod
 from typing import Any
+
 from backend.app.equipment.base import BaseEquipmentInterface
 from backend.app.equipment.models import AlarmRecord, UniversalEquipmentState
 from backend.app.simulation.context import SimulationContext
@@ -20,7 +21,7 @@ class BasePlugin(SimulationTask, ABC):
 
     def __init__(
         self,
-        name: str,
+        name: str = "BasePlugin",
         phase: int = 1,
         priority: int = 0,
         interval_ticks: int = 1,
@@ -39,22 +40,22 @@ class BasePlugin(SimulationTask, ABC):
     @abstractmethod
     def manifest(self) -> PluginManifest:
         """Return metadata manifest for this plugin."""
-        pass
 
     @abstractmethod
     def validate_config(self, config: dict[str, Any]) -> bool:
         """Validate input configuration parameters."""
-        pass
 
     @abstractmethod
     def initialize(self, config: dict[str, Any]) -> None:
         """Initialize plugin equipment model state."""
-        pass
 
     @abstractmethod
     def step_plugin(self, ctx: SimulationContext, delta_t_s: float) -> None:
         """Execute model tick physics for current tick."""
-        pass
+
+    def step(self, ctx: SimulationContext, delta_t_s: float) -> None:
+        """Forward step to step_plugin for equipment interface compatibility."""
+        self.step_plugin(ctx, delta_t_s)
 
     def execute(self, ctx: SimulationContext) -> None:
         """Execute tick wrapped in fault containment boundary."""
@@ -66,12 +67,10 @@ class BasePlugin(SimulationTask, ABC):
         except Exception as e:
             self.health_status = PluginHealthStatus.FAULTED
             self.enabled = False
-            logger.error(
-                "Fault containment: Plugin '%s' raised exception at tick %d ns: %s",
+            logger.exception(
+                "Fault containment: Plugin '%s' raised exception at tick %d ns",
                 self.name,
                 ctx.current_tick_ns,
-                e,
-                exc_info=True,
             )
             ctx.emit_event(
                 name="PLUGIN_FAULTED",
@@ -86,12 +85,16 @@ class BasePlugin(SimulationTask, ABC):
 
     def get_equipment_state(self) -> UniversalEquipmentState | None:
         """Return underlying equipment state if interface attached."""
+        if isinstance(self, BaseEquipmentInterface):
+            return self.get_state()
         if self._equipment_interface is not None:
             return self._equipment_interface.get_state()
         return None
 
     def get_alarms(self) -> list[AlarmRecord]:
         """Return active alarms from underlying equipment interface."""
+        if isinstance(self, BaseEquipmentInterface):
+            return self.get_alarms()
         if self._equipment_interface is not None:
             return self._equipment_interface.get_alarms()
         return []
@@ -99,4 +102,3 @@ class BasePlugin(SimulationTask, ABC):
     @abstractmethod
     def shutdown(self) -> None:
         """Safely clean up plugin resources."""
-        pass

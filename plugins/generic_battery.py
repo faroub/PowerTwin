@@ -1,11 +1,14 @@
 """Generic Battery System Equipment Plugin."""
 
 from typing import Any
-from backend.app.equipment.interfaces.battery import BatterySystemConfig, BatterySystemInterface
+
+from backend.app.equipment.interfaces.battery import (
+    BatterySystemConfig,
+    BatterySystemInterface,
+)
 from backend.app.equipment.models import (
     EquipmentMetadata,
     OperatingState,
-    QualityFlag,
     TelemetryPoint,
     UniversalEquipmentState,
 )
@@ -49,7 +52,7 @@ class GenericBatteryPlugin(BasePlugin, BatterySystemInterface):
         try:
             BatterySystemConfig(**config)
             return True
-        except Exception:
+        except ValueError:
             return False
 
     def initialize(self, config: dict[str, Any]) -> None:
@@ -61,21 +64,15 @@ class GenericBatteryPlugin(BasePlugin, BatterySystemInterface):
         self._is_initialized = True
 
     def step_plugin(self, ctx: SimulationContext, delta_t_s: float) -> None:
-        # Read PCS or controller power demand from shared state (+W = Discharging, -W = Charging)
         p_pcs_w = ctx.shared_state.get("pcs_active_power_w", 0.0)
-
-        # Calculate current: I = P / V (+A = Discharge out of battery, -A = Charge into battery)
         self.current_a = p_pcs_w / max(self.voltage_v, 1.0)
 
-        # Simple energy integration: dSoC = (-I * dt / nominal_capacity_ah) * 100
         capacity_ah = self._config.capacity_wh / self._config.nominal_voltage_v
         dsoc = (-self.current_a * (delta_t_s / 3600.0) / max(capacity_ah, 1.0)) * 100.0
         self.soc_pct = max(0.0, min(100.0, self.soc_pct + dsoc))
 
-        # Update OCV voltage approximation based on SoC
         self.voltage_v = self._config.nominal_voltage_v * (0.9 + 0.2 * (self.soc_pct / 100.0))
 
-        # Store state in shared bus
         ctx.shared_state["battery_soc_pct"] = self.soc_pct
         ctx.shared_state["battery_voltage_v"] = self.voltage_v
         ctx.shared_state["battery_current_a"] = self.current_a
@@ -84,7 +81,7 @@ class GenericBatteryPlugin(BasePlugin, BatterySystemInterface):
             self._operating_state = OperatingState.RUNNING
 
     def process_command(self, cmd: dict[str, Any]) -> bool:
-        if "reset_faults" in cmd and cmd["reset_faults"]:
+        if cmd.get("reset_faults"):
             self._operating_state = OperatingState.STANDBY
             return True
         return False

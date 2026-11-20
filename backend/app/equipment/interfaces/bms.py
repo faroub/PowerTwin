@@ -1,6 +1,7 @@
 """Battery Management System (BMS) Interface."""
 
 from pydantic import BaseModel, Field
+
 from backend.app.equipment.base import BaseEquipmentInterface
 from backend.app.equipment.models import EquipmentType, OperatingState
 

@@ -1,6 +1,7 @@
 """Generic PCS Inverter Equipment Plugin."""
 
 from typing import Any
+
 from backend.app.equipment.interfaces.pcs import PCSCommand, PCSConfig, PCSInterface
 from backend.app.equipment.models import (
     EquipmentMetadata,
@@ -47,7 +48,7 @@ class GenericPCSPlugin(BasePlugin, PCSInterface):
         try:
             PCSConfig(**config)
             return True
-        except Exception:
+        except ValueError:
             return False
 
     def initialize(self, config: dict[str, Any]) -> None:
@@ -57,11 +58,9 @@ class GenericPCSPlugin(BasePlugin, PCSInterface):
         self._is_initialized = True
 
     def step_plugin(self, ctx: SimulationContext, delta_t_s: float) -> None:
-        # Read requested setpoints from PPC / Controller or direct command
         p_req = ctx.shared_state.get("pcs_cmd_active_power_w", self.active_power_w)
         q_req = ctx.shared_state.get("pcs_cmd_reactive_power_var", self.reactive_power_var)
 
-        # Enforce rated limits
         p_clamped = max(-self._config.rated_power_w, min(self._config.rated_power_w, p_req))
         q_clamped = max(
             -self._config.rated_apparent_power_va,
@@ -83,7 +82,7 @@ class GenericPCSPlugin(BasePlugin, PCSInterface):
             self.active_power_w = parsed.active_power_setpoint_w
             self.reactive_power_var = parsed.reactive_power_setpoint_var
             return True
-        except Exception:
+        except ValueError:
             return False
 
     def get_state(self) -> UniversalEquipmentState:
