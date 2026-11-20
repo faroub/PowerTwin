@@ -1,0 +1,24 @@
+# Deployment Profile 1: Developer Workstation
+# Optimized for local development, hot-reloading, and fast feedback loops.
+
+profile_name: "DEVELOPER_WORKSTATION"
+environment: "development"
+debug: true
+
+safety_guardrails:
+  application_mode: "SIMULATION ONLY"
+  hardware_integration_enabled: false
+  allow_external_modbus_writes: false
+  bind_host: "127.0.0.1"
+
+networking:
+  backend_port: 8000
+  frontend_port: 5173
+  database_port: 5432
+  protocol_gateway_port: 5020
+
+database:
+  host: "localhost"
+  port: 5432
+  database_name: "powertwin_db"
+  retention_days: 7

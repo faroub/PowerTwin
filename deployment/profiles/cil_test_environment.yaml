@@ -1,0 +1,25 @@
+# Deployment Profile 3: Isolated CIL Test Environment
+# Configured for isolated hardware-in-the-loop / controller-in-the-loop laboratory testing.
+
+profile_name: "ISOLATED_CIL_TEST_ENVIRONMENT"
+environment: "testing"
+debug: true
+
+safety_guardrails:
+  application_mode: "SIMULATION ONLY"
+  hardware_integration_enabled: false
+  allow_external_modbus_writes: true   # Explicitly enabled for CIL protocol write testing
+  bind_host: "127.0.0.1"               # Bound strictly to isolated loopback
+
+networking:
+  backend_port: 8000
+  frontend_port: 5173
+  database_port: 5432
+  protocol_gateway_port: 5020
+
+protocol_gateway:
+  protocol: "MODBUS_TCP"
+  host: "127.0.0.1"
+  port: 5020
+  watchdog_timeout_ms: 5000
+  register_map_version: "1.0.0"

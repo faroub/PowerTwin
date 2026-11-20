@@ -1,0 +1,32 @@
+# Deployment Profile 2: Industrial On-Premises Server
+# Hardened for enterprise server deployments in plant control networks.
+
+profile_name: "INDUSTRIAL_SERVER"
+environment: "production"
+debug: false
+
+safety_guardrails:
+  application_mode: "SIMULATION ONLY"
+  hardware_integration_enabled: false  # SAFETY INVARIANT: Hardware interfaces MUST NOT be automatically enabled
+  allow_external_modbus_writes: false
+  bind_host: "127.0.0.1"
+
+networking:
+  backend_port: 8000
+  frontend_port: 80
+  database_port: 5432
+  protocol_gateway_port: 5020
+
+database:
+  host: "timescaledb-server"
+  port: 5432
+  database_name: "powertwin_prod_db"
+  retention_days: 90
+  compression_enabled: true
+
+container_security:
+  run_as_non_root: true
+  user_id: 1000
+  read_only_root_fs: true
+  drop_capabilities: ["ALL"]
+  no_new_privileges: true
