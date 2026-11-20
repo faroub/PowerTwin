@@ -119,13 +119,17 @@ class PlantTopologyFactory:
                 initial_soc_pct=c.initial_soc_pct,
             )
             bat = GenericBatterySystemModel(equipment_id=c.container_id, config=b_cfg)
-            bat.get_state().metadata = EquipmentMetadata(
+            bat.metadata = EquipmentMetadata(
                 manufacturer=c.vendor, model_name=c.plugin_id
             )
             battery_systems.append(bat)
 
+            bms_limits = BMSProtectionLimits(
+                max_charge_current_a=15000.0,
+                max_discharge_current_a=15000.0,
+            )
             bms = GenericBMSModel(
-                equipment_id=f"BMS_{c.container_id}", limits=BMSProtectionLimits()
+                equipment_id=f"BMS_{c.container_id}", limits=bms_limits
             )
             bms_units.append(bms)
 
@@ -139,7 +143,7 @@ class PlantTopologyFactory:
                 dc_voltage_max_v=pcs_c.dc_voltage_max_v,
             )
             pcs_inst = GenericPCSModel(equipment_id=pcs_c.pcs_id, config=p_cfg)
-            pcs_inst.get_state().metadata = EquipmentMetadata(
+            pcs_inst.metadata = EquipmentMetadata(
                 manufacturer=pcs_c.vendor, model_name=pcs_c.plugin_id
             )
             pcs_units.append(pcs_inst)

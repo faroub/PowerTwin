@@ -103,6 +103,9 @@ class GenericBatterySystemModel:
         self.operating_state: OperatingState = OperatingState.STANDBY
         self.is_available: bool = True
         self.active_alarms: list[AlarmRecord] = []
+        self.metadata: EquipmentMetadata = EquipmentMetadata(
+            manufacturer="Generic BESS", model_name="Energy-Balanced Battery Model V1"
+        )
 
         self.total_throughput_wh: float = 0.0
         self.last_step_timestamp_ns: int = 0
@@ -118,12 +121,7 @@ class GenericBatterySystemModel:
         return self.config.capacity_wh * (self.soc_pct / 100.0) * (self.soh_pct / 100.0)
 
     def get_available_power_limits(self) -> tuple[float, float]:
-        """Calculate dynamic available charge and discharge power limits in Watts.
-
-        Returns:
-            Tuple of (available_charge_power_w, available_discharge_power_w)
-            Both returned values are positive magnitudes in Watts.
-        """
+        """Calculate dynamic available charge and discharge power limits in Watts."""
         if not self.is_available or self.operating_state in (
             OperatingState.OFF,
             OperatingState.FAULTED,
@@ -154,16 +152,7 @@ class GenericBatterySystemModel:
         return (avail_ch_w, avail_dis_w)
 
     def step(self, power_demand_w: float, delta_t_s: float, timestamp_ns: int = 0) -> None:
-        """Execute battery energy balance step for time step delta_t_s.
-
-        Args:
-            power_demand_w: Requested power (+W = Discharge, -W = Charge).
-            delta_t_s: Step duration in seconds.
-            timestamp_ns: Simulation tick timestamp in nanoseconds.
-
-        Raises:
-            InvalidTimeStepError: If delta_t_s <= 0.
-        """
+        """Execute battery energy balance step for time step delta_t_s."""
         if delta_t_s <= 0.0:
             raise InvalidTimeStepError(
                 f"Simulation delta_t_s must be strictly positive (> 0.0), got: {delta_t_s}"
@@ -255,9 +244,7 @@ class GenericBatterySystemModel:
         return UniversalEquipmentState(
             equipment_id=self.equipment_id,
             equipment_type=self.equipment_type,
-            metadata=EquipmentMetadata(
-                manufacturer="Generic BESS", model_name="Energy-Balanced Battery Model V1"
-            ),
+            metadata=self.metadata,
             operating_state=self.operating_state,
             is_available=self.is_available,
             timestamp_ns=self.last_step_timestamp_ns,

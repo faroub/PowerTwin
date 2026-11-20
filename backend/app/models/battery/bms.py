@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class BMSProtectionLimits(BaseModel):
     """BMS safety protection and warning thresholds."""
 
-    over_voltage_fault_v: float = Field(default=1250.0)
+    over_voltage_fault_v: float = Field(default=1500.0)
     under_voltage_fault_v: float = Field(default=750.0)
     over_temp_warn_c: float = Field(default=45.0)
     over_temp_fault_c: float = Field(default=60.0)
@@ -64,8 +64,8 @@ class GenericBMSModel:
 
         self.ccl_a: float = self.limits.max_charge_current_a
         self.dcl_a: float = self.limits.max_discharge_current_a
-        self.cpl_w: float = 0.0
-        self.dpl_w: float = 0.0
+        self.cpl_w: float = self.limits.max_charge_current_a * 1000.0
+        self.dpl_w: float = self.limits.max_discharge_current_a * 1000.0
 
         self.active_warnings: list[str] = []
         self.active_alarms: list[AlarmRecord] = []
@@ -166,16 +166,13 @@ class GenericBMSModel:
             self.ccl_a = 0.0
             self.dcl_a = 0.0
         else:
-            # Base limits
             ccl = self.limits.max_charge_current_a
             dcl = self.limits.max_discharge_current_a
 
-            # Thermal derating (50% reduction outside optimal 5C-45C window)
             if temp_c > self.limits.over_temp_warn_c or temp_c < self.limits.under_temp_warn_c:
                 ccl *= 0.5
                 dcl *= 0.5
 
-            # SoC derating near extremes
             if soc_pct >= 95.0:
                 ccl *= max(0.0, (100.0 - soc_pct) / 5.0)
             if soc_pct <= 10.0:

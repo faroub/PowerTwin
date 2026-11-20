@@ -115,14 +115,13 @@ class GenericPCSModel:
         self.operating_state: OperatingState = OperatingState.STANDBY
         self.is_available: bool = True
         self.active_alarms: list[AlarmRecord] = []
+        self.metadata: EquipmentMetadata = EquipmentMetadata(
+            manufacturer="Generic BESS", model_name="PCS Inverter 5MW V1"
+        )
         self.last_step_timestamp_ns: int = 0
 
     def process_command(self, cmd: dict) -> bool:
-        """Process inbound P & Q command setpoints.
-
-        Returns:
-            True if command accepted, False if invalid or in fault state.
-        """
+        """Process inbound P & Q command setpoints."""
         try:
             parsed = PCSCommandModel(**cmd)
             if parsed.reset_fault:
@@ -143,22 +142,14 @@ class GenericPCSModel:
         self, p_req: float, q_req: float, s_max_eff: float
     ) -> tuple[float, float]:
         """Enforce apparent power circle constraint: P^2 + Q^2 <= S_max^2."""
-        # Clamp P to rated active power limit [-P_rated, +P_rated]
         p_clamped = max(
             -self.config.rated_active_power_w,
             min(self.config.rated_active_power_w, p_req),
         )
-
-        # Clamp P to effective apparent power limit
         p_accepted = max(-s_max_eff, min(s_max_eff, p_clamped))
-
-        # Calculate max available reactive power headroom: Q_max = sqrt(S_max^2 - P^2)
         q_headroom_sq = max(0.0, (s_max_eff**2) - (p_accepted**2))
         q_max_avail = math.sqrt(q_headroom_sq)
-
-        # Clamp Q to available headroom [-Q_max_avail, +Q_max_avail]
         q_accepted = max(-q_max_avail, min(q_max_avail, q_req))
-
         return (p_accepted, q_accepted)
 
     def step(
@@ -239,11 +230,10 @@ class GenericPCSModel:
         else:
             p_actual_next = self.accepted_p_w
 
-        # Inverter efficiency applies to Active Power output
-        if p_actual_next > 0.0:  # Discharging: AC output = DC input * efficiency
+        if p_actual_next > 0.0:
             self.actual_p_w = p_actual_next * self.config.efficiency
             p_losses = p_actual_next * (1.0 - self.config.efficiency)
-        elif p_actual_next < 0.0:  # Charging: DC output = AC input * efficiency
+        elif p_actual_next < 0.0:
             self.actual_p_w = p_actual_next / self.config.efficiency
             p_losses = abs(p_actual_next) * (1.0 - self.config.efficiency)
         else:
@@ -251,8 +241,6 @@ class GenericPCSModel:
             p_losses = 0.0
 
         self.actual_q_var = self.accepted_q_var
-
-        # 5. Measure P & Q with sensor noise
         self.measured_p_w = self.actual_p_w
         self.measured_q_var = self.actual_q_var
 
@@ -292,9 +280,7 @@ class GenericPCSModel:
         return UniversalEquipmentState(
             equipment_id=self.equipment_id,
             equipment_type=self.equipment_type,
-            metadata=EquipmentMetadata(
-                manufacturer="Generic BESS", model_name="PCS Inverter 5MW V1"
-            ),
+            metadata=self.metadata,
             operating_state=self.operating_state,
             is_available=self.is_available,
             timestamp_ns=self.last_step_timestamp_ns,
