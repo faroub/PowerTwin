@@ -55,6 +55,8 @@ class FCRPlugin(GridServiceInterface):
             return (0.0, 0.0)
 
         self.service_status = GridServiceStatus.ACTIVE
-        p_req = - (self.rated_capacity_w / (self.droop_pct / 100.0)) * (f_dev / self.nominal_frequency_hz)
+        p_req = -(self.rated_capacity_w / (self.droop_pct / 100.0)) * (
+            f_dev / self.nominal_frequency_hz
+        )
         p_req_clamped = max(-self.rated_capacity_w, min(self.rated_capacity_w, p_req))
         return (p_req_clamped, 0.0)

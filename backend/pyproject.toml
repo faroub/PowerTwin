@@ -48,10 +48,9 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["../tests"]
+testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
-addopts = "--cov=backend/app --cov=plugins --cov-branch --cov-report=term-missing"
 
 [tool.coverage.run]
 branch = true

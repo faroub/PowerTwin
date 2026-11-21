@@ -59,9 +59,13 @@ class GenericPCSPlugin(BasePlugin, PCSInterface):
 
     def step_plugin(self, ctx: SimulationContext, delta_t_s: float) -> None:
         p_req = ctx.shared_state.get("pcs_cmd_active_power_w", self.active_power_w)
-        q_req = ctx.shared_state.get("pcs_cmd_reactive_power_var", self.reactive_power_var)
+        q_req = ctx.shared_state.get(
+            "pcs_cmd_reactive_power_var", self.reactive_power_var
+        )
 
-        p_clamped = max(-self._config.rated_power_w, min(self._config.rated_power_w, p_req))
+        p_clamped = max(
+            -self._config.rated_power_w, min(self._config.rated_power_w, p_req)
+        )
         q_clamped = max(
             -self._config.rated_apparent_power_va,
             min(self._config.rated_apparent_power_va, q_req),
@@ -90,7 +94,9 @@ class GenericPCSPlugin(BasePlugin, PCSInterface):
         return UniversalEquipmentState(
             equipment_id=self.equipment_id,
             equipment_type=self.equipment_type,
-            metadata=EquipmentMetadata(manufacturer="Generic", model_name="PCS Inverter 5MW"),
+            metadata=EquipmentMetadata(
+                manufacturer="Generic", model_name="PCS Inverter 5MW"
+            ),
             operating_state=self._operating_state,
             is_available=self._is_available,
             timestamp_ns=t_ns,

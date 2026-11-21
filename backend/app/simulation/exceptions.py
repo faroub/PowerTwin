@@ -20,9 +20,7 @@ class TaskExecutionError(SimulationError):
         self.task_name = task_name
         self.tick_ns = tick_ns
         self.original_exception = original_exception
-        super().__init__(
-            f"Task '{task_name}' failed at tick {tick_ns} ns: {original_exception}"
-        )
+        super().__init__(f"Task '{task_name}' failed at tick {tick_ns} ns: {original_exception}")
 
 
 class SnapshotIncompatibleError(SimulationError):

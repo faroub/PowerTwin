@@ -41,11 +41,14 @@ class PluginRegistry:
 
         if manifest.plugin_id in self._registered_classes:
             logger.warning(
-                "Overwriting existing plugin class registration: '%s'", manifest.plugin_id
+                "Overwriting existing plugin class registration: '%s'",
+                manifest.plugin_id,
             )
 
         self._registered_classes[manifest.plugin_id] = plugin_cls
-        logger.info("Registered plugin class '%s' (v%s)", manifest.plugin_id, manifest.version)
+        logger.info(
+            "Registered plugin class '%s' (v%s)", manifest.plugin_id, manifest.version
+        )
 
     def validate_api_compatibility(self, manifest: PluginManifest) -> bool:
         """Validate if plugin API version matches registry API version."""
@@ -67,8 +70,13 @@ class PluginRegistry:
 
         dummy = self._registered_classes[plugin_id]()
         for dep_id in dummy.manifest.dependencies:
-            if dep_id not in self._active_plugins or not self._active_plugins[dep_id].enabled:
-                logger.error("Plugin '%s' missing enabled dependency '%s'", plugin_id, dep_id)
+            if (
+                dep_id not in self._active_plugins
+                or not self._active_plugins[dep_id].enabled
+            ):
+                logger.error(
+                    "Plugin '%s' missing enabled dependency '%s'", plugin_id, dep_id
+                )
                 return False
 
         return True
@@ -92,7 +100,9 @@ class PluginRegistry:
         plugin = plugin_cls()
 
         if not plugin.validate_config(config):
-            raise InitializationError(f"Configuration validation failed for plugin '{plugin_id}'")
+            raise InitializationError(
+                f"Configuration validation failed for plugin '{plugin_id}'"
+            )
 
         try:
             plugin.initialize(config)
@@ -101,7 +111,9 @@ class PluginRegistry:
             return plugin
         except Exception as e:
             plugin.health_status = PluginHealthStatus.FAULTED
-            raise InitializationError(f"Plugin '{plugin_id}' initialization failed: {e}") from e
+            raise InitializationError(
+                f"Plugin '{plugin_id}' initialization failed: {e}"
+            ) from e
 
     def enable_plugin(self, plugin_id: str) -> None:
         """Enable an initialized plugin after verifying dependencies."""

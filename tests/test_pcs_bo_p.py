@@ -20,8 +20,8 @@ from backend.app.models.pcs.pcs_model import GenericPCSModel, PCSConfigModel
 def test_pcs_pq_capability_circle_clamping() -> None:
     """Test P^2 + Q^2 <= S_max^2 capability circle clamping logic with P priority."""
     config = PCSConfigModel(
-        rated_active_power_w=5_000_000.0,      # 5.0 MW
-        rated_apparent_power_va=5_000_000.0,   # 5.0 MVA S_max
+        rated_active_power_w=5_000_000.0,  # 5.0 MW
+        rated_apparent_power_va=5_000_000.0,  # 5.0 MVA S_max
     )
     pcs = GenericPCSModel(config=config)
 
@@ -69,7 +69,9 @@ def test_pcs_four_explicit_p_and_q_values_distinction() -> None:
         efficiency=0.98,
     )
     pcs = GenericPCSModel(config=config)
-    pcs.process_command({"enable_inverter": True, "requested_p_w": 6_000_000.0})  # Exceeds 5 MW
+    pcs.process_command(
+        {"enable_inverter": True, "requested_p_w": 6_000_000.0}
+    )  # Exceeds 5 MW
 
     # Step for 1 second (full ramp to limit)
     pcs.step(dc_voltage_v=1000.0, ac_grid_voltage_v=690.0, delta_t_s=1.0)
@@ -109,14 +111,19 @@ def test_transformer_voltage_ratio_and_losses() -> None:
         rating_va=10_000_000.0,
         primary_voltage_v=690.0,
         secondary_voltage_v=13800.0,
-        core_loss_pct=0.002,    # 0.2% = 20 kW
+        core_loss_pct=0.002,  # 0.2% = 20 kW
         copper_loss_pct=0.010,  # 1.0% = 100 kW at full load
     )
     xfrm = GenericTransformerModel(config=config)
     assert xfrm.config.turns_ratio == 20.0
 
     # Step at full load (10 MW primary input at 690 V)
-    xfrm.step(primary_power_w=10_000_000.0, primary_power_var=0.0, primary_voltage_v=690.0, delta_t_s=1.0)
+    xfrm.step(
+        primary_power_w=10_000_000.0,
+        primary_power_var=0.0,
+        primary_voltage_v=690.0,
+        delta_t_s=1.0,
+    )
 
     # Secondary voltage = 690 V * 20 = 13800 V
     assert xfrm.secondary_voltage_v == 13800.0

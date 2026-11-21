@@ -57,16 +57,29 @@ def test_duplicate_identifier_detection() -> None:
             ContainerConfig(container_id="DUPLICATE_ID", capacity_wh=10_000_000.0),
         ],
         pcs_units=[
-            PCSUnitConfig(pcs_id="DUPLICATE_ID", rated_active_power_w=5_000_000.0, rated_apparent_power_va=5_500_000.0),  # Duplicate ID!
-            PCSUnitConfig(pcs_id="PCS_02", rated_active_power_w=5_000_000.0, rated_apparent_power_va=5_500_000.0),
+            PCSUnitConfig(
+                pcs_id="DUPLICATE_ID",
+                rated_active_power_w=5_000_000.0,
+                rated_apparent_power_va=5_500_000.0,
+            ),  # Duplicate ID!
+            PCSUnitConfig(
+                pcs_id="PCS_02",
+                rated_active_power_w=5_000_000.0,
+                rated_apparent_power_va=5_500_000.0,
+            ),
         ],
         transformers=[TransformerTopologyConfig(rating_va=12_000_000.0)],
         switchgear=[SwitchgearTopologyConfig()],
         auxiliary_systems=[],
         meters=[],
-        poi=POITopologyConfig(max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0),
+        poi=POITopologyConfig(
+            max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0
+        ),
         grid=GridTopologyConfig(),
-        ppc=PPCTopologyConfig(plant_rated_active_power_w=10_000_000.0, plant_rated_apparent_power_va=11_000_000.0),
+        ppc=PPCTopologyConfig(
+            plant_rated_active_power_w=10_000_000.0,
+            plant_rated_apparent_power_va=11_000_000.0,
+        ),
     )
 
     errors = validator.validate_topology(config)
@@ -84,14 +97,19 @@ def test_missing_required_components_detection() -> None:
         rated_power_w=10_000_000.0,
         rated_energy_wh=20_000_000.0,
         containers=[],  # Missing containers!
-        pcs_units=[],   # Missing PCS units!
+        pcs_units=[],  # Missing PCS units!
         transformers=[],
         switchgear=[],
         auxiliary_systems=[],
         meters=[],
-        poi=POITopologyConfig(max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0),
+        poi=POITopologyConfig(
+            max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0
+        ),
         grid=GridTopologyConfig(),
-        ppc=PPCTopologyConfig(plant_rated_active_power_w=10_000_000.0, plant_rated_apparent_power_va=11_000_000.0),
+        ppc=PPCTopologyConfig(
+            plant_rated_active_power_w=10_000_000.0,
+            plant_rated_apparent_power_va=11_000_000.0,
+        ),
     )
 
     errors = validator.validate_topology(config)
@@ -105,14 +123,27 @@ def test_incompatible_ratings_detection() -> None:
         rated_power_w=10_000_000.0,
         rated_energy_wh=20_000_000.0,
         containers=[ContainerConfig(container_id="C1", capacity_wh=20_000_000.0)],
-        pcs_units=[PCSUnitConfig(pcs_id="PCS1", rated_active_power_w=10_000_000.0, rated_apparent_power_va=11_000_000.0)],
-        transformers=[TransformerTopologyConfig(rating_va=5_000_000.0)],  # 5 MVA < 11 MVA PCS!
+        pcs_units=[
+            PCSUnitConfig(
+                pcs_id="PCS1",
+                rated_active_power_w=10_000_000.0,
+                rated_apparent_power_va=11_000_000.0,
+            )
+        ],
+        transformers=[
+            TransformerTopologyConfig(rating_va=5_000_000.0)
+        ],  # 5 MVA < 11 MVA PCS!
         switchgear=[SwitchgearTopologyConfig()],
         auxiliary_systems=[],
         meters=[],
-        poi=POITopologyConfig(max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0),
+        poi=POITopologyConfig(
+            max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0
+        ),
         grid=GridTopologyConfig(),
-        ppc=PPCTopologyConfig(plant_rated_active_power_w=10_000_000.0, plant_rated_apparent_power_va=11_000_000.0),
+        ppc=PPCTopologyConfig(
+            plant_rated_active_power_w=10_000_000.0,
+            plant_rated_apparent_power_va=11_000_000.0,
+        ),
     )
 
     errors = validator.validate_topology(config)
@@ -127,16 +158,37 @@ def test_unsupported_plugin_version_detection() -> None:
     config = PlantTopologyConfig(
         rated_power_w=10_000_000.0,
         rated_energy_wh=20_000_000.0,
-        containers=[ContainerConfig(container_id="C1", plugin_id="unregistered_battery_v99", capacity_wh=20_000_000.0)],
-        pcs_units=[PCSUnitConfig(pcs_id="PCS1", rated_active_power_w=10_000_000.0, rated_apparent_power_va=11_000_000.0)],
+        containers=[
+            ContainerConfig(
+                container_id="C1",
+                plugin_id="unregistered_battery_v99",
+                capacity_wh=20_000_000.0,
+            )
+        ],
+        pcs_units=[
+            PCSUnitConfig(
+                pcs_id="PCS1",
+                rated_active_power_w=10_000_000.0,
+                rated_apparent_power_va=11_000_000.0,
+            )
+        ],
         transformers=[TransformerTopologyConfig(rating_va=12_000_000.0)],
         switchgear=[SwitchgearTopologyConfig()],
         auxiliary_systems=[],
         meters=[],
-        poi=POITopologyConfig(max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0),
+        poi=POITopologyConfig(
+            max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0
+        ),
         grid=GridTopologyConfig(),
-        ppc=PPCTopologyConfig(plant_rated_active_power_w=10_000_000.0, plant_rated_apparent_power_va=11_000_000.0),
+        ppc=PPCTopologyConfig(
+            plant_rated_active_power_w=10_000_000.0,
+            plant_rated_apparent_power_va=11_000_000.0,
+        ),
     )
 
     errors = validator.validate_topology(config)
-    assert any("Plugin 'unregistered_battery_v99' referenced by Container 'C1' not found" in err for err in errors)
+    assert any(
+        "Plugin 'unregistered_battery_v99' referenced by Container 'C1' not found"
+        in err
+        for err in errors
+    )

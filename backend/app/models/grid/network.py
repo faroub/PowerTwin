@@ -100,9 +100,7 @@ class PlantElectricalNetwork:
         )
 
         # 6. Step Switchgear with secondary current
-        s_sec_sq = (
-            self.transformer.secondary_power_w**2 + self.transformer.secondary_power_var**2
-        )
+        s_sec_sq = self.transformer.secondary_power_w**2 + self.transformer.secondary_power_var**2
         s_sec = s_sec_sq**0.5
         i_sec = s_sec / (1.73205 * max(1.0, grid_v))
         self.switchgear.step(current_a=i_sec, timestamp_ns=timestamp_ns, delta_t_s=delta_t_s)

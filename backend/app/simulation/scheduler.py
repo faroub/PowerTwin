@@ -28,9 +28,7 @@ class SimulationScheduler:
             task: SimulationTask instance.
         """
         if task.name in self._tasks:
-            raise InitializationError(
-                f"Cannot register duplicate task name: '{task.name}'"
-            )
+            raise InitializationError(f"Cannot register duplicate task name: '{task.name}'")
 
         self._tasks[task.name] = task
         self._cache_valid = False

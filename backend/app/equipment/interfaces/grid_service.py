@@ -58,9 +58,7 @@ class GridServiceInterface(BaseEquipmentInterface):
         self.grid_service_metadata: GridServiceMetadata = (
             grid_service_metadata
             if grid_service_metadata is not None
-            else GridServiceMetadata(
-                service_id=equipment_id, service_name="Generic Grid Service"
-            )
+            else GridServiceMetadata(service_id=equipment_id, service_name="Generic Grid Service")
         )
         self.service_status: GridServiceStatus = GridServiceStatus.IDLE
         self.performance_score: float = 1.0

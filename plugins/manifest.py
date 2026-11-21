@@ -31,11 +31,17 @@ class PluginHealthStatus(StrEnum):
 class PluginManifest(BaseModel):
     """Metadata manifest describing a simulation plugin."""
 
-    plugin_id: str = Field(description="Unique string identifier e.g. 'generic_battery_v1'")
+    plugin_id: str = Field(
+        description="Unique string identifier e.g. 'generic_battery_v1'"
+    )
     name: str = Field(description="Human-readable plugin name")
     version: str = Field(default="1.0.0", description="Plugin SemVer version string")
-    api_version: str = Field(default="0.1.0", description="PowerTwin plugin API compatibility version")
+    api_version: str = Field(
+        default="0.1.0", description="PowerTwin plugin API compatibility version"
+    )
     category: PluginCategory
     author: str = Field(default="PowerTwin Open Core")
     capabilities: list[str] = Field(default_factory=list)
-    dependencies: list[str] = Field(default_factory=list, description="List of required plugin_ids")
+    dependencies: list[str] = Field(
+        default_factory=list, description="List of required plugin_ids"
+    )

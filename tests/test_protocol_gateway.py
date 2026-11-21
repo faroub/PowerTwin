@@ -42,7 +42,9 @@ def test_modbus_write_out_of_range_rejection() -> None:
 def test_watchdog_heartbeat_timeout_handling() -> None:
     """Test external controller watchdog heartbeat timeout (> 5 seconds)."""
     audit_log = ControlCommandLog()
-    gateway = ProtocolGatewayService(audit_log=audit_log, watchdog_timeout_ns=5_000_000_000)
+    gateway = ProtocolGatewayService(
+        audit_log=audit_log, watchdog_timeout_ns=5_000_000_000
+    )
     gateway.modbus_server.allow_writes = True
 
     # Heartbeat pulse at t=1,000,000,000 ns (1s)

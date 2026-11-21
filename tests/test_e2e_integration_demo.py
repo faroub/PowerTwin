@@ -71,7 +71,12 @@ def test_20_step_e2e_demonstration_workflow() -> None:
     assert plant.pcs_units[0].requested_p_w == -500_000.0
 
     # Step 11: Verify PCS output and battery energy change
-    plant.pcs_units[0].step(dc_voltage_v=1000.0, ac_grid_voltage_v=690.0, delta_t_s=0.1, timestamp_ns=20_000_000)
+    plant.pcs_units[0].step(
+        dc_voltage_v=1000.0,
+        ac_grid_voltage_v=690.0,
+        delta_t_s=0.1,
+        timestamp_ns=20_000_000,
+    )
     assert plant.pcs_units[0].actual_p_w < 0.0
 
     # Step 12: Verify POI power measurements
@@ -87,6 +92,7 @@ def test_20_step_e2e_demonstration_workflow() -> None:
     from fastapi.testclient import TestClient
 
     from backend.app.main import app
+
     client = TestClient(app)
     hmi_res = client.get("/api/v1/overview")
     assert hmi_res.status_code == 200

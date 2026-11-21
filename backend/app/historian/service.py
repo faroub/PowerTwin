@@ -30,9 +30,7 @@ from backend.app.historian.models import (
 
 logger = logging.getLogger(__name__)
 
-OVERFLOW_DIR: str = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "overflow"
-)
+OVERFLOW_DIR: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "overflow")
 MAX_BUFFER_SIZE: int = 10_000
 
 

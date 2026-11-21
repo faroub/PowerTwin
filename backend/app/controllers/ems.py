@@ -172,7 +172,7 @@ class EnergyManagementSystem:
         if self.active_mode == EMSMode.FREQUENCY_RESPONSE:
             f_diff = grid_frequency_hz - 60.0
             if abs(f_diff) > self.config.f_deadband_hz:
-                droop_p = - (50_000_000.0 / (self.config.droop_pct / 100.0)) * (f_diff / 60.0)
+                droop_p = -(50_000_000.0 / (self.config.droop_pct / 100.0)) * (f_diff / 60.0)
                 target_p = droop_p
 
         # 1. Check Feasibility

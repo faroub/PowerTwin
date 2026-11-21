@@ -133,8 +133,8 @@ class GenericBatterySystemModel:
         if self.soc_pct <= self.config.min_soc_pct:
             avail_dis_w = 0.0
         else:
-            usable_energy_wh = (
-                self.config.capacity_wh * ((self.soc_pct - self.config.min_soc_pct) / 100.0)
+            usable_energy_wh = self.config.capacity_wh * (
+                (self.soc_pct - self.config.min_soc_pct) / 100.0
             )
             max_dis_power_from_energy = usable_energy_wh * self.config.discharge_efficiency
             avail_dis_w = min(self.config.max_discharge_power_w, max_dis_power_from_energy)
@@ -143,8 +143,8 @@ class GenericBatterySystemModel:
         if self.soc_pct >= self.config.max_soc_pct:
             avail_ch_w = 0.0
         else:
-            headroom_energy_wh = (
-                self.config.capacity_wh * ((self.config.max_soc_pct - self.soc_pct) / 100.0)
+            headroom_energy_wh = self.config.capacity_wh * (
+                (self.config.max_soc_pct - self.soc_pct) / 100.0
             )
             max_ch_power_from_energy = headroom_energy_wh / self.config.charge_efficiency
             avail_ch_w = min(self.config.max_charge_power_w, max_ch_power_from_energy)

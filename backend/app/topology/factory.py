@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from plugins.dummy_auxiliary import DummyAuxiliaryPlugin
 from plugins.dummy_grid import DummyGridPlugin
 from plugins.generic_battery import GenericBatteryPlugin
@@ -119,18 +119,14 @@ class PlantTopologyFactory:
                 initial_soc_pct=c.initial_soc_pct,
             )
             bat = GenericBatterySystemModel(equipment_id=c.container_id, config=b_cfg)
-            bat.metadata = EquipmentMetadata(
-                manufacturer=c.vendor, model_name=c.plugin_id
-            )
+            bat.metadata = EquipmentMetadata(manufacturer=c.vendor, model_name=c.plugin_id)
             battery_systems.append(bat)
 
             bms_limits = BMSProtectionLimits(
                 max_charge_current_a=15000.0,
                 max_discharge_current_a=15000.0,
             )
-            bms = GenericBMSModel(
-                equipment_id=f"BMS_{c.container_id}", limits=bms_limits
-            )
+            bms = GenericBMSModel(equipment_id=f"BMS_{c.container_id}", limits=bms_limits)
             bms_units.append(bms)
 
         pcs_units: list[GenericPCSModel] = []

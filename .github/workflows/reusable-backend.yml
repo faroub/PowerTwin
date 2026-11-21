@@ -37,7 +37,7 @@ jobs:
         run: ruff check backend plugins tests
 
       - name: Run Type Checker (Mypy)
-        run: mypy backend plugins
+        run: mypy --config-file backend/pyproject.toml backend plugins
 
   backend-test:
     name: Backend Unit & Integration Tests

@@ -79,16 +79,24 @@ class DummyAuxiliaryPlugin(BasePlugin, AuxiliarySystemInterface):
         return UniversalEquipmentState(
             equipment_id=self.equipment_id,
             equipment_type=self.equipment_type,
-            metadata=EquipmentMetadata(manufacturer="Generic", model_name="Aux HVAC V1"),
+            metadata=EquipmentMetadata(
+                manufacturer="Generic", model_name="Aux HVAC V1"
+            ),
             operating_state=self._operating_state,
             is_available=self._is_available,
             timestamp_ns=t_ns,
             measurements={
                 "container_temp_c": TelemetryPoint(
-                    value=self.container_temp_c, unit="degC", timestamp_ns=t_ns, source_id=self.equipment_id
+                    value=self.container_temp_c,
+                    unit="degC",
+                    timestamp_ns=t_ns,
+                    source_id=self.equipment_id,
                 ),
                 "hvac_power_w": TelemetryPoint(
-                    value=self.hvac_power_w, unit="W", timestamp_ns=t_ns, source_id=self.equipment_id
+                    value=self.hvac_power_w,
+                    unit="W",
+                    timestamp_ns=t_ns,
+                    source_id=self.equipment_id,
                 ),
             },
         )

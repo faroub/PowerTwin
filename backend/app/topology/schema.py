@@ -76,9 +76,7 @@ class GridTopologyConfig(BaseModel):
 
     grid_id: str = Field(default="GRID_MODEL_01")
     plugin_id: str = Field(default="dummy_grid_v1")
-    nominal_frequency_hz: float = Field(
-        default=50.0, description="Grid frequency (50 Hz or 60 Hz)"
-    )
+    nominal_frequency_hz: float = Field(default=50.0, description="Grid frequency (50 Hz or 60 Hz)")
     nominal_voltage_v: float = Field(default=13800.0)
     short_circuit_mva: float = Field(default=500.0)
 

@@ -185,9 +185,7 @@ class FaultInjectionEngine:
             )
         )
 
-    def clear_fault(
-        self, fault_id: str, current_time_ns: int, plant: BuiltPlantInstance
-    ) -> bool:
+    def clear_fault(self, fault_id: str, current_time_ns: int, plant: BuiltPlantInstance) -> bool:
         """Clear active fault and restore equipment availability."""
         if fault_id not in self.active_faults:
             return False

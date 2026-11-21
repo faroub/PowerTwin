@@ -23,9 +23,7 @@ class BaseEquipmentInterface:
     ) -> None:
         self.equipment_id: str = equipment_id
         self.equipment_type: EquipmentType = equipment_type
-        self.metadata: EquipmentMetadata = (
-            metadata if metadata is not None else EquipmentMetadata()
-        )
+        self.metadata: EquipmentMetadata = metadata if metadata is not None else EquipmentMetadata()
         self._operating_state: OperatingState = OperatingState.OFF
         self._is_available: bool = False
         self._active_alarms: list[AlarmRecord] = []

@@ -153,13 +153,13 @@ class ScenarioRunner:
             return False
 
         if op == "EQ":
-            return actual == target
+            return bool(actual == target)
         elif op == "NE":
-            return actual != target
+            return bool(actual != target)
         elif op == "LE":
-            return actual <= target
+            return bool(actual <= target)
         elif op == "GE":
-            return actual >= target
+            return bool(actual >= target)
         elif op == "APPROX":
-            return abs(actual - target) <= crit.tolerance
+            return bool(abs(actual - target) <= crit.tolerance)
         return False

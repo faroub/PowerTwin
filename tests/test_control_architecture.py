@@ -138,7 +138,9 @@ def test_ppc_active_and_reactive_power_constraints() -> None:
     pcs_units = [
         GenericPCSModel(
             f"PCS_{i}",
-            config=PCSConfigModel(rated_active_power_w=5_000_000.0, rated_apparent_power_va=5_500_000.0),
+            config=PCSConfigModel(
+                rated_active_power_w=5_000_000.0, rated_apparent_power_va=5_500_000.0
+            ),
         )
         for i in range(10)
     ]
@@ -166,7 +168,9 @@ def test_ems_dispatch_infeasibility_when_battery_empty() -> None:
     eq_ctrl = BESSEquipmentController()
     eq_ctrl.operating_state = OperatingState.RUNNING
 
-    battery = GenericBatterySystemModel(config=BatterySystemConfigModel(initial_soc_pct=5.0))
+    battery = GenericBatterySystemModel(
+        config=BatterySystemConfigModel(initial_soc_pct=5.0)
+    )
     bms = GenericBMSModel()
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=5.0, temp_c=25.0)
     pcs = GenericPCSModel()
@@ -209,7 +213,9 @@ def test_ems_frequency_response_mode() -> None:
     eq_ctrl = BESSEquipmentController()
     eq_ctrl.operating_state = OperatingState.RUNNING
 
-    battery = GenericBatterySystemModel(config=BatterySystemConfigModel(initial_soc_pct=50.0))
+    battery = GenericBatterySystemModel(
+        config=BatterySystemConfigModel(initial_soc_pct=50.0)
+    )
     bms = GenericBMSModel()
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
     pcs = GenericPCSModel()

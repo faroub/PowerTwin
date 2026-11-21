@@ -40,9 +40,7 @@ class SMASunnyCentralPCSPlugin(BasePlugin, PCSInterface):
             "SUNSPEC_MODBUS_MAP",
             "GRID_FORMING_CAPABLE",
         ]
-        self.known_limitations: str = (
-            "Active power derates linearly above 45 deg C ambient temperature down to 80% at 60 deg C."
-        )
+        self.known_limitations: str = "Active power derates linearly above 45 deg C ambient temperature down to 80% at 60 deg C."
 
     @property
     def manifest(self) -> PluginManifest:
@@ -72,7 +70,9 @@ class SMASunnyCentralPCSPlugin(BasePlugin, PCSInterface):
         """Step physical model dynamics per simulation tick with thermal derating."""
         if self.ambient_temp_c > 45.0:
             derate_pct = max(0.80, 1.0 - (self.ambient_temp_c - 45.0) * 0.0133)
-            self.physical_model.config.rated_active_power_w = self.rated_power_w * derate_pct
+            self.physical_model.config.rated_active_power_w = (
+                self.rated_power_w * derate_pct
+            )
         else:
             self.physical_model.config.rated_active_power_w = self.rated_power_w
 

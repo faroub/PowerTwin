@@ -50,9 +50,7 @@ class POIConfigModel(BaseModel):
     frequency_high_limit_hz: float = Field(
         default=60.5, description="High frequency limit (60.5 Hz)"
     )
-    frequency_low_limit_hz: float = Field(
-        default=59.5, description="Low frequency limit (59.5 Hz)"
-    )
+    frequency_low_limit_hz: float = Field(default=59.5, description="Low frequency limit (59.5 Hz)")
 
     @field_validator("nominal_voltage_v", "max_export_power_w", "max_import_power_w")
     @classmethod
@@ -134,15 +132,15 @@ class POIModel:
         # Limit Exceeded Warning/Alarm Detection
         if net_p_w > self.config.max_export_power_w:
             msg = (
-                f"Export power ({net_p_w/1e6:.2f} MW) exceeded "
-                f"limit ({self.config.max_export_power_w/1e6:.2f} MW)"
+                f"Export power ({net_p_w / 1e6:.2f} MW) exceeded "
+                f"limit ({self.config.max_export_power_w / 1e6:.2f} MW)"
             )
             self._raise_alarm("POI_EXPORT_LIMIT_EXCEEDED", msg)
 
         if net_p_w < -self.config.max_import_power_w:
             msg = (
-                f"Import power ({abs(net_p_w)/1e6:.2f} MW) exceeded "
-                f"limit ({self.config.max_import_power_w/1e6:.2f} MW)"
+                f"Import power ({abs(net_p_w) / 1e6:.2f} MW) exceeded "
+                f"limit ({self.config.max_import_power_w / 1e6:.2f} MW)"
             )
             self._raise_alarm("POI_IMPORT_LIMIT_EXCEEDED", msg)
 

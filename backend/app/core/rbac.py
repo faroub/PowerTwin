@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 class UserRole(StrEnum):
     """User Operational Roles."""
 
-    OBSERVER = "OBSERVER"        # Read-only HMI & Telemetry access
-    ENGINEER = "ENGINEER"        # Simulation parameters, scenario execution, fault injection
+    OBSERVER = "OBSERVER"  # Read-only HMI & Telemetry access
+    ENGINEER = "ENGINEER"  # Simulation parameters, scenario execution, fault injection
     ADMINISTRATOR = "ADMINISTRATOR"  # Full system configuration, plugin management, user management
 
 

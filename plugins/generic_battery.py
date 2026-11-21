@@ -71,7 +71,9 @@ class GenericBatteryPlugin(BasePlugin, BatterySystemInterface):
         dsoc = (-self.current_a * (delta_t_s / 3600.0) / max(capacity_ah, 1.0)) * 100.0
         self.soc_pct = max(0.0, min(100.0, self.soc_pct + dsoc))
 
-        self.voltage_v = self._config.nominal_voltage_v * (0.9 + 0.2 * (self.soc_pct / 100.0))
+        self.voltage_v = self._config.nominal_voltage_v * (
+            0.9 + 0.2 * (self.soc_pct / 100.0)
+        )
 
         ctx.shared_state["battery_soc_pct"] = self.soc_pct
         ctx.shared_state["battery_voltage_v"] = self.voltage_v
@@ -91,19 +93,30 @@ class GenericBatteryPlugin(BasePlugin, BatterySystemInterface):
         return UniversalEquipmentState(
             equipment_id=self.equipment_id,
             equipment_type=self.equipment_type,
-            metadata=EquipmentMetadata(manufacturer="Generic", model_name="LFP Container V1"),
+            metadata=EquipmentMetadata(
+                manufacturer="Generic", model_name="LFP Container V1"
+            ),
             operating_state=self._operating_state,
             is_available=self._is_available,
             timestamp_ns=t_ns,
             measurements={
                 "soc_pct": TelemetryPoint(
-                    value=self.soc_pct, unit="pct", timestamp_ns=t_ns, source_id=self.equipment_id
+                    value=self.soc_pct,
+                    unit="pct",
+                    timestamp_ns=t_ns,
+                    source_id=self.equipment_id,
                 ),
                 "voltage_v": TelemetryPoint(
-                    value=self.voltage_v, unit="V", timestamp_ns=t_ns, source_id=self.equipment_id
+                    value=self.voltage_v,
+                    unit="V",
+                    timestamp_ns=t_ns,
+                    source_id=self.equipment_id,
                 ),
                 "current_a": TelemetryPoint(
-                    value=self.current_a, unit="A", timestamp_ns=t_ns, source_id=self.equipment_id
+                    value=self.current_a,
+                    unit="A",
+                    timestamp_ns=t_ns,
+                    source_id=self.equipment_id,
                 ),
             },
             active_limits={

@@ -48,7 +48,9 @@ class CountingTask(SimulationTask):
 class FailingTask(SimulationTask):
     """Test task raising an unhandled exception."""
 
-    def __init__(self, name: str = "FailingTask", fail_at_tick: int = 20_000_000) -> None:
+    def __init__(
+        self, name: str = "FailingTask", fail_at_tick: int = 20_000_000
+    ) -> None:
         super().__init__(name=name, phase=2, priority=0, interval_ticks=1)
         self.fail_at_tick = fail_at_tick
 
@@ -126,10 +128,20 @@ def test_task_execution_order_is_deterministic() -> None:
     runner = SimulationRunManager(config=config)
 
     # Register out of order
-    runner.register_task(CountingTask(name="Phase3_Task", phase=3, log_list=execution_order))
-    runner.register_task(CountingTask(name="Phase1_TaskB", phase=1, priority=10, log_list=execution_order))
-    runner.register_task(CountingTask(name="Phase1_TaskA", phase=1, priority=5, log_list=execution_order))
-    runner.register_task(CountingTask(name="Phase2_Task", phase=2, log_list=execution_order))
+    runner.register_task(
+        CountingTask(name="Phase3_Task", phase=3, log_list=execution_order)
+    )
+    runner.register_task(
+        CountingTask(
+            name="Phase1_TaskB", phase=1, priority=10, log_list=execution_order
+        )
+    )
+    runner.register_task(
+        CountingTask(name="Phase1_TaskA", phase=1, priority=5, log_list=execution_order)
+    )
+    runner.register_task(
+        CountingTask(name="Phase2_Task", phase=2, log_list=execution_order)
+    )
 
     runner.single_step()
 
@@ -255,7 +267,10 @@ def test_failed_task_continue_policy() -> None:
     runner.step(3)  # Step 1: OK, Step 2: Faults & Safe-parks, Step 3: Skipped
 
     assert task.enabled is False
-    assert runner.state == SimulationState.STOPPED or runner.state == SimulationState.RUNNING
+    assert (
+        runner.state == SimulationState.STOPPED
+        or runner.state == SimulationState.RUNNING
+    )
     fault_events = [e for e in events_received if e.name == "TASK_FAULTED"]
     assert len(fault_events) == 1
     assert fault_events[0].source == "FailingTask"

@@ -137,9 +137,14 @@ def test_multi_vendor_plant_topology_without_modifying_core_engine() -> None:
         switchgear=[SwitchgearTopologyConfig()],
         auxiliary_systems=[],
         meters=[MeterTopologyConfig()],
-        poi=POITopologyConfig(max_export_power_w=15_000_000.0, max_import_power_w=15_000_000.0),
+        poi=POITopologyConfig(
+            max_export_power_w=15_000_000.0, max_import_power_w=15_000_000.0
+        ),
         grid=GridTopologyConfig(),
-        ppc=PPCTopologyConfig(plant_rated_active_power_w=15_000_000.0, plant_rated_apparent_power_va=16_000_000.0),
+        ppc=PPCTopologyConfig(
+            plant_rated_active_power_w=15_000_000.0,
+            plant_rated_apparent_power_va=16_000_000.0,
+        ),
     )
 
     # 3. Build plant using PlantTopologyFactory without touching PPC or EMS!

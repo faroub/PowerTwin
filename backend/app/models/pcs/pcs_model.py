@@ -14,6 +14,7 @@ FOUR EXPLICIT P & Q VALUES DISTINGUISHED:
 """
 
 import math
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -120,7 +121,7 @@ class GenericPCSModel:
         )
         self.last_step_timestamp_ns: int = 0
 
-    def process_command(self, cmd: dict) -> bool:
+    def process_command(self, cmd: dict[str, Any]) -> bool:
         """Process inbound P & Q command setpoints."""
         try:
             parsed = PCSCommandModel(**cmd)

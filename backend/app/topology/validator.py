@@ -76,24 +76,24 @@ class TopologyValidator:
         if total_xfrm_s_va < total_pcs_s_va:
             msg = (
                 f"Incompatible electrical ratings: Total transformer rating "
-                f"({total_xfrm_s_va/1e6:.1f} MVA) is less than total PCS apparent "
-                f"capacity ({total_pcs_s_va/1e6:.1f} MVA)."
+                f"({total_xfrm_s_va / 1e6:.1f} MVA) is less than total PCS apparent "
+                f"capacity ({total_pcs_s_va / 1e6:.1f} MVA)."
             )
             errors.append(msg)
 
         if total_pcs_power_w < config.rated_power_w:
             msg = (
                 f"Incompatible active capacity: Total PCS active power "
-                f"({total_pcs_power_w/1e6:.1f} MW) is less than plant rated "
-                f"power ({config.rated_power_w/1e6:.1f} MW)."
+                f"({total_pcs_power_w / 1e6:.1f} MW) is less than plant rated "
+                f"power ({config.rated_power_w / 1e6:.1f} MW)."
             )
             errors.append(msg)
 
         if total_container_energy_wh < config.rated_energy_wh:
             msg = (
                 f"Incompatible energy capacity: Total container energy "
-                f"({total_container_energy_wh/1e6:.1f} MWh) is less than plant rated "
-                f"energy ({config.rated_energy_wh/1e6:.1f} MWh)."
+                f"({total_container_energy_wh / 1e6:.1f} MWh) is less than plant rated "
+                f"energy ({config.rated_energy_wh / 1e6:.1f} MWh)."
             )
             errors.append(msg)
 
@@ -119,9 +119,7 @@ class TopologyValidator:
                 errors.append(msg)
 
         # 5. Plugin Availability & Compatibility Check
-        reg_manifests = {
-            m.plugin_id: m for m in self.plugin_registry.get_registered_manifests()
-        }
+        reg_manifests = {m.plugin_id: m for m in self.plugin_registry.get_registered_manifests()}
 
         for c in config.containers:
             if c.plugin_id not in reg_manifests and c.plugin_id != "generic_battery_v1":
@@ -147,10 +145,7 @@ class TopologyValidator:
                 )
                 errors.append(msg)
 
-        if (
-            config.grid.plugin_id not in reg_manifests
-            and config.grid.plugin_id != "dummy_grid_v1"
-        ):
+        if config.grid.plugin_id not in reg_manifests and config.grid.plugin_id != "dummy_grid_v1":
             msg = f"Plugin '{config.grid.plugin_id}' referenced by Grid not found in registry."
             errors.append(msg)
 

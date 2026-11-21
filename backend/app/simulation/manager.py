@@ -188,9 +188,7 @@ class SimulationRunManager:
         if self.config.speed_factor <= 0.0:
             return
 
-        target_duration_s = (
-            self.clock.step_ns / NANOSECONDS_PER_SECOND
-        ) / self.config.speed_factor
+        target_duration_s = (self.clock.step_ns / NANOSECONDS_PER_SECOND) / self.config.speed_factor
         elapsed_s = time.perf_counter() - start_wall_s
         sleep_needed_s = target_duration_s - elapsed_s
 
@@ -228,9 +226,7 @@ class SimulationRunManager:
 
     def create_snapshot(self) -> SimulationSnapshot:
         """Capture engine state snapshot."""
-        task_states = {
-            name: task.get_task_state() for name, task in self.scheduler._tasks.items()
-        }
+        task_states = {name: task.get_task_state() for name, task in self.scheduler._tasks.items()}
         return SimulationSnapshot(
             simulation_run_id=self.simulation_run_id,
             timestamp_ns=self.clock.time_ns,
@@ -250,9 +246,7 @@ class SimulationRunManager:
         snapshot.validate_compatibility()
 
         self.simulation_run_id = snapshot.simulation_run_id
-        self.clock.reset(
-            initial_ticks_ns=snapshot.timestamp_ns, step_ns=snapshot.step_ns
-        )
+        self.clock.reset(initial_ticks_ns=snapshot.timestamp_ns, step_ns=snapshot.step_ns)
         self.clock._total_steps = snapshot.total_steps
         self.random.set_state(snapshot.random_state)
         self.shared_state.clear()
