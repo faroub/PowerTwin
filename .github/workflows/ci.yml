@@ -108,7 +108,7 @@ jobs:
              [ "${{ needs.frontend-ci.result }}" != "success" ] || \
              [ "${{ needs.system-engineering-ci.result }}" != "success" ] || \
              [ "${{ needs.infrastructure-ci.result }}" != "success" ]; then
-            echo "CI pipeline FAILED. Please review the failed job above."
+            echo "CI pipeline FAILED. One or more mandatory jobs failed, were cancelled, or were skipped."
             exit 1
           else
             echo "CI pipeline PASSED successfully."

@@ -4,7 +4,7 @@ on:
   workflow_call:
     outputs:
       coverage-percent:
-        description: "Backend coverage percentage"
+        description: "Backend line coverage percentage"
         value: ${{ jobs.backend-test.outputs.coverage }}
 
 permissions:
@@ -64,12 +64,15 @@ jobs:
         run: |
           PYTHONPATH=. pytest --cov=backend/app --cov=plugins --cov-branch --cov-report=xml:coverage.xml --cov-report=term-missing
 
-      - name: Extract Coverage Output
+      - name: Extract Real Coverage Percentage
         id: cov
         run: |
-          echo "percentage=90" >> $GITHUB_OUTPUT
+          COVERAGE=$(python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); root = tree.getroot(); print(f'{float(root.attrib[\"line-rate\"])*100:.1f}')")
+          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "Extracted Backend Coverage: $COVERAGE%"
 
       - name: Upload Coverage Artifact
+        if: always()
         uses: actions/upload-artifact@505410076e65609755f672099f712d96e7d083b8 # v4.0.0
         with:
           name: backend-coverage-report

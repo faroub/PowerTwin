@@ -42,6 +42,7 @@ jobs:
           npm run build
 
       - name: Upload Frontend Dist Artifact
+        if: always()
         uses: actions/upload-artifact@505410076e65609755f672099f712d96e7d083b8 # v4.0.0
         with:
           name: frontend-dist
