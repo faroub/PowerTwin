@@ -1,28 +1,33 @@
-"""Simulation engine placeholder stub.
-
-Full simulation physics, tick-clock execution, and DAG state management
-will be implemented in subsequent work packages.
-"""
+"""Simulation Engine Integration Status Provider."""
 
 from typing import Any
 
+from backend.app.api.v1.simulation_ctrl import get_active_simulation_engine
 
-class SimulationEngineStub:
-    """Stub interface for central simulation engine."""
 
-    def __init__(self) -> None:
-        self.is_running: bool = False
-        self.current_tick: int = 0
+class SimulationEngineStatusProvider:
+    """Provides status from active simulation engine or returns NOT_CONNECTED."""
 
     def get_status(self) -> dict[str, Any]:
-        """Return engine placeholder status."""
+        """Return actual active simulation engine status."""
+        engine = get_active_simulation_engine()
+        if engine is None:
+            return {
+                "status": "NOT_CONNECTED",
+                "mode": "SIMULATION_ONLY",
+                "current_tick": 0,
+                "is_running": False,
+                "message": "No active simulation engine instance attached.",
+            }
+
+        state_str = engine.state.value if hasattr(engine.state, "value") else str(engine.state)
         return {
-            "status": "NOT_STARTED",
+            "status": state_str,
             "mode": "SIMULATION_ONLY",
-            "current_tick": self.current_tick,
-            "is_running": self.is_running,
-            "message": "Simulation physics engine initialization pending WP02+",
+            "current_tick": engine.clock.total_steps,
+            "is_running": (state_str == "RUNNING"),
+            "message": f"Simulation engine is in state '{state_str}'.",
         }
 
 
-engine_stub = SimulationEngineStub()
+engine_stub = SimulationEngineStatusProvider()

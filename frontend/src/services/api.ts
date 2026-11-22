@@ -24,16 +24,11 @@ export interface PlantOverviewData {
   wall_clock_time_str: string;
 }
 
-export interface SLDComponentNode {
-  id: string;
-  label: string;
-  type: 'CONTAINER' | 'PCS' | 'TRANSFORMER' | 'SWITCHGEAR' | 'METER' | 'GRID';
-  status: 'RUNNING' | 'STANDBY' | 'FAULTED' | 'OFF' | 'CLOSED' | 'OPEN';
-  p_mw: number;
-  q_mvar: number;
-  voltage_v: number;
-  soc_pct?: number;
-  active_alarms: number;
+export interface ControlResponse {
+  success: boolean;
+  status: string;
+  engine_state?: string;
+  message: string;
 }
 
 export interface SystemInfo {
@@ -90,15 +85,56 @@ export async function fetchPlantOverview(): Promise<PlantOverviewData> {
   };
 }
 
-export async function dispatchSimulationControl(action: string, payload: Record<string, unknown> = {}): Promise<boolean> {
+export async function dispatchSimulationControl(
+  action: string,
+  payload: Record<string, unknown> = {},
+  token?: string
+): Promise<ControlResponse> {
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch('/api/v1/simulation/control', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ action, ...payload }),
     });
-    return res.ok;
+
+    const data = await res.json();
+
+    if (res.status === 200) {
+      return {
+        success: true,
+        status: data.status || 'SUCCESS',
+        engine_state: data.engine_state,
+        message: data.message || 'Action executed successfully.',
+      };
+    } else if (res.status === 503) {
+      return {
+        success: false,
+        status: 'NOT_CONNECTED',
+        message: data.detail?.message || 'Simulation engine is not connected.',
+      };
+    } else if (res.status === 401 || res.status === 403) {
+      return {
+        success: false,
+        status: 'UNAUTHORIZED',
+        message: 'Authentication / permission required for simulation control.',
+      };
+    } else {
+      return {
+        success: false,
+        status: 'FAILED',
+        message: data.detail?.message || 'Failed to execute control action.',
+      };
+    }
   } catch {
-    return false;
+    return {
+      success: false,
+      status: 'DISCONNECTED',
+      message: 'Network error connecting to backend API.',
+    };
   }
 }

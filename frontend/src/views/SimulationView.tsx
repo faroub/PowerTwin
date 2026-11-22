@@ -1,13 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ConfirmationModal } from '../components/ConfirmationModal';
+import { fetchSystemHealth, dispatchSimulationControl, ControlResponse } from '../services/api';
 
 export const SimulationView: React.FC = () => {
-  const [modalOpen, setModalOpen] = useState(false);
-  const [actionName, setActionName] = useState('');
+  const [engineState, setEngineState] = useState<string>('UNKNOWN');
+  const [modalOpen, setModalOpen] = useState<boolean>(false);
+  const [actionName, setActionName] = useState<string>('');
+  const [actionEnum, setActionEnum] = useState<string>('');
+  const [feedback, setFeedback] = useState<ControlResponse | null>(null);
 
-  const triggerControl = (name: string) => {
+  useEffect(() => {
+    const checkEngine = async () => {
+      const health = await fetchSystemHealth();
+      if (health.healthy && health.data?.engine) {
+        setEngineState(health.data.engine.status || 'NOT_CONNECTED');
+      } else {
+        setEngineState('NOT_CONNECTED');
+      }
+    };
+    checkEngine();
+  }, []);
+
+  const triggerControl = (name: string, actEnum: string) => {
     setActionName(name);
+    setActionEnum(actEnum);
     setModalOpen(true);
+  };
+
+  const handleConfirmAction = async () => {
+    setModalOpen(false);
+    const result = await dispatchSimulationControl(actionEnum);
+    setFeedback(result);
+    if (result.engine_state) {
+      setEngineState(result.engine_state);
+    }
   };
 
   return (
@@ -17,11 +43,39 @@ export const SimulationView: React.FC = () => {
         <p className="view-subtitle">Clock Control, Speed Multipliers, and Deterministic Reset</p>
       </div>
 
+      {feedback && (
+        <div
+          style={{
+            padding: '12px 16px',
+            borderRadius: '6px',
+            marginBottom: '16px',
+            backgroundColor: feedback.success ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+            border: `1px solid ${feedback.success ? '#22c55e' : '#ef4444'}`,
+            color: feedback.success ? '#22c55e' : '#ef4444',
+            fontSize: '0.9rem',
+          }}
+        >
+          <strong>[{feedback.status}]</strong> {feedback.message}
+        </div>
+      )}
+
       <div className="grid-cards">
         <div className="card">
           <div className="card-title">Engine Lifecycle State</div>
-          <div className="card-value" style={{ color: '#22c55e' }}>RUNNING</div>
-          <div className="card-note">100 Hz Tick Frequency</div>
+          <div
+            className="card-value"
+            style={{
+              color:
+                engineState === 'RUNNING'
+                  ? '#22c55e'
+                  : engineState === 'PAUSED'
+                  ? '#eab308'
+                  : '#ef4444',
+            }}
+          >
+            {engineState}
+          </div>
+          <div className="card-note">Live Engine Status</div>
         </div>
 
         <div className="card">
@@ -35,20 +89,44 @@ export const SimulationView: React.FC = () => {
         <h3 style={{ marginBottom: '16px', color: '#38bdf8' }}>Engine Execution Controls</h3>
         <div style={{ display: 'flex', gap: '12px' }}>
           <button
-            onClick={() => triggerControl('Pause Engine')}
-            style={{ padding: '10px 20px', borderRadius: '6px', backgroundColor: '#eab308', color: '#0f172a', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}
+            onClick={() => triggerControl('Pause Engine', 'PAUSE')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '6px',
+              backgroundColor: '#eab308',
+              color: '#0f172a',
+              border: 'none',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
           >
             PAUSE
           </button>
           <button
-            onClick={() => triggerControl('Single Step (+10ms)')}
-            style={{ padding: '10px 20px', borderRadius: '6px', backgroundColor: '#38bdf8', color: '#0f172a', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}
+            onClick={() => triggerControl('Single Step (+10ms)', 'STEP')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '6px',
+              backgroundColor: '#38bdf8',
+              color: '#0f172a',
+              border: 'none',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
           >
             SINGLE STEP (+10ms)
           </button>
           <button
-            onClick={() => triggerControl('Reset Simulation Clock')}
-            style={{ padding: '10px 20px', borderRadius: '6px', backgroundColor: '#ef4444', color: '#ffffff', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}
+            onClick={() => triggerControl('Reset Simulation Clock', 'RESET')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '6px',
+              backgroundColor: '#ef4444',
+              color: '#ffffff',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+            }}
           >
             RESET SIMULATION
           </button>
@@ -59,7 +137,7 @@ export const SimulationView: React.FC = () => {
         isOpen={modalOpen}
         title="Confirm Engine Control Action"
         actionDetails={`Are you sure you want to execute: ${actionName}?`}
-        onConfirm={() => setModalOpen(false)}
+        onConfirm={handleConfirmAction}
         onCancel={() => setModalOpen(false)}
       />
     </div>
