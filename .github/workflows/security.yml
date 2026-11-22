@@ -26,12 +26,12 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@f3bbb05694c2f74569081c28664c0866d64dec21 # v4.39.3
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: python, javascript
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@f3bbb05694c2f74569081c28664c0866d64dec21 # v4.39.3
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
 
   dependency-audit:
     name: Python & npm Dependency Security Audit
@@ -97,7 +97,7 @@ jobs:
           docker build -t powertwin-backend:scan -f deployment/Dockerfile.backend .
 
       - name: Scan Backend Image with Trivy
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: "powertwin-backend:scan"
           format: "table"
