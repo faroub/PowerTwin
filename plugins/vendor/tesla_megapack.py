@@ -67,8 +67,18 @@ class TeslaMegapackBatteryPlugin(BasePlugin, BatterySystemInterface):
         """Initialize vendor equipment instance."""
         if "capacity_wh" in config:
             self.capacity_wh = float(config["capacity_wh"])
+            self.physical_model.config.capacity_wh = self.capacity_wh
+            if "max_discharge_power_w" in config:
+                self.max_continuous_power_w = float(config["max_discharge_power_w"])
+            else:
+                self.max_continuous_power_w = self.capacity_wh * 0.5
+            self.physical_model.config.max_discharge_power_w = (
+                self.max_continuous_power_w
+            )
+            self.physical_model.config.max_charge_power_w = self.max_continuous_power_w
         if "nominal_voltage_v" in config:
             self.nominal_voltage_v = float(config["nominal_voltage_v"])
+            self.physical_model.config.nominal_voltage_v = self.nominal_voltage_v
         if "initial_soc_pct" in config:
             self.soc_pct = float(config["initial_soc_pct"])
             self.physical_model.soc_pct = self.soc_pct

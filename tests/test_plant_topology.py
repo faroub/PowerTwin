@@ -1,7 +1,10 @@
-"""Automated Unit Tests for WP06 Configuration-Driven Plant Topology."""
+"""Automated Unit & Integration Tests for Single Equipment Ownership Topology Engine."""
 
 import pytest
 
+from backend.app.controllers.ems import EnergyManagementSystem
+from backend.app.controllers.equipment_controller import BESSEquipmentController
+from backend.app.controllers.ppc import PowerPlantController
 from backend.app.topology.factory import PlantTopologyFactory
 from backend.app.topology.schema import (
     ContainerConfig,
@@ -30,6 +33,54 @@ def test_reference_10mw_20mwh_plant_topology_loading() -> None:
     assert len(plant.pcs_units) == 4
     assert len(plant.transformers) == 1
     assert plant.grid.config.nominal_frequency_hz == 50.0
+
+
+def test_single_equipment_instance_ownership_verification() -> None:
+    """Verify PT-004 invariant: Only ONE authoritative equipment model object exists per asset."""
+    factory = PlantTopologyFactory()
+    plant = factory.build_plant(
+        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
+    )
+
+    # 1. Verify Battery Container 01 single object reference
+    bat_from_list = plant.battery_systems[0]
+    bat_task = plant.simulation_engine.scheduler._tasks["CONTAINER_01"]
+    bat_from_task = getattr(bat_task, "physical_model", bat_task)
+
+    assert bat_from_list is bat_from_task  # Exact same object identity (is)
+
+    # 2. Verify PCS 01 single object reference
+    pcs_from_list = plant.pcs_units[0]
+    pcs_task = plant.simulation_engine.scheduler._tasks["PCS_01"]
+    pcs_from_task = getattr(pcs_task, "physical_model", pcs_task)
+
+    assert pcs_from_list is pcs_from_task  # Exact same object identity (is)
+
+    # 3. Verify dispatch setpoint changes state on the authoritative instance
+    eq_ctrl = BESSEquipmentController()
+    eq_ctrl.execute_startup_sequence(
+        bms_list=plant.bms_units,
+        pcs_list=plant.pcs_units,
+        switchgear=plant.switchgear[0],
+        container_temp_c=25.0,
+        current_time_ns=0,
+    )
+
+    ppc = PowerPlantController()
+    ems = EnergyManagementSystem()
+
+    ems.dispatch_step(
+        requested_p_w=2_000_000.0,
+        requested_q_var=0.0,
+        ppc=ppc,
+        battery=plant.battery_systems[0],
+        bms_list=plant.bms_units,
+        pcs_list=plant.pcs_units,
+        equipment_controller=eq_ctrl,
+    )
+
+    # Check setpoint on the scheduler task instance -> Matches exactly
+    assert pcs_from_task.requested_p_w == 500_000.0
 
 
 def test_variant_50mw_200mwh_multi_vendor_plant_loading() -> None:
@@ -61,7 +112,7 @@ def test_duplicate_identifier_detection() -> None:
                 pcs_id="DUPLICATE_ID",
                 rated_active_power_w=5_000_000.0,
                 rated_apparent_power_va=5_500_000.0,
-            ),  # Duplicate ID!
+            ),
             PCSUnitConfig(
                 pcs_id="PCS_02",
                 rated_active_power_w=5_000_000.0,
@@ -96,8 +147,8 @@ def test_missing_required_components_detection() -> None:
     config = PlantTopologyConfig(
         rated_power_w=10_000_000.0,
         rated_energy_wh=20_000_000.0,
-        containers=[],  # Missing containers!
-        pcs_units=[],  # Missing PCS units!
+        containers=[],
+        pcs_units=[],
         transformers=[],
         switchgear=[],
         auxiliary_systems=[],
@@ -130,9 +181,7 @@ def test_incompatible_ratings_detection() -> None:
                 rated_apparent_power_va=11_000_000.0,
             )
         ],
-        transformers=[
-            TransformerTopologyConfig(rating_va=5_000_000.0)
-        ],  # 5 MVA < 11 MVA PCS!
+        transformers=[TransformerTopologyConfig(rating_va=5_000_000.0)],
         switchgear=[SwitchgearTopologyConfig()],
         auxiliary_systems=[],
         meters=[],
@@ -152,7 +201,7 @@ def test_incompatible_ratings_detection() -> None:
 
 def test_unsupported_plugin_version_detection() -> None:
     """Test validator detects un-registered / unsupported plugin_id references."""
-    registry = PluginRegistry()  # Empty registry
+    registry = PluginRegistry()
     validator = TopologyValidator(plugin_registry=registry)
 
     config = PlantTopologyConfig(

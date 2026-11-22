@@ -40,10 +40,7 @@ class PluginRegistry:
             )
 
         if manifest.plugin_id in self._registered_classes:
-            logger.warning(
-                "Overwriting existing plugin class registration: '%s'",
-                manifest.plugin_id,
-            )
+            logger.info("Updating plugin class registration: '%s'", manifest.plugin_id)
 
         self._registered_classes[manifest.plugin_id] = plugin_cls
         logger.info(
@@ -63,87 +60,98 @@ class PluginRegistry:
             manifests.append(cls().manifest)
         return manifests
 
-    def validate_dependencies(self, plugin_id: str) -> bool:
-        """Verify all dependencies for a plugin are currently registered and enabled."""
-        if plugin_id not in self._registered_classes:
+    def validate_dependencies(self, instance_key: str) -> bool:
+        """Verify all dependencies for a plugin instance are currently registered and enabled."""
+        if instance_key not in self._active_plugins:
             return False
 
-        dummy = self._registered_classes[plugin_id]()
-        for dep_id in dummy.manifest.dependencies:
+        plugin = self._active_plugins[instance_key]
+        for dep_id in plugin.manifest.dependencies:
             if (
                 dep_id not in self._active_plugins
                 or not self._active_plugins[dep_id].enabled
             ):
                 logger.error(
-                    "Plugin '%s' missing enabled dependency '%s'", plugin_id, dep_id
+                    "Plugin instance '%s' missing enabled dependency '%s'",
+                    instance_key,
+                    dep_id,
                 )
                 return False
 
         return True
 
     def create_and_initialize(
-        self, plugin_id: str, config: dict[str, Any]
+        self, plugin_id: str, config: dict[str, Any], instance_id: str | None = None
     ) -> BasePlugin:
         """Instantiate, validate configuration, and initialize a registered plugin.
 
         Args:
             plugin_id: Unique string identifier of registered plugin class.
             config: Configuration dictionary.
+            instance_id: Optional unique equipment instance identifier (e.g. 'CONTAINER_01').
 
         Returns:
-            Initialized BasePlugin instance (disabled by default per safety rules).
+            Initialized BasePlugin instance.
         """
         if plugin_id not in self._registered_classes:
             raise InitializationError(f"Plugin ID '{plugin_id}' is not registered.")
 
         plugin_cls = self._registered_classes[plugin_id]
+        key = instance_id if instance_id else plugin_id
         plugin = plugin_cls()
+        plugin.name = key
+        if hasattr(plugin, "equipment_id"):
+            object.__setattr__(plugin, "equipment_id", key)
 
         if not plugin.validate_config(config):
             raise InitializationError(
-                f"Configuration validation failed for plugin '{plugin_id}'"
+                f"Configuration validation failed for plugin '{plugin_id}' (instance '{key}')"
             )
 
         try:
             plugin.initialize(config)
             plugin.health_status = PluginHealthStatus.HEALTHY
-            self._active_plugins[plugin_id] = plugin
+            self._active_plugins[key] = plugin
             return plugin
         except Exception as e:
             plugin.health_status = PluginHealthStatus.FAULTED
             raise InitializationError(
-                f"Plugin '{plugin_id}' initialization failed: {e}"
+                f"Plugin '{plugin_id}' instance '{key}' initialization failed: {e}"
             ) from e
 
-    def enable_plugin(self, plugin_id: str) -> None:
-        """Enable an initialized plugin after verifying dependencies."""
-        if plugin_id not in self._active_plugins:
-            raise InitializationError(f"Plugin '{plugin_id}' is not instantiated.")
-
-        if not self.validate_dependencies(plugin_id):
+    def enable_plugin(self, instance_key: str) -> None:
+        """Enable an initialized plugin instance after verifying dependencies."""
+        if instance_key not in self._active_plugins:
             raise InitializationError(
-                f"Cannot enable plugin '{plugin_id}': missing active dependencies."
+                f"Plugin instance '{instance_key}' is not instantiated."
             )
 
-        plugin = self._active_plugins[plugin_id]
+        if not self.validate_dependencies(instance_key):
+            raise InitializationError(
+                f"Cannot enable plugin instance '{instance_key}': missing active dependencies."
+            )
+
+        plugin = self._active_plugins[instance_key]
         if plugin.health_status == PluginHealthStatus.FAULTED:
-            raise InitializationError(f"Cannot enable faulted plugin '{plugin_id}'.")
+            raise InitializationError(
+                f"Cannot enable faulted plugin instance '{instance_key}'."
+            )
 
         plugin.enabled = True
         plugin.health_status = PluginHealthStatus.HEALTHY
-        logger.info("Enabled plugin '%s'", plugin_id)
+        logger.info("Enabled plugin instance '%s'", instance_key)
 
-    def disable_plugin(self, plugin_id: str) -> None:
-        """Disable an active plugin."""
-        if plugin_id in self._active_plugins:
-            plugin = self._active_plugins[plugin_id]
+    def disable_plugin(self, instance_key: str) -> None:
+        """Disable an active plugin instance."""
+        if instance_key in self._active_plugins:
+            plugin = self._active_plugins[instance_key]
             plugin.enabled = False
             plugin.health_status = PluginHealthStatus.DISABLED
-            logger.info("Disabled plugin '%s'", plugin_id)
+            logger.info("Disabled plugin instance '%s'", instance_key)
 
-    def get_plugin(self, plugin_id: str) -> BasePlugin | None:
-        """Return active plugin instance by plugin_id."""
-        return self._active_plugins.get(plugin_id)
+    def get_plugin(self, instance_key: str) -> BasePlugin | None:
+        """Return active plugin instance by instance_key or equipment_id."""
+        return self._active_plugins.get(instance_key)
 
     def shutdown_all(self) -> None:
         """Safely shutdown all active plugins."""

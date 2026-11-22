@@ -6,15 +6,14 @@ from backend.app.equipment.interfaces.battery import (
     BatterySystemConfig,
     BatterySystemInterface,
 )
-from backend.app.equipment.models import (
-    EquipmentMetadata,
-    OperatingState,
-    TelemetryPoint,
-    UniversalEquipmentState,
+from backend.app.equipment.models import UniversalEquipmentState
+from backend.app.models.battery.system import (
+    BatterySystemConfigModel,
+    GenericBatterySystemModel,
 )
 from backend.app.simulation.context import SimulationContext
 from plugins.base import BasePlugin
-from plugins.manifest import PluginCategory, PluginManifest
+from plugins.manifest import PluginCategory, PluginHealthStatus, PluginManifest
 
 
 class GenericBatteryPlugin(BasePlugin, BatterySystemInterface):
@@ -24,16 +23,20 @@ class GenericBatteryPlugin(BasePlugin, BatterySystemInterface):
         BasePlugin.__init__(
             self,
             name=equipment_id,
-            phase=4,  # Phase 4: Battery Physics
+            phase=4,
             priority=10,
             interval_ticks=1,
         )
         BatterySystemInterface.__init__(self, equipment_id=equipment_id)
         self._config: BatterySystemConfig = BatterySystemConfig()
-        self.soc_pct: float = 50.0
-        self.voltage_v: float = 1000.0
-        self.current_a: float = 0.0
-        self.temp_c: float = 25.0
+        self.physical_model = GenericBatterySystemModel(
+            equipment_id=equipment_id,
+            config=BatterySystemConfigModel(
+                capacity_wh=100_000_000.0,
+                nominal_voltage_v=1000.0,
+                initial_soc_pct=50.0,
+            ),
+        )
 
     @property
     def manifest(self) -> PluginManifest:
@@ -57,80 +60,40 @@ class GenericBatteryPlugin(BasePlugin, BatterySystemInterface):
 
     def initialize(self, config: dict[str, Any]) -> None:
         self._config = BatterySystemConfig(**config)
-        self.soc_pct = self._config.initial_soc_pct
-        self.voltage_v = self._config.nominal_voltage_v
-        self._operating_state = OperatingState.STANDBY
-        self._is_available = True
-        self._is_initialized = True
+        self.physical_model.config.capacity_wh = self._config.capacity_wh
+        self.physical_model.config.nominal_voltage_v = self._config.nominal_voltage_v
+        self.physical_model.soc_pct = self._config.initial_soc_pct
+        self.enabled = True
+        self.health_status = PluginHealthStatus.HEALTHY
 
     def step_plugin(self, ctx: SimulationContext, delta_t_s: float) -> None:
-        p_pcs_w = ctx.shared_state.get("pcs_active_power_w", 0.0)
-        self.current_a = p_pcs_w / max(self.voltage_v, 1.0)
-
-        capacity_ah = self._config.capacity_wh / self._config.nominal_voltage_v
-        dsoc = (-self.current_a * (delta_t_s / 3600.0) / max(capacity_ah, 1.0)) * 100.0
-        self.soc_pct = max(0.0, min(100.0, self.soc_pct + dsoc))
-
-        self.voltage_v = self._config.nominal_voltage_v * (
-            0.9 + 0.2 * (self.soc_pct / 100.0)
+        p_pcs_w = ctx.shared_state.get(
+            "pcs_cmd_active_power_w", self.physical_model.active_power_w
+        )
+        self.physical_model.step(
+            power_demand_w=p_pcs_w,
+            delta_t_s=delta_t_s,
+            timestamp_ns=ctx.current_tick_ns,
         )
 
-        ctx.shared_state["battery_soc_pct"] = self.soc_pct
-        ctx.shared_state["battery_voltage_v"] = self.voltage_v
-        ctx.shared_state["battery_current_a"] = self.current_a
-
-        if self.current_a != 0.0:
-            self._operating_state = OperatingState.RUNNING
+        ctx.shared_state["battery_soc_pct"] = self.physical_model.soc_pct
+        ctx.shared_state["battery_voltage_v"] = self.physical_model.voltage_v
+        ctx.shared_state["battery_current_a"] = self.physical_model.current_a
 
     def process_command(self, cmd: dict[str, Any]) -> bool:
         if cmd.get("reset_faults"):
-            self._operating_state = OperatingState.STANDBY
+            self.physical_model.clear_faults()
             return True
         return False
 
     def get_state(self) -> UniversalEquipmentState:
-        t_ns = getattr(self, "last_execution_tick_ns", 0) or 0
-        return UniversalEquipmentState(
-            equipment_id=self.equipment_id,
-            equipment_type=self.equipment_type,
-            metadata=EquipmentMetadata(
-                manufacturer="Generic", model_name="LFP Container V1"
-            ),
-            operating_state=self._operating_state,
-            is_available=self._is_available,
-            timestamp_ns=t_ns,
-            measurements={
-                "soc_pct": TelemetryPoint(
-                    value=self.soc_pct,
-                    unit="pct",
-                    timestamp_ns=t_ns,
-                    source_id=self.equipment_id,
-                ),
-                "voltage_v": TelemetryPoint(
-                    value=self.voltage_v,
-                    unit="V",
-                    timestamp_ns=t_ns,
-                    source_id=self.equipment_id,
-                ),
-                "current_a": TelemetryPoint(
-                    value=self.current_a,
-                    unit="A",
-                    timestamp_ns=t_ns,
-                    source_id=self.equipment_id,
-                ),
-            },
-            active_limits={
-                "max_charge_current_a": self._config.max_charge_current_a,
-                "max_discharge_current_a": self._config.max_discharge_current_a,
-            },
-        )
+        return self.physical_model.get_state()
 
     def get_capabilities(self) -> dict[str, Any]:
         return {
-            "capacity_wh": self._config.capacity_wh,
-            "nominal_voltage_v": self._config.nominal_voltage_v,
+            "capacity_wh": self.physical_model.config.capacity_wh,
+            "nominal_voltage_v": self.physical_model.config.nominal_voltage_v,
         }
 
     def shutdown(self) -> None:
-        self._operating_state = OperatingState.OFF
-        self._is_available = False
+        self.enabled = False

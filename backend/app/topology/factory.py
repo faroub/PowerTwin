@@ -19,14 +19,14 @@ from backend.app.controllers.equipment_controller import (
 from backend.app.controllers.ppc import PowerPlantController, PPCConfigModel
 from backend.app.equipment.models import EquipmentMetadata
 from backend.app.models.battery.bms import BMSProtectionLimits, GenericBMSModel
-from backend.app.models.battery.system import BatterySystemConfigModel, GenericBatterySystemModel
+from backend.app.models.battery.system import GenericBatterySystemModel
 from backend.app.models.bop.switchgear import GenericSwitchgearModel, SwitchgearConfigModel
 from backend.app.models.bop.transformer import GenericTransformerModel, TransformerConfigModel
 from backend.app.models.grid.grid_model import GenericGridModel, GridConfigModel
 from backend.app.models.grid.network import PlantElectricalNetwork
 from backend.app.models.grid.poi_model import POIConfigModel, POIModel
 from backend.app.models.meter.meter_model import GenericMeterModel, MeterConfigModel
-from backend.app.models.pcs.pcs_model import GenericPCSModel, PCSConfigModel
+from backend.app.models.pcs.pcs_model import GenericPCSModel
 from backend.app.simulation.config import SimulationConfiguration
 from backend.app.simulation.manager import SimulationRunManager
 from backend.app.topology.schema import PlantTopologyConfig
@@ -77,8 +77,8 @@ class PlantTopologyFactory:
         for plugin_cls in plugins:
             try:
                 self.plugin_registry.register_plugin_class(plugin_cls)
-            except Exception:
-                pass
+            except Exception as err:
+                logger.debug("Plugin class '%s' already registered: %s", plugin_cls, err)
 
     @classmethod
     def load_config_from_yaml(cls, yaml_filepath: str) -> PlantTopologyConfig:
@@ -92,7 +92,7 @@ class PlantTopologyFactory:
         config: PlantTopologyConfig | dict[str, Any],
         sim_config: SimulationConfiguration | None = None,
     ) -> BuiltPlantInstance:
-        """Build full plant instance and wire simulation engine."""
+        """Build full plant instance establishing one authoritative equipment instance per asset."""
         if isinstance(config, dict):
             parsed_config = PlantTopologyConfig(**config)
         else:
@@ -108,19 +108,43 @@ class PlantTopologyFactory:
             parsed_config.plant_id,
         )
 
-        # 2. Instantiate Equipment Models
+        # 2. Wire Simulation Engine Context
+        engine_config = (
+            sim_config
+            if sim_config is not None
+            else SimulationConfiguration(tick_step_ns=10_000_000, speed_factor=0.0)
+        )
+        simulation_engine = SimulationRunManager(config=engine_config)
+
+        # 3. Instantiate Authoritative Battery Plugins & Models
         battery_systems: list[GenericBatterySystemModel] = []
         bms_units: list[GenericBMSModel] = []
 
         for c in parsed_config.containers:
-            b_cfg = BatterySystemConfigModel(
-                capacity_wh=c.capacity_wh,
-                nominal_voltage_v=c.nominal_voltage_v,
-                initial_soc_pct=c.initial_soc_pct,
+            plugin = self.plugin_registry.create_and_initialize(
+                c.plugin_id,
+                {
+                    "capacity_wh": c.capacity_wh,
+                    "nominal_voltage_v": c.nominal_voltage_v,
+                    "initial_soc_pct": c.initial_soc_pct,
+                },
+                instance_id=c.container_id,
             )
-            bat = GenericBatterySystemModel(equipment_id=c.container_id, config=b_cfg)
-            bat.metadata = EquipmentMetadata(manufacturer=c.vendor, model_name=c.plugin_id)
-            battery_systems.append(bat)
+            self.plugin_registry.enable_plugin(c.container_id)
+            simulation_engine.register_task(plugin)
+
+            if hasattr(plugin, "physical_model") and isinstance(
+                plugin.physical_model, GenericBatterySystemModel
+            ):
+                bat_model = plugin.physical_model
+            elif isinstance(plugin, GenericBatterySystemModel):
+                bat_model = plugin
+            else:
+                bat_model = GenericBatterySystemModel(equipment_id=c.container_id)
+
+            bat_model.equipment_id = c.container_id
+            bat_model.metadata = EquipmentMetadata(manufacturer=c.vendor, model_name=c.plugin_id)
+            battery_systems.append(bat_model)
 
             bms_limits = BMSProtectionLimits(
                 max_charge_current_a=15000.0,
@@ -129,21 +153,36 @@ class PlantTopologyFactory:
             bms = GenericBMSModel(equipment_id=f"BMS_{c.container_id}", limits=bms_limits)
             bms_units.append(bms)
 
+        # 4. Instantiate Authoritative PCS Plugins & Models
         pcs_units: list[GenericPCSModel] = []
         for pcs_c in parsed_config.pcs_units:
-            p_cfg = PCSConfigModel(
-                rated_active_power_w=pcs_c.rated_active_power_w,
-                rated_apparent_power_va=pcs_c.rated_apparent_power_va,
-                ac_voltage_nominal_v=pcs_c.ac_voltage_v,
-                dc_voltage_min_v=pcs_c.dc_voltage_min_v,
-                dc_voltage_max_v=pcs_c.dc_voltage_max_v,
+            pcs_plugin = self.plugin_registry.create_and_initialize(
+                pcs_c.plugin_id,
+                {
+                    "rated_power_w": pcs_c.rated_active_power_w,
+                    "rated_apparent_power_va": pcs_c.rated_apparent_power_va,
+                },
+                instance_id=pcs_c.pcs_id,
             )
-            pcs_inst = GenericPCSModel(equipment_id=pcs_c.pcs_id, config=p_cfg)
-            pcs_inst.metadata = EquipmentMetadata(
+            self.plugin_registry.enable_plugin(pcs_c.pcs_id)
+            simulation_engine.register_task(pcs_plugin)
+
+            if hasattr(pcs_plugin, "physical_model") and isinstance(
+                pcs_plugin.physical_model, GenericPCSModel
+            ):
+                pcs_model = pcs_plugin.physical_model
+            elif isinstance(pcs_plugin, GenericPCSModel):
+                pcs_model = pcs_plugin
+            else:
+                pcs_model = GenericPCSModel(equipment_id=pcs_c.pcs_id)
+
+            pcs_model.equipment_id = pcs_c.pcs_id
+            pcs_model.metadata = EquipmentMetadata(
                 manufacturer=pcs_c.vendor, model_name=pcs_c.plugin_id
             )
-            pcs_units.append(pcs_inst)
+            pcs_units.append(pcs_model)
 
+        # 5. Instantiate Transformers, Switchgear, Meters, POI, Grid
         transformers: list[GenericTransformerModel] = []
         for x_c in parsed_config.transformers:
             x_cfg = TransformerConfigModel(
@@ -187,7 +226,7 @@ class PlantTopologyFactory:
             ),
         )
 
-        # 3. Instantiate Controllers
+        # 6. Instantiate Controllers
         eq_ctrl = BESSEquipmentController(
             equipment_id=parsed_config.equipment_controller.controller_id,
             config=EquipmentControllerConfig(
@@ -208,48 +247,16 @@ class PlantTopologyFactory:
             config=EMSConfigModel(target_soc_pct=parsed_config.ems.target_soc_pct),
         )
 
-        # 4. Connect Plant Electrical Network
+        # 7. Connect Authoritative Plant Electrical Network
         network = PlantElectricalNetwork(
-            battery=battery_systems[0],
-            pcs=pcs_units[0],
-            transformer=transformers[0],
-            switchgear=switchgear_list[0],
+            battery=battery_systems,
+            pcs=pcs_units,
+            transformer=transformers,
+            switchgear=switchgear_list,
             poi=poi,
-            meter=meters[0],
+            meter=meters,
             grid=grid,
         )
-
-        # 5. Wire Simulation Engine
-        engine_config = (
-            sim_config
-            if sim_config is not None
-            else SimulationConfiguration(tick_step_ns=10_000_000, speed_factor=0.0)
-        )
-        simulation_engine = SimulationRunManager(config=engine_config)
-
-        # Instantiate plugins for containers and PCS with unique task names
-        for c in parsed_config.containers:
-            bat_plugin = GenericBatteryPlugin(equipment_id=c.container_id)
-            bat_plugin.initialize(
-                {
-                    "capacity_wh": c.capacity_wh,
-                    "nominal_voltage_v": c.nominal_voltage_v,
-                    "initial_soc_pct": c.initial_soc_pct,
-                }
-            )
-            bat_plugin.enabled = True
-            simulation_engine.register_task(bat_plugin)
-
-        for pcs_c in parsed_config.pcs_units:
-            pcs_plugin = GenericPCSPlugin(equipment_id=pcs_c.pcs_id)
-            pcs_plugin.initialize(
-                {
-                    "rated_power_w": pcs_c.rated_active_power_w,
-                    "rated_apparent_power_va": pcs_c.rated_apparent_power_va,
-                }
-            )
-            pcs_plugin.enabled = True
-            simulation_engine.register_task(pcs_plugin)
 
         return BuiltPlantInstance(
             topology_config=parsed_config,

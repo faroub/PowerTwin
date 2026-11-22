@@ -61,8 +61,12 @@ class SMASunnyCentralPCSPlugin(BasePlugin, PCSInterface):
         """Initialize vendor equipment instance."""
         if "rated_power_w" in config:
             self.rated_power_w = float(config["rated_power_w"])
+            self.physical_model.config.rated_active_power_w = self.rated_power_w
         if "rated_apparent_power_va" in config:
             self.rated_apparent_power_va = float(config["rated_apparent_power_va"])
+            self.physical_model.config.rated_apparent_power_va = (
+                self.rated_apparent_power_va
+            )
         self.enabled = True
         self.health_status = PluginHealthStatus.HEALTHY
 
