@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Layout } from './components/Layout';
 import { ViewId } from './components/Sidebar';
+import { LoginView } from './components/LoginView';
 import { PlantOverviewView } from './views/PlantOverviewView';
 import { SingleLineDiagramView } from './views/SingleLineDiagramView';
 import { BatterySystemsView } from './views/BatterySystemsView';
@@ -20,9 +21,22 @@ import { ScenarioManagerView } from './views/ScenarioManagerView';
 import { EquipmentLibraryView } from './views/EquipmentLibraryView';
 import { PluginManagerView } from './views/PluginManagerView';
 import { SystemSettingsView } from './views/SystemSettingsView';
+import { logout, platformSession } from './services/api';
+import { UserSession } from './services/auth';
 
 export const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewId>('overview');
+  const [user, setUser] = useState<UserSession | null>(null);
+
+  const handleLoginSuccess = () => {
+    setUser(platformSession.user);
+  };
+
+  const handleLogout = () => {
+    logout();
+    setUser(null);
+    setCurrentView('overview');
+  };
 
   const renderView = () => {
     switch (currentView) {
@@ -70,8 +84,14 @@ export const App: React.FC = () => {
   };
 
   return (
-    <Layout currentView={currentView} onSelectView={setCurrentView}>
-      {renderView()}
-    </Layout>
+    <>
+      {!user ? (
+        <LoginView onLoginSuccess={handleLoginSuccess} />
+      ) : (
+        <Layout currentView={currentView} onSelectView={setCurrentView} user={user} onLogout={handleLogout}>
+          {renderView()}
+        </Layout>
+      )}
+    </>
   );
 };

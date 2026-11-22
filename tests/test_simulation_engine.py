@@ -225,6 +225,58 @@ def test_snapshot_incompatible_version() -> None:
         snapshot.validate_compatibility()
 
 
+def test_clock_total_steps_restore_uses_public_api() -> None:
+    """Test the total step counter can be restored publicly and validates non-negative."""
+    clock = SimulationClock(step_ns=10_000_000)
+    clock.advance()
+    clock.advance()
+    clock.advance()
+    assert clock.total_steps == 3
+
+    clock.restore_total_steps(1)
+    assert clock.total_steps == 1
+
+    with pytest.raises(InvalidTimeStepError):
+        clock.restore_total_steps(-1)
+
+
+def test_snapshot_restores_step_counter_deterministically() -> None:
+    """Test that restore_snapshot uses the public step counter (no private attribute patch)."""
+    runner = SimulationRunManager()
+    bat_plugin = GenericBatteryPlugin(equipment_id="BAT_CONT_01")
+    bat_plugin.initialize({"initial_soc_pct": 50.0, "capacity_wh": 10_000_000.0})
+    bat_plugin.enabled = True
+    runner.register_task(bat_plugin)
+
+    # Discharge at 2 MW so the punch-out SoC is tracked through the task loop
+    bat_plugin.physical_model.active_power_w = 2_000_000.0
+    runner.step(5)
+
+    snapshot = runner.create_snapshot()
+    assert snapshot.total_steps == 5
+    soc_at_snapshot = bat_plugin.physical_model.soc_pct
+    assert soc_at_snapshot < 50.0
+
+    runner.step(5)
+    assert runner.clock.total_steps == 10
+    assert runner.clock.time_ns == 100_000_000
+    assert bat_plugin.physical_model.soc_pct < soc_at_snapshot
+
+    # Restore: step counter and the deterministic RNG state must both be restored
+    runner.restore_snapshot(snapshot)
+    assert runner.clock.total_steps == 5
+    assert runner.clock.time_ns == 50_000_000
+    assert runner.state == SimulationState.PAUSED
+    assert bat_plugin.physical_model.soc_pct == soc_at_snapshot
+
+    # A second run from the restored state continues down from the stored SoC
+    runner.start()
+    runner.step(5)
+    assert runner.clock.total_steps == 10
+    assert bat_plugin.physical_model.soc_pct < soc_at_snapshot
+    runner.stop()
+
+
 def test_failed_task_fail_fast_policy() -> None:
     """Test FAIL_FAST policy aborts simulation upon task failure."""
     config = SimulationConfiguration(error_policy="FAIL_FAST")

@@ -60,5 +60,6 @@ The HMI provides operators and test engineers with real-time plant visibility, i
 
 - HMI communicates strictly with the FastAPI backend over:
   - **REST API (`/api/v1/...`)**: Scenario loading, authentication, historical query retrieval, setpoint submission.
-  - **WebSocket (`/ws/telemetry`)**: Binary/JSON streaming of real-time telemetry frame updates at 10-50 Hz UI refresh rates.
+  - **Platform Session (`/api/v1/auth/login`, `/api/v1/auth/me`)**: Frontend login view validates credentials against the backend auth endpoint, keeps the JWT token exclusively in process memory (`platformSession`), and dispatches the token in `Authorization: Bearer <token>` headers on every request. No `localStorage`, `sessionStorage` or cookies are ever written.
+  - **Telemetry polling (`/api/v1/overview`)**: UI views consume the backend plant overview endpoint via the shared `usePlantTelemetry` hook (fixed 2 s polling interval). The backend launcher buffer drives telemetry sampling; no WebSocket endpoint exists, and all rendering happens off the backend source of truth.
 - Zero business or physical simulation logic exists in frontend React code.

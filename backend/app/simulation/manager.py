@@ -281,7 +281,7 @@ class SimulationRunManager:
 
         self.simulation_run_id = snapshot.simulation_run_id
         self.clock.reset(initial_ticks_ns=snapshot.timestamp_ns, step_ns=snapshot.step_ns)
-        self.clock._total_steps = snapshot.total_steps
+        self.clock.restore_total_steps(snapshot.total_steps)
         self.random.set_state(snapshot.random_state)
         self.shared_state.clear()
         self.shared_state.update(snapshot.shared_state)

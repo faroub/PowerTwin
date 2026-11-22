@@ -220,3 +220,84 @@ def test_scenario_recovery_after_fault_cleared() -> None:
     report = runner.run_scenario(scenario)
     assert report.passed is True
     assert len(report.fault_audit_records) == 2  # INJECTED and CLEARED
+
+
+def test_scenario_runner_drives_plugin_physics_loop() -> None:
+    """Test the scenario runner drives the plant plugin physics loop, not idle fallbacks.
+
+    NOTE: The 4 x 5 MWh containers at 50% SoC are energy-horizon limited to 2.18 MW each
+    (8.73 MW total) on the EMS dispatch path, so the 10 MW request is clamped by the
+    battery limits before it reaches the 10 MW POI export limit. The criteria assert
+    that the plugin-driven per-PCS dispatch flows at that maximum feasible rate and
+    that SoC decays while discharging; an idle fallback would record 0 W and 50% SoC.
+    """
+    runner = ScenarioRunner()
+    scenario = ScenarioDefinition(
+        scenario_id="SCENARIO_PLUGIN_PHYSICS_LOOP",
+        description=(
+            "10 MW discharge over 5s must flow through the plugin-driven PCS and battery"
+            " models, not the model fallback values."
+        ),
+        plant_config_path="configs/reference_10mw_20mwh.yaml",
+        simulation_duration_ns=5_000_000_000,
+        requested_p_w=10_000_000.0,
+        expected_behavior="Plugin loop computes Per-PCS setpoint and SoC drops.",
+        acceptance_criteria=[
+            AcceptanceCriteriaSpec(
+                criterion_id="CRIT_PLUGIN_DISPATCH_FLOWS",
+                description=(
+                    "Sum of per-PCS requested power equals the EMS-accepted dispatch at"
+                    " the plant's maximum feasible discharge (8.73 MW)"
+                ),
+                metric_name="PCS_ACTIVE_POWER_W",
+                operator="GE",
+                target_value=8_000_000.0,
+            ),
+            AcceptanceCriteriaSpec(
+                criterion_id="CRIT_SOC_DROPS_ON_DISPATCH",
+                description="SoC decreases while discharging",
+                metric_name="BATTERY_SOC_PCT",
+                operator="LE",
+                target_value=50.0,
+                tolerance=1.0,
+            ),
+        ],
+    )
+
+    report = runner.run_scenario(scenario)
+    assert report.passed is True
+
+
+def test_scenario_discharge_empty_battery_rejected() -> None:
+    """Test a 100 MW discharge request with an empty battery (5% SoC) is rejected by EMS."""
+    runner = ScenarioRunner()
+    scenario = ScenarioDefinition(
+        scenario_id="SCENARIO_EMPTY_BATTERY_DISPATCH",
+        description="100 MW request at 5% SoC is rejected by EMS as infeasible.",
+        plant_config_path="configs/reference_10mw_20mwh.yaml",
+        initial_conditions={"soc_pct": 5.0},
+        requested_p_w=100_000_000.0,
+        simulation_duration_ns=500_000_000,
+        expected_behavior="EMS rejects setpoint; accepted power = 0.0 W.",
+        acceptance_criteria=[
+            AcceptanceCriteriaSpec(
+                criterion_id="CRIT_ZERO_ACCEPTED_POWER",
+                description="Accepted power is 0.0 W when battery is empty",
+                metric_name="ACCEPTED_POWER_W",
+                operator="EQ",
+                target_value=0.0,
+                tolerance=0.0,
+            ),
+            AcceptanceCriteriaSpec(
+                criterion_id="CRIT_PPC_ZERO_ACCEPTED",
+                description="PPC accepted power is 0.0 W when battery is empty",
+                metric_name="PPC_ACCEPTED_P_W",
+                operator="EQ",
+                target_value=0.0,
+                tolerance=0.0,
+            ),
+        ],
+    )
+
+    report = runner.run_scenario(scenario)
+    assert report.passed is True

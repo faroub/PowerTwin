@@ -143,3 +143,103 @@ def test_communication_loss_simulation() -> None:
     assert acc is False
     assert "REJECTED_COMMUNICATION_LOSS" in reason
     assert audit_log.entries[-1].status == CommandStatus.REJECTED_INTERLOCK
+
+
+def test_modbus_write_rejected_non_finite_value() -> None:
+    """Test non-finite P/Q setpoints are rejected by the Modbus write validator."""
+    gateway = ProtocolGatewayService()
+    gateway.modbus_server.allow_writes = True
+
+    for value in (math.nan, float("inf"), float("-inf")):
+        acc, reason = gateway.process_external_command(
+            requestor="CIL_PPC",
+            target_equipment_id="PPC_01",
+            address=100,
+            value=value,
+            current_time_ns=1_000_000_000,
+        )
+        assert acc is False
+        assert "REJECTED_NON_FINITE" in reason
+
+
+def test_modbus_write_out_of_range_setpoint() -> None:
+    """Test setpoints exceeding the plant rated limits are rejected."""
+    gateway = ProtocolGatewayService()
+    gateway.modbus_server.allow_writes = True
+
+    acc, reason = gateway.process_external_command(
+        requestor="CIL_PPC",
+        target_equipment_id="PPC_01",
+        address=100,
+        value=100_000_000.0,
+        current_time_ns=1_000_000_000,
+    )
+    assert acc is False
+    assert "REJECTED_OUT_OF_RANGE" in reason
+
+
+def test_gateway_dispatches_p_and_q_setpoints_to_plant() -> None:
+    """Test writing P & Q registers (100/102) dispatches both through the plant EMS."""
+    factory = PlantTopologyFactory()
+    plant = factory.build_plant(
+        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
+    )
+
+    plant.equipment_controller.execute_startup_sequence(
+        bms_list=plant.bms_units,
+        pcs_list=plant.pcs_units,
+        switchgear=plant.switchgear[0],
+        container_temp_c=25.0,
+        current_time_ns=0,
+    )
+
+    gateway = ProtocolGatewayService(plant_instance=plant)
+    gateway.modbus_server.allow_writes = True
+
+    # Write P first, then Q (registers are read back when addressing the other write)
+    acc_p, _ = gateway.process_external_command(
+        requestor="CIL_CONTROLLER",
+        target_equipment_id="PPC_MAIN_01",
+        address=100,
+        value=10_000_000.0,
+        current_time_ns=10_000_000,
+    )
+    assert acc_p is True
+
+    acc_q, _ = gateway.process_external_command(
+        requestor="CIL_CONTROLLER",
+        target_equipment_id="PPC_MAIN_01",
+        address=102,
+        value=1_000_000.0,
+        current_time_ns=20_000_000,
+    )
+    assert acc_q is True
+
+    # The EMS accepted both setpoints (max.forKW/dispatch available)
+    assert plant.ems.requested_p_w == 10_000_000.0
+    assert plant.ems.requested_q_var == 1_000_000.0
+    assert plant.ppc.accepted_p_w >= 0.0
+    assert plant.ppc.accepted_q_var >= 0.0
+    assert plant.pcs_units[0].requested_p_w > 0.0
+    assert plant.pcs_units[0].requested_q_var > 0.0
+
+
+def test_gateway_without_plant_instance_logs_gracefully() -> None:
+    """Test that a gateway without a bound plant instance still logs/audits commands."""
+    audit_log = ControlCommandLog()
+    gateway = ProtocolGatewayService(audit_log=audit_log)
+    gateway.modbus_server.allow_writes = True
+
+    acc, _reason = gateway.process_external_command(
+        requestor="CIL_PPC",
+        target_equipment_id="PPC_01",
+        address=104,
+        value=1.0,
+        current_time_ns=1_000_000_000,
+    )
+    assert acc is True
+    assert audit_log.entries[-1].status == CommandStatus.ACCEPTED
+    assert audit_log.entries[-1].source_layer == "EXTERNAL_CIL:CIL_PPC"
+    assert (
+        audit_log.entries[-1].action_name == "WRITE_REGISTER:WATCHDOG_HEARTBEAT_COUNTER"
+    )

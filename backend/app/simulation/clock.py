@@ -45,6 +45,27 @@ class SimulationClock:
         """Return total number of steps executed since initialization/reset."""
         return self._total_steps
 
+    @total_steps.setter
+    def total_steps(self, total_steps: int) -> None:
+        """Restore the total number of steps executed (snapshot resume support).
+
+        Args:
+            total_steps: New total step count (must be >= 0).
+        """
+        if total_steps < 0:
+            raise InvalidTimeStepError(
+                f"Total steps must be non-negative (>= 0), got: {total_steps}"
+            )
+        self._total_steps = total_steps
+
+    def restore_total_steps(self, total_steps: int) -> None:
+        """Restore the total step counter by a named, public API.
+
+        Args:
+            total_steps: New total step count (must be >= 0).
+        """
+        self.total_steps = total_steps
+
     def advance(self) -> int:
         """Advance simulation clock by exactly one tick step.
 

@@ -8,6 +8,7 @@ export const SimulationView: React.FC = () => {
   const [actionName, setActionName] = useState<string>('');
   const [actionEnum, setActionEnum] = useState<string>('');
   const [feedback, setFeedback] = useState<ControlResponse | null>(null);
+  
 
   useEffect(() => {
     const checkEngine = async () => {
@@ -19,6 +20,7 @@ export const SimulationView: React.FC = () => {
       }
     };
     checkEngine();
+
   }, []);
 
   const triggerControl = (name: string, actEnum: string) => {
@@ -29,7 +31,7 @@ export const SimulationView: React.FC = () => {
 
   const handleConfirmAction = async () => {
     setModalOpen(false);
-    const result = await dispatchSimulationControl(actionEnum);
+    const result = await dispatchSimulationControl(actionEnum, {});
     setFeedback(result);
     if (result.engine_state) {
       setEngineState(result.engine_state);

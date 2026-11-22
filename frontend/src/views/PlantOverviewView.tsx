@@ -1,22 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { fetchPlantOverview, PlantOverviewData } from '../services/api';
+import React from 'react';
+
+import { usePlantTelemetry } from '../services/hooks';
 
 export const PlantOverviewView: React.FC = () => {
-  const [overview, setOverview] = useState<PlantOverviewData | null>(null);
-
-  useEffect(() => {
-    let isMounted = true;
-    const loadData = async () => {
-      const data = await fetchPlantOverview();
-      if (isMounted) setOverview(data);
-    };
-    loadData();
-    const interval = setInterval(loadData, 2000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, []);
+  const { data: overview, loading } = usePlantTelemetry();
 
   const isConnected = overview && overview.simulation_state !== 'NOT_CONNECTED';
 
@@ -35,7 +22,7 @@ export const PlantOverviewView: React.FC = () => {
         <div className="card">
           <div className="card-title">Plant Active Power</div>
           <div className="card-value" style={{ color: '#38bdf8' }}>
-            {isConnected && overview?.active_power_mw !== null ? `${overview.active_power_mw.toFixed(2)} MW` : 'N/A'}
+            {isConnected && overview?.active_power_mw !== null ? `${overview.active_power_mw.toFixed(2)} MW` : loading ? '—' : 'N/A'}
           </div>
           <div className="card-note">Net Export (+MW Discharge)</div>
         </div>
@@ -43,7 +30,7 @@ export const PlantOverviewView: React.FC = () => {
         <div className="card">
           <div className="card-title">Plant Reactive Power</div>
           <div className="card-value" style={{ color: '#38bdf8' }}>
-            {isConnected && overview?.reactive_power_mvar !== null ? `${overview.reactive_power_mvar.toFixed(2)} MVAR` : 'N/A'}
+            {isConnected && overview?.reactive_power_mvar !== null ? `${overview.reactive_power_mvar.toFixed(2)} MVAR` : loading ? '—' : 'N/A'}
           </div>
           <div className="card-note">+VAR Supplying</div>
         </div>
@@ -53,7 +40,7 @@ export const PlantOverviewView: React.FC = () => {
           <div className="card-value">
             {isConnected && overview?.avail_charge_mw !== null && overview?.avail_discharge_mw !== null
               ? `-${overview.avail_charge_mw.toFixed(1)} / +${overview.avail_discharge_mw.toFixed(1)} MW`
-              : 'N/A'}
+              : loading ? '—' : 'N/A'}
           </div>
           <div className="card-note">Headroom Limits</div>
         </div>
@@ -63,7 +50,7 @@ export const PlantOverviewView: React.FC = () => {
           <div className="card-value" style={{ color: '#22c55e' }}>
             {isConnected && overview?.average_soc_pct !== null && overview?.total_energy_mwh !== null
               ? `${overview.average_soc_pct.toFixed(1)} % (${overview.total_energy_mwh.toFixed(1)} MWh)`
-              : 'N/A'}
+              : loading ? '—' : 'N/A'}
           </div>
           <div className="card-note">Plant Stored Energy</div>
         </div>
@@ -73,7 +60,7 @@ export const PlantOverviewView: React.FC = () => {
           <div className="card-value">
             {isConnected && overview?.grid_frequency_hz !== null && overview?.poi_voltage_kv !== null
               ? `${overview.grid_frequency_hz.toFixed(2)} Hz | ${overview.poi_voltage_kv.toFixed(2)} kV`
-              : 'N/A'}
+              : loading ? '—' : 'N/A'}
           </div>
           <div className="card-note">POI Bus Metrics</div>
         </div>
@@ -83,7 +70,7 @@ export const PlantOverviewView: React.FC = () => {
           <div className="card-value" style={{ color: overview?.active_alarms_count === 0 ? '#22c55e' : '#ef4444' }}>
             {isConnected
               ? `${overview?.active_alarms_count} Alarms | ${overview?.equipment_availability_pct.toFixed(0)}%`
-              : 'NOT CONNECTED'}
+              : loading ? '—' : 'NOT CONNECTED'}
           </div>
           <div className="card-note">System Availability</div>
         </div>

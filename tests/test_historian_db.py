@@ -1,8 +1,14 @@
 """Automated Unit Tests for WP07 Historian, Database, and Audit Trail."""
 
 import os
+import pathlib
+from typing import cast
 
-from backend.app.historian.service import OVERFLOW_DIR, HistorianService
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.app.historian import service as historian_service
+from backend.app.historian.service import HistorianService
 
 
 def test_historian_telemetry_buffering_and_timestamp_consistency() -> None:
@@ -47,13 +53,18 @@ def test_command_traceability_audit_logging() -> None:
     assert status["command_buffer_size"] == 1
 
 
-def test_emergency_disk_overflow_flush_on_buffer_full() -> None:
+def test_emergency_disk_overflow_flush_on_buffer_full(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
     """Test zero silent data loss policy: emergency disk overflow flush when memory buffer fills."""
+    # Redirect overflow writes to a temporary directory so no tracked repository file is
+    # modified by the test suite.
+    monkeypatch.setattr(historian_service, "OVERFLOW_DIR", str(tmp_path))
     # Small buffer size of 2 items
     historian = HistorianService(max_buffer_size=2)
 
     # Clean previous test overflow files if any
-    overflow_file = os.path.join(OVERFLOW_DIR, "telemetry_overflow.json")
+    overflow_file = os.path.join(tmp_path, "telemetry_overflow.json")
     if os.path.exists(overflow_file):
         os.remove(overflow_file)
 
@@ -86,3 +97,47 @@ def test_alarm_recording() -> None:
     )
     assert success is True
     assert historian.get_buffer_status()["event_buffer_size"] == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_buffer_to_db_rollback_preserves_overflow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Test a failed database commit rolls back and persists buffering items to disk."""
+    # Redirect overflow writes to a temporary directory so no tracked repository file is
+    # modified by the test suite.
+    monkeypatch.setattr(historian_service, "OVERFLOW_DIR", str(tmp_path))
+
+    overflow_file = os.path.join(tmp_path, "telemetry_overflow.json")
+    if os.path.exists(overflow_file):
+        os.remove(overflow_file)
+
+    historian = HistorianService(max_buffer_size=2)
+    assert historian.record_telemetry("TAG1", "EQ1", 10.0, "V", 100) is True
+    assert historian.record_telemetry("TAG2", "EQ1", 12.0, "V", 200) is True
+    overflow_occurred = historian.record_telemetry("TAG3", "EQ1", 14.0, "V", 300)
+    assert overflow_occurred is False
+    assert os.path.exists(overflow_file)
+
+    # Simulate a database session that cannot commit
+    class FakeSession:
+        async def commit(self) -> None:
+            raise RuntimeError("Database unreachable")
+
+        async def rollback(self) -> None:
+            pass
+
+    (
+        telemetry_written,
+        commands_written,
+        events_written,
+    ) = await historian.flush_buffer_to_db(cast("AsyncSession", FakeSession()))
+    assert telemetry_written == 0
+    assert commands_written == 0
+    assert events_written == 0
+
+    # Buffered items were preserved to disk again (no silent data loss)
+    with open(overflow_file, encoding="utf-8") as f:
+        content = f.read().strip().splitlines()
+    assert len(content) >= 2
+    assert any("TAG3" in line for line in content)

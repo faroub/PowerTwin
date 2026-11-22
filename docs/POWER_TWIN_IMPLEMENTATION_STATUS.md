@@ -20,8 +20,8 @@ All implementations operate strictly in **SIMULATION ONLY** mode (`SIMULATION_ON
 | **Vendor Plugin Framework** | `IMPLEMENTED_AND_TESTED` | Plug-and-play plugin architecture for CATL EnerOne, Tesla Megapack, SMA Sunny Central, and Sungrow SC5000 models without core engine modification. |
 | **CIL Protocol Gateway** | `IMPLEMENTED_AND_TESTED` | Modbus TCP server bound strictly to loopback (`127.0.0.1:5020`), read-only telemetry registers (`0x0000`–`0x000C`), command write registers (`0x0064`–`0x006C`) routed to plant EMS dispatch loop, watchdog heartbeat tracking ($5\text{s}$ timeout). |
 | **Historian & Telemetry** | `IMPLEMENTED_AND_TESTED` | Non-blocking in-memory ring buffer (10,000 max capacity), zero silent data loss disk overflow fallback, live telemetry extraction in `/api/v1/overview`. |
-| **SCADA Web HMI** | `IMPLEMENTED_AND_TESTED` | 19-view React + TypeScript SCADA frontend, interactive Single-Line Diagram, real-time telemetry display with **"SIMULATED DATA ONLY"** labeling. |
-| **Security & API RBAC** | `IMPLEMENTED_AND_TESTED` | JWT HTTP Bearer token authentication, deny-by-default `require_permission(...)` middleware, restrictive CORS rules, startup safety invariant validation. |
+| **SCADA Web HMI** | `IMPLEMENTED_AND_TESTED` | 19-view React + TypeScript SCADA frontend, interactive Single-Line Diagram, real-time telemetry display with **"SIMULATED DATA ONLY"** labeling, login-gated platform session and per-view telemetry wiring from the backend `/api/v1/overview` endpoint. |
+| **Security & API RBAC** | `IMPLEMENTED_AND_TESTED` | JWT HTTP Bearer token authentication, deny-by-default `require_permission(...)` middleware, restrictive CORS rules, startup safety invariant validation, in-memory platform session bridge (token never persisted to client storage), dev user accounts for frontend login and per-view permission gating. |
 | **CI/CD & Release Pipeline** | `IMPLEMENTED_AND_TESTED` | GitHub Actions parallel workflows with verified pinned action commit SHAs, dynamic pytest XML coverage parsing, non-root Docker builds (`powertwin`), SPDX JSON SBOM, and SHA256 checksum generation. |
 
 ---

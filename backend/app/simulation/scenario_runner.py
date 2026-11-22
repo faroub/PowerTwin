@@ -75,13 +75,22 @@ class ScenarioRunner:
                 requested_p_w=scenario.requested_p_w,
                 requested_q_var=scenario.requested_q_var,
                 ppc=plant.ppc,
-                battery=plant.battery_systems[0],
+                battery=plant.battery_systems,
                 bms_list=plant.bms_units,
                 pcs_list=plant.pcs_units,
                 equipment_controller=plant.equipment_controller,
                 grid_frequency_hz=plant.grid.config.nominal_frequency_hz,
                 timestamp_ns=current_time_ns,
             )
+
+            # Wire the accepted dispatch setpoints into the simulation engine shared state.
+            # The plugin-driven physics loop (Phase 3 PCS -> Phase 4 Battery) derives its
+            # per-PCS command from this key, so the plant must step off the authoritative
+            # accepted setpoints rather than the idle model fallback values.
+            engine = plant.simulation_engine
+            num_pcs_units = max(1, len(plant.pcs_units))
+            engine.context.shared_state["pcs_cmd_active_power_w"] = acc_p / num_pcs_units
+            engine.context.shared_state["pcs_cmd_reactive_power_var"] = acc_q / num_pcs_units
 
             # Step Physics
             plant.simulation_engine.step(1)
@@ -100,6 +109,13 @@ class ScenarioRunner:
             recorded_metrics["ACTIVE_BATTERY_COUNT"] = bat_avail_cnt
             recorded_metrics["EQUIPMENT_CONTROLLER_AVAILABLE"] = (
                 plant.equipment_controller.is_available
+            )
+            # Plugin-driven physics loop telemetry (authoritative per-PCS setpoints)
+            recorded_metrics["BATTERY_SOC_PCT"] = sum(
+                b.soc_pct for b in plant.battery_systems
+            ) / max(1, len(plant.battery_systems))
+            recorded_metrics["PCS_ACTIVE_POWER_W"] = float(
+                sum(pcs.requested_p_w for pcs in plant.pcs_units)
             )
 
         # 5. Evaluate Engineering Acceptance Criteria

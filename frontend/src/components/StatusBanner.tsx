@@ -4,9 +4,11 @@ import { SystemInfo } from '../services/api';
 interface StatusBannerProps {
   isOnline: boolean;
   systemInfo: SystemInfo | null;
+  username?: string;
+  role?: string;
 }
 
-export const StatusBanner: React.FC<StatusBannerProps> = ({ isOnline, systemInfo }) => {
+export const StatusBanner: React.FC<StatusBannerProps> = ({ isOnline, systemInfo, username, role }) => {
   return (
     <div className="top-bar">
       <div className="brand-title">
@@ -26,6 +28,12 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({ isOnline, systemInfo
           <span className="dot online"></span>
           SAFETY: GUARDRAILS ACTIVE
         </div>
+        {username && (
+          <div className="status-pill online">
+            <span className="dot online"></span>
+            {role && <span>{role}</span>} User: {username}
+          </div>
+        )}
       </div>
     </div>
   );

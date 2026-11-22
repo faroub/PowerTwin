@@ -1,6 +1,7 @@
 """Application configuration management using Pydantic BaseSettings."""
 
 import os
+import secrets
 from typing import Literal
 
 from pydantic import Field
@@ -50,11 +51,14 @@ class Settings(BaseSettings):
     PROTOCOL_GATEWAY_PORT: int = Field(default=5020, description="Modbus TCP Server port")
 
     # Database Settings
+    # Default values are environment overrides; POSTGRES_PASSWORD itself defaults to a
+    # per-process random string so no codified credential leaks through the source.
     POSTGRES_SERVER: str = Field(default_factory=lambda: os.getenv("POSTGRES_SERVER", "localhost"))
     POSTGRES_PORT: int = Field(default_factory=lambda: int(os.getenv("POSTGRES_PORT", "5432")))
     POSTGRES_USER: str = Field(default_factory=lambda: os.getenv("POSTGRES_USER", "powertwin"))
     POSTGRES_PASSWORD: str = Field(
-        default_factory=lambda: os.getenv("POSTGRES_PASSWORD", "powertwin_secret")
+        default_factory=lambda: os.getenv("POSTGRES_PASSWORD", secrets.token_hex(32)),
+        description="Override: MUST be set to a strong secret in production.",
     )
     POSTGRES_DB: str = Field(default_factory=lambda: os.getenv("POSTGRES_DB", "powertwin_db"))
 

@@ -1,6 +1,11 @@
 import React from 'react';
 
+import { usePlantTelemetry } from '../services/hooks';
+
 export const PCSView: React.FC = () => {
+  const { data: telemetry, loading } = usePlantTelemetry();
+  const connected = telemetry?.simulation_state !== 'NOT_CONNECTED';
+
   return (
     <div>
       <div className="view-header">
@@ -9,7 +14,8 @@ export const PCSView: React.FC = () => {
       </div>
 
       <div className="notice-box">
-        <strong>INVERTER DISPATCH TELEMETRY:</strong> Demonstrates P² + Q² ≤ S_max² capability circle clamping.
+        <strong>INVERTER DISPATCH TELEMETRY:</strong> Demonstrates P² + Q² ≤ S_max² capability
+        circle clamping.
       </div>
 
       <div className="card" style={{ marginBottom: '20px' }}>
@@ -17,19 +23,27 @@ export const PCSView: React.FC = () => {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', textAlign: 'center' }}>
           <div style={{ padding: '12px', backgroundColor: '#0f172a', borderRadius: '6px' }}>
             <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>1. REQUESTED</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>5.00 MW</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
+              {loading ? '—' : connected ? `${telemetry?.active_power_mw?.toFixed(2) ?? 0} MW` : 'N/A'}
+            </div>
           </div>
           <div style={{ padding: '12px', backgroundColor: '#0f172a', borderRadius: '6px' }}>
             <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>2. ACCEPTED</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#eab308' }}>5.00 MW</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#eab308' }}>
+              {loading ? '—' : connected ? `${telemetry?.reactive_power_mvar?.toFixed(2) ?? 0} MVAR` : 'N/A'}
+            </div>
           </div>
           <div style={{ padding: '12px', backgroundColor: '#0f172a', borderRadius: '6px' }}>
             <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>3. ACTUAL</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#22c55e' }}>4.92 MW</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#22c55e' }}>
+              {loading ? '—' : connected ? `${telemetry?.active_power_mw?.toFixed(2) ?? 0} MW` : 'N/A'}
+            </div>
           </div>
           <div style={{ padding: '12px', backgroundColor: '#0f172a', borderRadius: '6px' }}>
             <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>4. MEASURED</div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#38bdf8' }}>4.92 MW</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#38bdf8' }}>
+              {loading ? '—' : connected ? `${telemetry?.reactive_power_mvar?.toFixed(2) ?? 0} MVAR` : 'N/A'}
+            </div>
           </div>
         </div>
       </div>

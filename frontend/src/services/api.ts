@@ -1,3 +1,19 @@
+/**
+ * Frontend API client for the PowerTwin BESS platform.
+ *
+ * All read/write calls target the local FastAPI backend through the Vite dev proxy
+ * (`/api/v1/...`) or, at build time, the reverse proxy exposing `/api/v1/...` on the
+ * same origin. Every request that touches platform state carries the platform session
+ * token.
+ *
+ * NOTE: The token lives exclusively in process memory (in-memory React state), i.e. it is
+ * never stored on the client filesystem. This keeps the platform in the default
+ * SIMULATION ONLY posture and avoids persisting credentials.
+ */
+
+import { rolePermissions } from './auth';
+import type { Permission, UserSession } from './auth';
+
 export interface SafetyReport {
   application_mode: string;
   simulation_only: boolean;
@@ -45,9 +61,70 @@ export interface SystemInfo {
   };
 }
 
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  username: string;
+  role: string;
+  permissions: string[];
+}
+
+/**
+ * In-memory platform session holder.
+ *
+ * The token is deliberately NOT persisted in localStorage/sessionStorage or cookies:
+ * it is scoped to the live browser session and is cleared on page reload.
+ */
+class PlatformSession {
+  #token: string | null = null;
+
+  #user: UserSession | null = null;
+
+  get token(): string | null {
+    return this.#token;
+  }
+
+  get user(): UserSession | null {
+    return this.#user;
+  }
+
+  get isAuthenticated(): boolean {
+    return this.#token !== null;
+  }
+
+  setAuthenticated(user: UserSession, token: string): void {
+    this.#user = user;
+    this.#token = token;
+  }
+
+  clear(): void {
+    this.#user = null;
+    this.#token = null;
+  }
+}
+
+/** Global platform session singleton, shared across API service and UI layers. */
+export const platformSession = new PlatformSession();
+
+const BASE_URL = '/api/v1';
+
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const token = platformSession.token;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export async function fetchSystemHealth(): Promise<{ healthy: boolean; data?: SystemInfo }> {
   try {
-    const res = await fetch('/api/v1/info');
+    const res = await fetch(`${BASE_URL}/info`, { headers: authHeaders() });
     if (!res.ok) {
       return { healthy: false };
     }
@@ -58,14 +135,9 @@ export async function fetchSystemHealth(): Promise<{ healthy: boolean; data?: Sy
   }
 }
 
-export async function fetchPlantOverview(token?: string): Promise<PlantOverviewData | null> {
+export async function fetchPlantOverview(): Promise<PlantOverviewData | null> {
   try {
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const res = await fetch('/api/v1/overview', { headers });
+    const res = await fetch(`${BASE_URL}/overview`, { headers: authHeaders() });
     if (res.ok) {
       return await res.json();
     }
@@ -78,17 +150,11 @@ export async function fetchPlantOverview(token?: string): Promise<PlantOverviewD
 export async function dispatchSimulationControl(
   action: string,
   payload: Record<string, unknown> = {},
-  token?: string
 ): Promise<ControlResponse> {
   try {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const res = await fetch('/api/v1/simulation/control', {
+    const res = await fetch(`${BASE_URL}/simulation/control`, {
       method: 'POST',
-      headers,
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, ...payload }),
     });
 
@@ -127,4 +193,42 @@ export async function dispatchSimulationControl(
       message: 'Network error connecting to backend API.',
     };
   }
+}
+
+export async function login(payload: LoginRequest): Promise<TokenResponse | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      const data: TokenResponse = await res.json();
+      return data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchUserDetails(token: string): Promise<UserSession | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const user = await res.json();
+      const role = user.role;
+      const permissions = rolePermissions[role] ?? new Set<Permission>();
+      return { username: user.username, role, permissions };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function logout(): void {
+  platformSession.clear();
 }
