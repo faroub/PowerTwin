@@ -1,5 +1,11 @@
 """Generic PCS (Power Conversion System) Inverter Model.
 
+SIMULATION MODEL DISCLAIMER:
+  This software PCS model simulates phasor-domain active/reactive power dispatch,
+  P^2 + Q^2 <= S_max^2 capability circle clamping, thermal IGBT heatsink mass,
+  and AC voltage current limiters for software testing and CIL integration.
+  It does NOT claim detailed switching-converter or sub-microsecond EMT fidelity.
+
 DOCUMENTED SIGN CONVENTION:
   +P (Positive Active Power) = DISCHARGING into AC grid/plant
   -P (Negative Active Power) = CHARGING from AC grid/plant
@@ -9,10 +15,11 @@ DOCUMENTED SIGN CONVENTION:
 FOUR EXPLICIT P & Q VALUES DISTINGUISHED:
   1. Requested P, Q: Target setpoint submitted by PPC/EMS.
   2. Accepted P, Q: Validated setpoint after PQ circle (P^2 + Q^2 <= S_max^2) and DC window limits.
-  3. Actual P, Q: Physical AC output generated after applying ramp rate limit and efficiency losses.
+  3. Actual P, Q: Physical AC output generated after applying ramp rate limit.
   4. Measured P, Q: Telemetry values reported by simulated AC sensors.
 """
 
+import logging
 import math
 from typing import Any
 
@@ -28,6 +35,8 @@ from backend.app.equipment.models import (
     UniversalEquipmentState,
 )
 from backend.app.simulation.exceptions import InvalidTimeStepError
+
+logger = logging.getLogger(__name__)
 
 
 class PCSConfigModel(BaseModel):
@@ -46,6 +55,9 @@ class PCSConfigModel(BaseModel):
     ramp_rate_limit_w_per_s: float = Field(
         default=10_000_000.0, description="Max active power ramp rate limit in W/s (10 MW/s)"
     )
+    ramp_rate_limit_var_per_s: float = Field(
+        default=10_000_000.0, description="Max reactive power ramp rate limit in VAR/s (10 MVAR/s)"
+    )
     efficiency: float = Field(
         default=0.985, description="Inverter conversion efficiency (0.985 = 98.5%)"
     )
@@ -60,17 +72,19 @@ class PCSConfigModel(BaseModel):
         "rated_apparent_power_va",
         "ac_voltage_nominal_v",
         "ramp_rate_limit_w_per_s",
+        "ramp_rate_limit_var_per_s",
+        "max_ac_current_a",
     )
     @classmethod
     def validate_positive(cls, v: float) -> float:
-        if v <= 0.0:
+        if v <= 0.0 or math.isnan(v) or math.isinf(v):
             raise ValueError(f"Value must be strictly positive (> 0), got: {v}")
         return v
 
     @field_validator("efficiency")
     @classmethod
     def validate_efficiency(cls, v: float) -> float:
-        if v <= 0.0 or v > 1.0:
+        if v <= 0.0 or v > 1.0 or math.isnan(v) or math.isinf(v):
             raise ValueError(f"Efficiency must be in (0.0, 1.0], got: {v}")
         return v
 
@@ -96,22 +110,23 @@ class GenericPCSModel:
         self.equipment_type: EquipmentType = EquipmentType.PCS
         self.config: PCSConfigModel = config if config is not None else PCSConfigModel()
 
-        # 1. Requested Setpoints (Input from PPC/EMS)
+        # 1. Requested Setpoints
         self.requested_p_w: float = 0.0
         self.requested_q_var: float = 0.0
 
-        # 2. Accepted Setpoints (After PQ circle & boundary clamping)
+        # 2. Accepted Setpoints
         self.accepted_p_w: float = 0.0
         self.accepted_q_var: float = 0.0
 
-        # 3. Actual Physical Output (After ramp limiter & efficiency)
+        # 3. Actual Physical AC Output
         self.actual_p_w: float = 0.0
         self.actual_q_var: float = 0.0
 
-        # 4. Measured Telemetry Values (With sensor noise)
+        # 4. Measured Telemetry Values
         self.measured_p_w: float = 0.0
         self.measured_q_var: float = 0.0
 
+        self.priority_mode: str = "ACTIVE_POWER_PRIORITY"
         self.igbt_temp_c: float = 25.0
         self.operating_state: OperatingState = OperatingState.STANDBY
         self.is_available: bool = True
@@ -125,6 +140,15 @@ class GenericPCSModel:
         """Process inbound P & Q command setpoints."""
         try:
             parsed = PCSCommandModel(**cmd)
+            if (
+                math.isnan(parsed.requested_p_w)
+                or math.isinf(parsed.requested_p_w)
+                or math.isnan(parsed.requested_q_var)
+                or math.isinf(parsed.requested_q_var)
+            ):
+                logger.warning("Rejected non-finite P or Q command setpoint.")
+                return False
+
             if parsed.reset_fault:
                 self.clear_faults()
 
@@ -140,18 +164,30 @@ class GenericPCSModel:
             return False
 
     def evaluate_pq_capability_circle(
-        self, p_req: float, q_req: float, s_max_eff: float
+        self,
+        p_req: float,
+        q_req: float,
+        s_max_eff: float,
+        priority_mode: str = "ACTIVE_POWER_PRIORITY",
     ) -> tuple[float, float]:
-        """Enforce apparent power circle constraint: P^2 + Q^2 <= S_max^2."""
-        p_clamped = max(
-            -self.config.rated_active_power_w,
-            min(self.config.rated_active_power_w, p_req),
-        )
-        p_accepted = max(-s_max_eff, min(s_max_eff, p_clamped))
-        q_headroom_sq = max(0.0, (s_max_eff**2) - (p_accepted**2))
-        q_max_avail = math.sqrt(q_headroom_sq)
-        q_accepted = max(-q_max_avail, min(q_max_avail, q_req))
-        return (p_accepted, q_accepted)
+        """Enforce apparent power circle constraint: P^2 + Q^2 <= S_max^2 under priority mode."""
+        if priority_mode == "REACTIVE_POWER_PRIORITY":
+            q_clamped = max(-s_max_eff, min(s_max_eff, q_req))
+            p_max_avail = math.sqrt(max(0.0, (s_max_eff**2) - (q_clamped**2)))
+            p_clamped = max(
+                -self.config.rated_active_power_w, min(self.config.rated_active_power_w, p_req)
+            )
+            p_accepted = max(-p_max_avail, min(p_max_avail, p_clamped))
+            return (p_accepted, q_clamped)
+        else:  # ACTIVE_POWER_PRIORITY (Default)
+            p_clamped = max(
+                -self.config.rated_active_power_w, min(self.config.rated_active_power_w, p_req)
+            )
+            p_accepted = max(-s_max_eff, min(s_max_eff, p_clamped))
+            q_headroom_sq = max(0.0, (s_max_eff**2) - (p_accepted**2))
+            q_max_avail = math.sqrt(q_headroom_sq)
+            q_accepted = max(-q_max_avail, min(q_max_avail, q_req))
+            return (p_accepted, q_accepted)
 
     def step(
         self,
@@ -161,9 +197,19 @@ class GenericPCSModel:
         timestamp_ns: int = 0,
     ) -> None:
         """Execute physical PCS step for time step delta_t_s."""
-        if delta_t_s <= 0.0:
+        if (
+            math.isnan(dc_voltage_v)
+            or math.isinf(dc_voltage_v)
+            or math.isnan(ac_grid_voltage_v)
+            or math.isinf(ac_grid_voltage_v)
+        ):
+            raise ValueError(
+                f"Non-finite voltage in PCS step: DC={dc_voltage_v}, AC={ac_grid_voltage_v}"
+            )
+
+        if delta_t_s <= 0.0 or math.isnan(delta_t_s) or math.isinf(delta_t_s):
             raise InvalidTimeStepError(
-                f"Simulation delta_t_s must be strictly positive (> 0.0), got: {delta_t_s}"
+                f"Simulation delta_t_s must be strictly positive and finite, got: {delta_t_s}"
             )
 
         self.last_step_timestamp_ns = timestamp_ns
@@ -182,8 +228,15 @@ class GenericPCSModel:
             )
             self._trigger_fault("DC_UNDER_VOLTAGE_FAULT", msg, timestamp_ns)
 
-        # 2. Thermal Derating Interface
+        # 2. Thermal Derating & AC Current Limiting
         s_max_effective = self.config.rated_apparent_power_va
+
+        # AC current limit: S_current_limit = sqrt(3) * V_ac * I_ac_max
+        s_current_limit = (
+            math.sqrt(3.0) * max(1.0, ac_grid_voltage_v) * self.config.max_ac_current_a
+        )
+        s_max_effective = min(s_max_effective, s_current_limit)
+
         if self.igbt_temp_c >= self.config.over_temp_fault_c:
             msg = (
                 f"IGBT temp ({self.igbt_temp_c:.1f} C) exceeded "
@@ -215,14 +268,14 @@ class GenericPCSModel:
             self.measured_q_var = 0.0
             return
 
-        # 3. Evaluate Apparent Power Circle & Accept Setpoints
+        # 3. Evaluate Apparent Power Circle
         p_acc, q_acc = self.evaluate_pq_capability_circle(
-            self.requested_p_w, self.requested_q_var, s_max_effective
+            self.requested_p_w, self.requested_q_var, s_max_effective, self.priority_mode
         )
         self.accepted_p_w = p_acc
         self.accepted_q_var = q_acc
 
-        # 4. Enforce Ramp Rate Limit on Active Power P
+        # 4. Enforce Ramp Rate Limit on Active Power P and Reactive Power Q
         max_delta_p = self.config.ramp_rate_limit_w_per_s * delta_t_s
         p_delta = self.accepted_p_w - self.actual_p_w
 
@@ -231,21 +284,27 @@ class GenericPCSModel:
         else:
             p_actual_next = self.accepted_p_w
 
-        if p_actual_next > 0.0:
-            self.actual_p_w = p_actual_next * self.config.efficiency
+        max_delta_q = self.config.ramp_rate_limit_var_per_s * delta_t_s
+        q_delta = self.accepted_q_var - self.actual_q_var
+
+        if abs(q_delta) > max_delta_q:
+            self.actual_q_var += math.copysign(max_delta_q, q_delta)
+        else:
+            self.actual_q_var = self.accepted_q_var
+
+        self.actual_p_w = p_actual_next
+
+        if p_actual_next > 0.0:  # Discharging
             p_losses = p_actual_next * (1.0 - self.config.efficiency)
-        elif p_actual_next < 0.0:
-            self.actual_p_w = p_actual_next / self.config.efficiency
+        elif p_actual_next < 0.0:  # Charging
             p_losses = abs(p_actual_next) * (1.0 - self.config.efficiency)
         else:
-            self.actual_p_w = 0.0
             p_losses = 0.0
 
-        self.actual_q_var = self.accepted_q_var
         self.measured_p_w = self.actual_p_w
         self.measured_q_var = self.actual_q_var
 
-        # 6. IGBT Heatsink Thermal Model Update
+        # 5. IGBT Thermal Model Update
         heat_joules = p_losses * delta_t_s
         temp_rise = heat_joules / self.config.thermal_mass_j_per_c
         cooling = (self.igbt_temp_c - 25.0) * (0.02 * delta_t_s)
@@ -263,6 +322,7 @@ class GenericPCSModel:
             "measured_p_w": self.measured_p_w,
             "measured_q_var": self.measured_q_var,
             "igbt_temp_c": self.igbt_temp_c,
+            "priority_mode": self.priority_mode,
             "operating_state": self.operating_state.value,
             "is_available": self.is_available,
         }
@@ -278,6 +338,7 @@ class GenericPCSModel:
         self.measured_p_w = float(state.get("measured_p_w", 0.0))
         self.measured_q_var = float(state.get("measured_q_var", 0.0))
         self.igbt_temp_c = float(state.get("igbt_temp_c", 25.0))
+        self.priority_mode = str(state.get("priority_mode", "ACTIVE_POWER_PRIORITY"))
         if "operating_state" in state:
             self.operating_state = OperatingState(state["operating_state"])
         self.is_available = bool(state.get("is_available", True))
@@ -293,12 +354,13 @@ class GenericPCSModel:
         self.measured_p_w = 0.0
         self.measured_q_var = 0.0
         self.igbt_temp_c = 25.0
+        self.priority_mode = "ACTIVE_POWER_PRIORITY"
         self.operating_state = OperatingState.STANDBY
         self.is_available = True
         self.active_alarms.clear()
 
     def _trigger_fault(self, code: str, description: str, timestamp_ns: int) -> None:
-        """Helper to trip PCS into fault state."""
+        """Helper to trip PCS into fault state with alarm deduplication."""
         self.operating_state = OperatingState.FAULTED
         self.is_available = False
         self.accepted_p_w = 0.0
@@ -306,14 +368,15 @@ class GenericPCSModel:
         self.actual_p_w = 0.0
         self.actual_q_var = 0.0
 
-        alarm = AlarmRecord(
-            code=code,
-            severity=AlarmSeverity.CRITICAL,
-            description=description,
-            timestamp_ns=timestamp_ns,
-            source_id=self.equipment_id,
-        )
-        self.active_alarms.append(alarm)
+        if not any(a.code == code and not a.cleared for a in self.active_alarms):
+            alarm = AlarmRecord(
+                code=code,
+                severity=AlarmSeverity.CRITICAL,
+                description=description,
+                timestamp_ns=timestamp_ns,
+                source_id=self.equipment_id,
+            )
+            self.active_alarms.append(alarm)
 
     def clear_faults(self) -> None:
         """Clear active PCS faults."""
