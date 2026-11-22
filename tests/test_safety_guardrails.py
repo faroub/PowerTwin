@@ -139,3 +139,35 @@ def test_validate_safety_invariants_rejects_nonloopback_modbus_host(
 
     assert "INVARIANT VIOLATION" in str(exc_info.value)
     assert "non-loopback host interface" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_production_server_host_must_be_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify production refuses a server binding on every available interface."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", "a" * JWT_SECRET_MIN_BYTES)
+    monkeypatch.setattr(
+        settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES
+    )
+    monkeypatch.setattr(settings, "HOST", "0.0.0.0")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_safety_invariants()
+
+    assert "SECURITY VIOLATION" in str(exc_info.value)
+    assert "loopback" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_dev_mode_allows_all_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify non-production environments are unaffected by the host binding rule."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
+    monkeypatch.setattr(settings, "HOST", "0.0.0.0")
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT", 5)
+    monkeypatch.setattr(settings, "LOGIN_LOCKOUT_SECONDS", 60)
+
+    validate_safety_invariants()

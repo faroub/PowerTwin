@@ -28,7 +28,7 @@ PowerTwin is packaged and deployed as a multi-container microservice application
 
 To enforce Safety Rule **SR-003** and **SR-012**:
 1. **Internal Container Network**: `timescaledb` and `redis` services bind exclusively to an isolated internal Docker bridge network (`powertwin_internal`) with zero exposed host ports.
-2. **Local Interface Binding**: In development and simulation-only modes, the backend binds API and WebSocket listeners strictly to `127.0.0.1` or the container internal gateway.
+2. **Local Interface Binding**: In development and simulation-only modes, the backend binds API and WebSocket listeners strictly to `127.0.0.1` or the container internal gateway. Production deployments bind to `127.0.0.1` or an explicit documented trusted host; `0.0.0.0` (all interfaces) is rejected at startup by the safety invariants.
 3. **Hardware Network Separation**: Physical network interfaces connected to field networks (if ever authorized in future phases) must reside on isolated physical NICs completely segregated from the application management network.
 
 ---

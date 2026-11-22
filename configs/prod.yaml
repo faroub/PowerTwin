@@ -14,7 +14,7 @@ safety:
   automatic_device_discovery_enabled: false
 
 server:
-  host: "0.0.0.0"
+  host: "127.0.0.1"
 
 database:
   server: "${POSTGRES_SERVER}"

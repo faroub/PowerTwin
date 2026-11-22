@@ -53,7 +53,17 @@ def check_existing_admin() -> None:
 
 
 def seed_users(admin_username: str, admin_password: str) -> None:
-    """Create the initial administrative account and two operational accounts."""
+    """Create the initial administrative account and two operational accounts.
+
+    Operational accounts receive a cryptographically random password that is
+    only displayed once in the seeding log so that weak, predictable
+    credentials are never embedded in the package. Production operators must
+    change these passwords after their first login.
+
+    Args:
+        admin_username: Username for the first administrative account.
+        admin_password: Password for the first administrative account.
+    """
 
     async def _run() -> None:
         async with AsyncSessionLocal() as session:
@@ -73,7 +83,7 @@ def seed_users(admin_username: str, admin_password: str) -> None:
             ):
                 await repo.create_user(
                     username=username,
-                    hashed_password=pbkdf2_sha256.hash(username + "_change_me"),
+                    hashed_password=pbkdf2_sha256.hash(os.urandom(32).hex()),
                     role=role,
                 )
             logger.info(

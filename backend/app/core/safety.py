@@ -91,6 +91,27 @@ def _validate_database_password() -> None:
         raise RuntimeError(msg)
 
 
+def _validate_server_binding() -> None:
+    """Reject a non-loopback server binding in production deployments.
+
+    A writable interface exposed to untrusted networks is a safety violation;
+    production deployments must keep the API bound to the loopback interface
+    unless an explicit, documented external binding is required.
+    """
+    if settings.ENVIRONMENT not in ("production",):
+        return
+
+    loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+    if settings.HOST not in loopback_hosts:
+        msg = (
+            f"SECURITY VIOLATION: The production server host '{settings.HOST}' "
+            "must be bound to a loopback interface; a non-loopback host exposes "
+            "writable control interfaces to untrusted networks."
+        )
+        logger.critical(msg)
+        raise RuntimeError(msg)
+
+
 def _validate_login_limits() -> None:
     """Reject unreasonable authentication rate-limit settings."""
     if settings.LOGIN_RATE_LIMIT > 0 and settings.LOGIN_LOCKOUT_SECONDS > 0:
@@ -127,7 +148,11 @@ def validate_safety_invariants() -> None:
             logger.critical(msg)
             raise RuntimeError(msg)
 
-    # 3. Authentication and Secret Invariant Validation
+    # 3. Production server binding must remain loopback unless explicitly
+    #    documented and configured otherwise.
+    _validate_server_binding()
+
+    # 4. Authentication and Secret Invariant Validation
     _validate_token_secret()
     _validate_database_password()
     _validate_login_limits()

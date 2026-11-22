@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # General Project Information
     PROJECT_NAME: str = "PowerTwin BESS Simulator"
     ENVIRONMENT: Literal["development", "production", "testing"] = "development"
-    DEBUG: bool = True
+    DEBUG: bool = False
     API_V1_STR: str = "/api/v1"
 
     @staticmethod
@@ -76,7 +76,10 @@ class Settings(BaseSettings):
     )
 
     # Server Configuration
-    HOST: str = "0.0.0.0"
+    # The default is the loopback interface so that a deployment that does not
+    # explicitly opt into a trusted external network never binds a writable
+    # control interface to all available interfaces.
+    HOST: str = "127.0.0.1"
     PORT: int = 8000
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
