@@ -3,8 +3,9 @@
 import datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from backend.app.core.rbac import Permission, require_permission
 from backend.app.core.safety import get_safety_report
 from backend.app.simulation.engine_stub import engine_stub
 
@@ -12,7 +13,9 @@ router = APIRouter(tags=["Plant Overview"])
 
 
 @router.get("/overview")
-async def get_plant_overview() -> dict[str, Any]:
+async def get_plant_overview(
+    _user: Any = Depends(require_permission(Permission.READ_TELEMETRY)),
+) -> dict[str, Any]:
     """Return real-time Plant Overview SCADA metrics."""
     now_wall = datetime.datetime.now(datetime.UTC).strftime("%H:%M:%S UTC")
     return {

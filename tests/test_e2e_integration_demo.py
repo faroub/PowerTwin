@@ -88,13 +88,21 @@ def test_20_step_e2e_demonstration_workflow() -> None:
     historian.record_telemetry("POI.P", "POI_01", acc_p, "W", 10_000_000)
     assert historian.get_buffer_status()["telemetry_buffer_size"] == 1
 
-    # Step 14: Verify HMI display endpoints
+    # Step 14: Verify HMI display endpoints with authenticated session token
     from fastapi.testclient import TestClient
 
     from backend.app.main import app
 
     client = TestClient(app)
-    hmi_res = client.get("/api/v1/overview")
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "observer", "password": "observer123"}
+    )
+    assert login_res.status_code == 200
+    token = login_res.json()["access_token"]
+
+    hmi_res = client.get(
+        "/api/v1/overview", headers={"Authorization": f"Bearer {token}"}
+    )
     assert hmi_res.status_code == 200
 
     # Step 15: Inject a battery-container fault (Container 01 unavailable)

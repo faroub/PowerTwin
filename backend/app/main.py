@@ -9,13 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.api import health, router
 from backend.app.core.config import settings
 from backend.app.core.logging import setup_logging
-from backend.app.core.safety import get_safety_report
+from backend.app.core.safety import get_safety_report, validate_safety_invariants
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Lifespan context manager for startup and shutdown events."""
     setup_logging(log_level=settings.LOG_LEVEL, json_logs=settings.JSON_LOGS)
+    validate_safety_invariants()
     safety_report = get_safety_report()
     print("===========================================================")
     print(f"  STARTING {settings.PROJECT_NAME}")
@@ -38,13 +39,13 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Configure CORS
+    # Configure Restrictive CORS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
     # Include Routers

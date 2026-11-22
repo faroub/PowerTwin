@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     API_V1_STR: str = "/api/v1"
 
+    # Authentication & Security
+    JWT_SECRET_KEY: str = Field(
+        default="default_powertwin_dev_secret_key_change_in_production",
+        description="Secret key for JWT signing. MUST be overridden in production.",
+    )
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+
     # Server Configuration
     HOST: str = "0.0.0.0"
     PORT: int = 8000
