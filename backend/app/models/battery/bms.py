@@ -1,10 +1,16 @@
 """Generic Master BMS Controller Model.
 
+SIMULATION MODEL DISCLAIMER:
+  This software BMS controller model simulates protection threshold logic for software
+  testing and Controller-in-the-Loop integration.
+  It is NOT certified hardware or a replacement for physical BMS protection equipment.
+
 Monitors battery measurements, enforces voltage/current/thermal limits,
 calculates dynamic charge/discharge power limits (CPL/DPL), and manages contactor permissives.
 """
 
 import logging
+import math
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -84,7 +90,11 @@ class GenericBMSModel:
                 self.clear_faults()
 
             if parsed.close_contactors is True:
-                if not self.interlock_ok or self.operating_state == OperatingState.FAULTED:
+                if (
+                    not self.interlock_ok
+                    or self.operating_state == OperatingState.FAULTED
+                    or not self.is_available
+                ):
                     logger.warning("BMS rejected contactor close command: interlock/fault active.")
                     return False
                 self.contactors_closed = True
@@ -114,8 +124,21 @@ class GenericBMSModel:
         soc_pct: float,
         temp_c: float,
         timestamp_ns: int = 0,
+        quality: str = "GOOD",
     ) -> None:
         """Evaluate battery sensor measurements against protection thresholds and compute limits."""
+        if (
+            quality != "GOOD"
+            or math.isnan(voltage_v)
+            or math.isnan(current_a)
+            or math.isnan(soc_pct)
+            or math.isnan(temp_c)
+        ):
+            logger.warning(
+                "BMS evaluation received bad quality or non-finite inputs: quality=%s", quality
+            )
+            return
+
         self.last_step_timestamp_ns = timestamp_ns
         self.active_warnings.clear()
 
@@ -185,29 +208,48 @@ class GenericBMSModel:
         self.dpl_w = self.dcl_a * voltage_v
 
     def _trigger_fault(self, code: str, description: str, timestamp_ns: int) -> None:
-        """Helper to trip BMS into fault state."""
+        """Helper to trip BMS into fault state with alarm deduplication."""
         self.operating_state = OperatingState.FAULTED
         self.contactors_closed = False
         self.is_available = False
         self.ccl_a = 0.0
         self.dcl_a = 0.0
 
-        alarm = AlarmRecord(
-            code=code,
-            severity=AlarmSeverity.CRITICAL,
-            description=description,
-            timestamp_ns=timestamp_ns,
-            source_id=self.equipment_id,
-        )
-        self.active_alarms.append(alarm)
+        if not any(a.code == code and not a.cleared for a in self.active_alarms):
+            alarm = AlarmRecord(
+                code=code,
+                severity=AlarmSeverity.CRITICAL,
+                description=description,
+                timestamp_ns=timestamp_ns,
+                source_id=self.equipment_id,
+            )
+            self.active_alarms.append(alarm)
 
-    def clear_faults(self) -> None:
-        """Clear active BMS faults."""
+    def clear_faults(self, current_temp_c: float = 25.0, current_voltage_v: float = 1000.0) -> bool:
+        """Clear active BMS faults if triggering fault condition is no longer active.
+
+        Returns:
+            True if faults cleared successfully, False if fault condition remains active.
+        """
+        if (
+            current_temp_c >= self.limits.over_temp_fault_c
+            or current_temp_c <= self.limits.under_temp_fault_c
+        ):
+            logger.warning("BMS clear_faults rejected: temperature fault condition still active.")
+            return False
+
+        if current_voltage_v >= self.limits.over_voltage_fault_v or (
+            current_voltage_v <= self.limits.under_voltage_fault_v and current_voltage_v > 0.0
+        ):
+            logger.warning("BMS clear_faults rejected: voltage fault condition still active.")
+            return False
+
         for a in self.active_alarms:
             a.cleared = True
         self.operating_state = OperatingState.STANDBY
         self.is_available = True
         self.interlock_ok = True
+        return True
 
     def get_state(self) -> UniversalEquipmentState:
         """Return universal equipment state for Master BMS."""

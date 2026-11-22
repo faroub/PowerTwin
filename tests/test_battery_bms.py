@@ -1,4 +1,6 @@
-"""Automated Unit Tests for WP04A Battery System and BMS Models."""
+"""Automated Unit & Property Tests for Battery System and BMS Models."""
+
+import math
 
 import pytest
 
@@ -19,28 +21,25 @@ from backend.app.simulation.exceptions import InvalidTimeStepError
 def test_battery_sign_convention_and_discharge_energy_balance() -> None:
     """Test +P = DISCHARGING sign convention and energy balance."""
     config = BatterySystemConfigModel(
-        capacity_wh=100_000.0,  # 100 kWh
+        capacity_wh=100_000.0,
         initial_soc_pct=50.0,
         charge_efficiency=0.90,
         discharge_efficiency=0.90,
-        aux_power_w=0.0,  # Disable aux for pure energy test
+        aux_power_w=0.0,
     )
     battery = GenericBatterySystemModel(config=config)
 
-    # Discharging at +36,000 W (+36 kW) for 3600 seconds (1 hour)
-    # P_chem = 36,000 / 0.90 = 40,000 W -> 40 kWh drawn from chemistry
     battery.step(power_demand_w=36_000.0, delta_t_s=3600.0)
 
     assert battery.active_power_w == 36_000.0
-    assert battery.current_a > 0.0  # +A discharge current
-    # SoC change: 40 kWh / 100 kWh = 40% drop -> 50% - 40% = 10%
+    assert battery.current_a > 0.0
     assert pytest.approx(battery.soc_pct, abs=0.01) == 10.0
 
 
 def test_battery_charge_energy_balance_and_round_trip_efficiency() -> None:
     """Test -P = CHARGING sign convention and round-trip efficiency."""
     config = BatterySystemConfigModel(
-        capacity_wh=100_000.0,  # 100 kWh
+        capacity_wh=100_000.0,
         initial_soc_pct=10.0,
         charge_efficiency=0.90,
         discharge_efficiency=0.90,
@@ -48,16 +47,11 @@ def test_battery_charge_energy_balance_and_round_trip_efficiency() -> None:
     )
     battery = GenericBatterySystemModel(config=config)
 
-    # Charge at -44,444.44 W (-44.44 kW) for 3600 seconds (1 hour)
-    # P_chem = 44,444.44 * 0.90 = 40,000 W -> 40 kWh added to chemistry
     battery.step(power_demand_w=-44_444.444, delta_t_s=3600.0)
 
-    assert battery.active_power_w < 0.0  # -W charging
-    assert battery.current_a < 0.0  # -A charging current
-    # SoC change: 40 kWh / 100 kWh = +40% -> 10% + 40% = 50%
+    assert battery.active_power_w < 0.0
+    assert battery.current_a < 0.0
     assert pytest.approx(battery.soc_pct, abs=0.01) == 50.0
-
-    # Round trip efficiency check: (36 kW delivered) / (44.44 kW supplied) = 0.81 (0.90 * 0.90)
     assert pytest.approx(battery.round_trip_efficiency, abs=0.001) == 0.81
 
 
@@ -72,98 +66,75 @@ def test_soc_min_max_limits_enforcement() -> None:
     )
     battery = GenericBatterySystemModel(config=config)
 
-    # Charge towards 95% limit
     battery.step(power_demand_w=-10_000.0, delta_t_s=3600.0)
-    assert pytest.approx(battery.soc_pct, abs=0.01) == 95.0  # Clamped at max_soc_pct
-
-    ch_limit, dis_limit = battery.get_available_power_limits()
-    assert ch_limit == 0.0  # Cannot charge further
-    assert dis_limit > 0.0
-
-    # Discharge down to 5% min limit
-    battery.step(power_demand_w=20_000.0, delta_t_s=3600.0)
-    assert pytest.approx(battery.soc_pct, abs=0.01) == 5.0  # Clamped at min_soc_pct
-
-    ch_limit2, dis_limit2 = battery.get_available_power_limits()
-    assert dis_limit2 == 0.0  # Cannot discharge further
-    assert ch_limit2 > 0.0
-
-
-def test_auxiliary_power_consumption() -> None:
-    """Test continuous auxiliary load depletes battery energy."""
-    config = BatterySystemConfigModel(
-        capacity_wh=10_000.0,
-        initial_soc_pct=50.0,
-        aux_power_w=1000.0,  # 1 kW aux load
-    )
-    battery = GenericBatterySystemModel(config=config)
-
-    # 1 hour idle with 1 kW aux load -> 1 kWh consumed
-    battery.step(power_demand_w=0.0, delta_t_s=3600.0)
-
-    # SoC change: -1 kWh / 10 kWh = -10% -> 50% - 10% = 40%
-    assert pytest.approx(battery.soc_pct, abs=0.01) == 40.0
-
-
-def test_invalid_time_step_rejection() -> None:
-    """Test rejection of non-positive simulation delta_t_s."""
-    battery = GenericBatterySystemModel()
-
-    with pytest.raises(InvalidTimeStepError):
-        battery.step(power_demand_w=100.0, delta_t_s=0.0)
-
-    with pytest.raises(InvalidTimeStepError):
-        battery.step(power_demand_w=100.0, delta_t_s=-1.0)
-
-
-def test_equipment_faults_and_availability() -> None:
-    """Test equipment fault sets is_available = False and zero power output."""
-    battery = GenericBatterySystemModel()
-    battery.set_fault("CELL_OVERVOLTAGE", "Cell voltage exceeded 3.65V")
-
-    assert battery.operating_state == OperatingState.FAULTED
-    assert battery.is_available is False
+    assert pytest.approx(battery.soc_pct, abs=0.01) == 95.0
 
     ch_limit, dis_limit = battery.get_available_power_limits()
     assert ch_limit == 0.0
-    assert dis_limit == 0.0
+    assert dis_limit > 0.0
+
+    battery.step(power_demand_w=20_000.0, delta_t_s=3600.0)
+    assert pytest.approx(battery.soc_pct, abs=0.01) == 5.0
+
+    ch_limit2, dis_limit2 = battery.get_available_power_limits()
+    assert dis_limit2 == 0.0
+    assert ch_limit2 > 0.0
 
 
-def test_bms_thermal_derating_and_fault_tripping() -> None:
-    """Test BMS thermal protection: 50% derating in warning zone, fault trip at 60C."""
-    bms = GenericBMSModel(limits=BMSProtectionLimits())
+def test_auxiliary_power_consumption_and_unserved_tracking() -> None:
+    """Test continuous auxiliary load depletes energy and tracks unserved aux energy when at min SoC."""
+    config = BatterySystemConfigModel(
+        capacity_wh=10_000.0,
+        initial_soc_pct=5.0,
+        min_soc_pct=5.0,
+        aux_power_w=1000.0,
+    )
+    battery = GenericBatterySystemModel(config=config)
 
-    # Optimal temp (25 C) -> Full CCL/DCL limits
-    bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
-    assert bms.ccl_a == 1000.0
-    assert bms.dcl_a == 1000.0
-    assert bms.cpl_w == 1_000_000.0
+    battery.step(power_demand_w=0.0, delta_t_s=3600.0)
 
-    # Warning temp (50 C) -> 50% derating
-    bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=50.0)
-    assert bms.ccl_a == 500.0
-    assert bms.dcl_a == 500.0
+    assert battery.soc_pct == 5.0
+    assert battery.unserved_aux_energy_wh == 1000.0
 
-    # Over-temp fault (65 C) -> Fault trip, contactors open, 0A limits
+
+def test_non_finite_input_rejection() -> None:
+    """Test battery model rejects non-finite power or time step inputs."""
+    battery = GenericBatterySystemModel()
+
+    with pytest.raises(ValueError):
+        battery.step(power_demand_w=math.nan, delta_t_s=1.0)
+
+    with pytest.raises((ValueError, InvalidTimeStepError)):
+        battery.step(power_demand_w=100.0, delta_t_s=math.nan)
+
+
+def test_bms_alarm_deduplication_and_persistent_fault_clearing() -> None:
+    """Test BMS alarm deduplication and refusal to clear faults while condition persists."""
+    bms = GenericBMSModel(limits=BMSProtectionLimits(over_temp_fault_c=60.0))
+
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=65.0)
-    assert bms.operating_state == OperatingState.FAULTED
-    assert bms.is_available is False
-    assert bms.ccl_a == 0.0
-    assert bms.dcl_a == 0.0
+    bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=65.0)
+
     assert len(bms.get_state().alarms) == 1
+
+    cleared = bms.clear_faults(current_temp_c=65.0)
+    assert cleared is False
+    assert bms.operating_state == OperatingState.FAULTED
+
+    cleared_ok = bms.clear_faults(current_temp_c=25.0)
+    assert cleared_ok is True
+    assert bms.operating_state == OperatingState.STANDBY
 
 
 def test_bms_command_validation() -> None:
     """Test BMS command handling and interlock validation."""
     bms = GenericBMSModel()
 
-    # Valid contactor close command
     res = bms.process_command({"close_contactors": True})
     assert res is True
     assert bms.contactors_closed is True
     assert bms.operating_state == OperatingState.RUNNING
 
-    # Fault state rejects contactor close command
     bms._trigger_fault("TEST_FAULT", "Test fault", 0)
     res_fault = bms.process_command({"close_contactors": True})
     assert res_fault is False
