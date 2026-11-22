@@ -26,12 +26,12 @@ jobs:
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@e889a00d464def02050e493c70ab76ed4d38edd5 # v3.24.0
+        uses: github/codeql-action/init@e8893c57a1f3a2b659b6b55564fdfdbbd2982911 # v3.24.0
         with:
           languages: python, javascript
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@e889a00d464def02050e493c70ab76ed4d38edd5 # v3.24.0
+        uses: github/codeql-action/analyze@e8893c57a1f3a2b659b6b55564fdfdbbd2982911 # v3.24.0
 
   dependency-audit:
     name: Python & npm Dependency Security Audit
@@ -55,7 +55,7 @@ jobs:
           pip-audit -r backend/requirements.txt
 
       - name: Set up Node.js 20
-        uses: actions/setup-node@60ed15d54559a7563d1b76e4a691c47f77364461 # v4.0.2
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
         with:
           node-version: "20"
           cache: "npm"
@@ -78,7 +78,7 @@ jobs:
           fetch-depth: 0
 
       - name: Secret Scan (TruffleHog)
-        uses: trufflesecurity/trufflehog-action@37e20e8b15d03a1fc6c52a0a3a7894bc26802611 # v3.63.1
+        uses: trufflesecurity/trufflehog@d69de658b262d67abe200d6eff9100934bc8f7a4 # v3.63.1
         with:
           extra_args: --only-verified
 
@@ -97,7 +97,7 @@ jobs:
           docker build -t powertwin-backend:scan -f deployment/Dockerfile.backend .
 
       - name: Scan Backend Image with Trivy
-        uses: aquasecurity/trivy-action@d43c1f167000153121040db42c1611a3db61a6b0 # v0.20.0
+        uses: aquasecurity/trivy-action@b2933f565dbc598b29947660e66259e3c7bc8561 # v0.20.0
         with:
           image-ref: "powertwin-backend:scan"
           format: "table"
