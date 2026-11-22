@@ -13,7 +13,6 @@ on:
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
   release-build:
@@ -57,13 +56,11 @@ jobs:
         run: |
           cd frontend && npm run build
 
-      - name: Generate Software Bill of Materials (SBOM)
+      - name: Generate Software Bill of Materials (SBOM) & Checksums
         run: |
           mkdir -p release_artifacts
-          echo '{"name": "PowerTwin", "version": "${{ github.ref_name }}", "components": ["fastapi", "react", "sqlalchemy", "timescaledb"]}' > release_artifacts/sbom.json
+          echo '{"spdxVersion": "SPDX-2.3", "dataLicense": "CC0-1.0", "name": "PowerTwin", "version": "${{ github.ref_name }}", "packages": [{"name": "fastapi", "version": "0.110.0"}, {"name": "react", "version": "18.2.0"}, {"name": "sqlalchemy", "version": "2.0.28"}]}' > release_artifacts/sbom.spdx.json
 
-      - name: Package Release Bundle (Tarball)
-        run: |
           tar -czf release_artifacts/powertwin-release-${{ github.ref_name }}.tar.gz \
             configs/ \
             deployment/ \
@@ -72,7 +69,10 @@ jobs:
             docker-compose.yml \
             AGENTS.md
 
-      - name: Build & Scan Docker Images
+          cd release_artifacts
+          sha256sum * > SHA256SUMS
+
+      - name: Build & Scan Docker Release Images
         run: |
           docker build -t powertwin-backend:${{ github.ref_name }} -f deployment/Dockerfile.backend .
           docker build -t powertwin-frontend:${{ github.ref_name }} -f deployment/Dockerfile.frontend .

@@ -2,6 +2,7 @@
 .gitignore
 .dockerignore
 .idea
+.artifacts
 .mypy_cache
 .pytest_cache
 .ruff_cache
@@ -12,3 +13,5 @@
 **/*.pyo
 **/*.pyd
 **/.env
+backend/app/historian/overflow/*.json
+release_artifacts/

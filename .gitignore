@@ -103,5 +103,7 @@ yarn-error.log*
 *.sqlite3
 postgres_data/
 
-# IDE Artifacts
+# IDE Artifacts & Overflow Data
 .artifacts/
+backend/app/historian/overflow/*.json
+release_artifacts/
