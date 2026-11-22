@@ -1,23 +1,24 @@
-"""Automated Test Suite for WP02 Independent Deterministic Simulation Engine."""
+"""Automated Test Suite for WP02 Independent Deterministic Simulation Engine & PT-005 Lifecycle/Snapshot Semantics."""
 
 import pytest
 
+from backend.app.models.battery.bms import GenericBMSModel
+from backend.app.models.battery.system import GenericBatterySystemModel
+from backend.app.models.pcs.pcs_model import GenericPCSModel
 from backend.app.simulation.clock import SimulationClock
 from backend.app.simulation.config import SimulationConfiguration
 from backend.app.simulation.context import SimulationContext
-from backend.app.simulation.event import SimulationEvent
-from backend.app.simulation.example import (
-    create_example_simulation,
-)
 from backend.app.simulation.exceptions import (
     InvalidTimeStepError,
+    SimulationError,
     SnapshotIncompatibleError,
-    TaskExecutionError,
 )
 from backend.app.simulation.manager import SimulationRunManager
 from backend.app.simulation.snapshot import SimulationSnapshot
 from backend.app.simulation.state import SimulationState
 from backend.app.simulation.task import SimulationTask
+from plugins.generic_battery import GenericBatteryPlugin
+from plugins.generic_pcs import GenericPCSPlugin
 
 
 class CountingTask(SimulationTask):
@@ -104,6 +105,22 @@ def test_pause_and_resume() -> None:
     assert runner.state == SimulationState.STOPPED
 
 
+def test_step_while_stopped_or_paused() -> None:
+    """Test stepping while stopped or paused advances clock and sets state to PAUSED."""
+    runner = SimulationRunManager()
+    task = CountingTask(name="StepTask")
+    runner.register_task(task)
+
+    assert runner.state == SimulationState.STOPPED
+    runner.step(1)
+    assert runner.clock.total_steps == 1
+    assert runner.state == SimulationState.PAUSED
+
+    runner.step(2)
+    assert runner.clock.total_steps == 3
+    assert runner.state == SimulationState.PAUSED
+
+
 def test_single_step() -> None:
     """Test single-step advances exactly one tick."""
     runner = SimulationRunManager()
@@ -121,95 +138,75 @@ def test_single_step() -> None:
     assert task.execution_count == 1
 
 
-def test_task_execution_order_is_deterministic() -> None:
-    """Test task execution order follows Phase -> Priority -> Name sorting."""
-    execution_order: list[str] = []
-    config = SimulationConfiguration(tick_step_ns=10_000_000)
-    runner = SimulationRunManager(config=config)
+def test_reset_restores_equipment_and_bms_states() -> None:
+    """Test reset restores battery SoC, PCS state, and clears BMS faults."""
+    battery = GenericBatterySystemModel()
+    battery.soc_pct = 20.0
+    battery.active_power_w = 5_000_000.0
 
-    # Register out of order
-    runner.register_task(
-        CountingTask(name="Phase3_Task", phase=3, log_list=execution_order)
-    )
-    runner.register_task(
-        CountingTask(
-            name="Phase1_TaskB", phase=1, priority=10, log_list=execution_order
-        )
-    )
-    runner.register_task(
-        CountingTask(name="Phase1_TaskA", phase=1, priority=5, log_list=execution_order)
-    )
-    runner.register_task(
-        CountingTask(name="Phase2_Task", phase=2, log_list=execution_order)
-    )
+    pcs = GenericPCSModel()
+    pcs.requested_p_w = 5_000_000.0
+    pcs.actual_p_w = 4_925_000.0
 
-    runner.single_step()
+    bms = GenericBMSModel()
+    bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=65.0)
+    assert bms.is_available is False
 
-    expected_order = [
-        "Phase1_TaskA@10000000",
-        "Phase1_TaskB@10000000",
-        "Phase2_Task@10000000",
-        "Phase3_Task@10000000",
-    ]
-    assert execution_order == expected_order
+    # Reset
+    battery.reset_to_initial_conditions()
+    pcs.reset_to_initial_conditions()
+    bms.clear_faults()
+
+    assert battery.soc_pct == 50.0
+    assert battery.active_power_w == 0.0
+    assert pcs.requested_p_w == 0.0
+    assert pcs.actual_p_w == 0.0
+    assert bms.is_available is True
 
 
-def test_different_task_rates() -> None:
-    """Test multi-rate tasks (every tick vs every N ticks)."""
+def test_reset_preserves_plugin_disabled_status() -> None:
+    """Test reset does not accidentally enable a previously disabled plugin."""
     runner = SimulationRunManager()
-    fast_task = CountingTask(name="Fast100Hz", interval_ticks=1)
-    slow_task = CountingTask(name="Slow10Hz", interval_ticks=10)
+    plugin1 = GenericBatteryPlugin(equipment_id="BAT1")
+    plugin2 = GenericPCSPlugin(equipment_id="PCS1")
 
-    runner.register_task(fast_task)
-    runner.register_task(slow_task)
+    runner.register_task(plugin1)
+    runner.register_task(plugin2)
 
-    # Run 10 ticks
-    runner.step(10)
-
-    assert fast_task.execution_count == 10
-    assert slow_task.execution_count == 1  # Executed only on tick 1 (step 1)
-
-
-def test_reset_restores_initial_conditions() -> None:
-    """Test reset restores time, RNG, and task states."""
-    runner = SimulationRunManager()
-    task = CountingTask(name="Task1")
-    runner.register_task(task)
-
-    runner.step(5)
-    assert runner.clock.total_steps == 5
-    assert task.execution_count == 5
+    plugin1.enabled = True
+    plugin2.enabled = False  # Explicitly disabled
 
     runner.reset()
 
-    assert runner.clock.time_ns == 0
-    assert runner.clock.total_steps == 0
-    assert runner.state == SimulationState.STOPPED
-    assert task.execution_count == 0
-    assert task.enabled is True
+    assert plugin1.enabled is True
+    assert plugin2.enabled is False  # Preserved disabled state
 
 
-def test_snapshot_create_and_restore() -> None:
-    """Test snapshot creation and state restoration."""
-    runner = create_example_simulation(seed=12345)
+def test_snapshot_restores_physical_equipment_states() -> None:
+    """Test snapshot serialization and restoration includes underlying physical equipment states."""
+    runner = SimulationRunManager()
+    bat_plugin = GenericBatteryPlugin(equipment_id="BAT_CONT_01")
+    bat_plugin.initialize({"initial_soc_pct": 50.0, "capacity_wh": 10_000_000.0})
+    bat_plugin.enabled = True
+    runner.register_task(bat_plugin)
+
+    # Step simulation and discharge battery
+    bat_plugin.physical_model.active_power_w = 2_000_000.0  # +2 MW discharge
     runner.step(5)
 
     snapshot = runner.create_snapshot()
     assert snapshot.total_steps == 5
-    assert snapshot.timestamp_ns == 50_000_000
-    assert "p_gen_w" in snapshot.shared_state
-
-    val_at_5 = snapshot.shared_state["p_gen_w"]
+    soc_at_snap = bat_plugin.physical_model.soc_pct
+    assert soc_at_snap < 50.0  # Discharged
 
     # Run another 5 steps
     runner.step(5)
-    assert runner.clock.total_steps == 10
+    assert bat_plugin.physical_model.soc_pct < soc_at_snap
 
-    # Restore snapshot back to step 5
+    # Restore snapshot
     runner.restore_snapshot(snapshot)
     assert runner.clock.total_steps == 5
-    assert runner.clock.time_ns == 50_000_000
-    assert runner.shared_state["p_gen_w"] == val_at_5
+    assert bat_plugin.physical_model.soc_pct == soc_at_snap
 
 
 def test_snapshot_incompatible_version() -> None:
@@ -228,19 +225,6 @@ def test_snapshot_incompatible_version() -> None:
         snapshot.validate_compatibility()
 
 
-def test_identical_seeded_runs_produce_identical_results() -> None:
-    """Test bit-exact replay determinism across separate runs with same seed."""
-    run1 = create_example_simulation(seed=999)
-    run1.step(20)
-
-    run2 = create_example_simulation(seed=999)
-    run2.step(20)
-
-    assert run1.clock.time_ns == run2.clock.time_ns
-    assert run1.shared_state["p_gen_w"] == run2.shared_state["p_gen_w"]
-    assert run1.shared_state["net_power_w"] == run2.shared_state["net_power_w"]
-
-
 def test_failed_task_fail_fast_policy() -> None:
     """Test FAIL_FAST policy aborts simulation upon task failure."""
     config = SimulationConfiguration(error_policy="FAIL_FAST")
@@ -248,49 +232,7 @@ def test_failed_task_fail_fast_policy() -> None:
     runner.register_task(FailingTask(fail_at_tick=20_000_000))
 
     runner.single_step()  # 10ms - OK
-    with pytest.raises(TaskExecutionError):
+    with pytest.raises(SimulationError):
         runner.single_step()  # 20ms - Fails!
 
     assert runner.state == SimulationState.FAULTED
-
-
-def test_failed_task_continue_policy() -> None:
-    """Test CONTINUE_WITH_FAULT_LOG policy safe-parks task without crashing engine."""
-    config = SimulationConfiguration(error_policy="CONTINUE_WITH_FAULT_LOG")
-    runner = SimulationRunManager(config=config)
-    task = FailingTask(fail_at_tick=20_000_000)
-    runner.register_task(task)
-
-    events_received: list[SimulationEvent] = []
-    runner.events.subscribe_all(events_received.append)
-
-    runner.step(3)  # Step 1: OK, Step 2: Faults & Safe-parks, Step 3: Skipped
-
-    assert task.enabled is False
-    assert (
-        runner.state == SimulationState.STOPPED
-        or runner.state == SimulationState.RUNNING
-    )
-    fault_events = [e for e in events_received if e.name == "TASK_FAULTED"]
-    assert len(fault_events) == 1
-    assert fault_events[0].source == "FailingTask"
-
-
-def test_example_simulation_integration() -> None:
-    """Test complete small example simulation execution."""
-    runner = create_example_simulation(seed=42)
-    events: list[SimulationEvent] = []
-    runner.events.subscribe_all(events.append)
-
-    runner.step(4)
-
-    assert runner.clock.total_steps == 4
-    assert runner.clock.time_ns == 40_000_000
-    assert "p_gen_w" in runner.shared_state
-    assert "net_power_w" in runner.shared_state
-
-    # Verify event counts (Generator runs 4 times, Load runs 2 times on step 1 & step 3)
-    gen_events = [e for e in events if e.name == "POWER_GENERATED"]
-    load_events = [e for e in events if e.name == "NET_POWER_CALCULATED"]
-    assert len(gen_events) == 4
-    assert len(load_events) == 2

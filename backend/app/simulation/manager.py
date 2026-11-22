@@ -58,8 +58,14 @@ class SimulationRunManager:
 
     def start(self) -> None:
         """Start or restart simulation execution."""
+        if self.state == SimulationState.FAULTED:
+            raise SimulationError(
+                "Cannot start faulted simulation engine. Please reset engine first."
+            )
+
         if self.state in (SimulationState.RUNNING, SimulationState.PAUSED):
             logger.warning("Simulation is already started in state %s", self.state)
+            self.state = SimulationState.RUNNING
             return
 
         self.state = SimulationState.RUNNING
@@ -83,6 +89,11 @@ class SimulationRunManager:
 
     def resume(self) -> None:
         """Resume simulation execution from paused state."""
+        if self.state == SimulationState.FAULTED:
+            raise SimulationError(
+                "Cannot resume faulted simulation engine. Please reset engine first."
+            )
+
         if self.state != SimulationState.PAUSED:
             return
 
@@ -125,42 +136,62 @@ class SimulationRunManager:
         if num_ticks <= 0:
             raise ValueError(f"num_ticks must be strictly positive (> 0), got: {num_ticks}")
 
+        if self.state == SimulationState.FAULTED:
+            raise SimulationError(
+                "Cannot step faulted simulation engine. Please reset engine first."
+            )
+
+        if self.state == SimulationState.COMPLETED:
+            raise SimulationError(
+                "Cannot step completed simulation engine. Please reset engine first."
+            )
+
+        initial_state = self.state
         executed_summary: list[str] = []
 
-        for _ in range(num_ticks):
-            if (
-                self.config.max_ticks is not None
-                and self.clock.total_steps >= self.config.max_ticks
-            ):
-                self.state = SimulationState.COMPLETED
-                self.context.emit_event(
-                    name="SIMULATION_COMPLETED",
-                    source="SIMULATION_ENGINE",
-                    payload={
-                        "run_id": self.simulation_run_id,
-                        "timestamp_ns": self.clock.time_ns,
-                    },
-                )
-                break
+        try:
+            for _ in range(num_ticks):
+                if (
+                    self.config.max_ticks is not None
+                    and self.clock.total_steps >= self.config.max_ticks
+                ):
+                    self.state = SimulationState.COMPLETED
+                    self.context.emit_event(
+                        name="SIMULATION_COMPLETED",
+                        source="SIMULATION_ENGINE",
+                        payload={
+                            "run_id": self.simulation_run_id,
+                            "timestamp_ns": self.clock.time_ns,
+                        },
+                    )
+                    break
 
-            # Advance clock by fixed tick step
-            self.clock.advance()
+                # Advance clock by fixed tick step
+                self.clock.advance()
 
-            # Execute scheduled tasks for current tick
-            try:
+                # Execute scheduled tasks for current tick
                 tasks_run = self.scheduler.step_scheduler(self.context)
                 executed_summary.extend(tasks_run)
-            except SimulationError:
-                self.state = SimulationState.FAULTED
-                self.context.emit_event(
-                    name="SIMULATION_FAULTED",
-                    source="SIMULATION_ENGINE",
-                    payload={
-                        "run_id": self.simulation_run_id,
-                        "timestamp_ns": self.clock.time_ns,
-                    },
-                )
-                raise
+
+            # If stepped while PAUSED or STOPPED, keep in PAUSED state
+            if (
+                initial_state in (SimulationState.PAUSED, SimulationState.STOPPED)
+                and self.state != SimulationState.COMPLETED
+            ):
+                self.state = SimulationState.PAUSED
+
+        except Exception as err:
+            self.state = SimulationState.FAULTED
+            self.context.emit_event(
+                name="SIMULATION_FAULTED",
+                source="SIMULATION_ENGINE",
+                payload={
+                    "run_id": self.simulation_run_id,
+                    "timestamp_ns": self.clock.time_ns,
+                    "error": str(err),
+                },
+            )
+            raise SimulationError(f"Simulation tick step failed: {err}") from err
 
         return executed_summary
 
@@ -196,7 +227,7 @@ class SimulationRunManager:
             time.sleep(sleep_needed_s)
 
     def reset(self, config_override: SimulationConfiguration | None = None) -> None:
-        """Reset simulation engine to initial conditions."""
+        """Reset simulation engine to initial conditions, preserving task enabled states."""
         if config_override is not None:
             self.config = config_override
 
@@ -216,11 +247,14 @@ class SimulationRunManager:
             shared_state=self.shared_state,
         )
 
-        # Reset task internal states
+        # Reset task internal execution counts and physical models, preserving task enabled state
         for task in self.scheduler._tasks.values():
-            task.enabled = True
             task.execution_count = 0
             task.last_execution_tick_ns = None
+            if hasattr(task, "physical_model") and hasattr(
+                task.physical_model, "reset_to_initial_conditions"
+            ):
+                task.physical_model.reset_to_initial_conditions()
 
         self.state = SimulationState.STOPPED
 

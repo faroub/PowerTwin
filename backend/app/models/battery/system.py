@@ -8,6 +8,7 @@ DOCUMENTED SIGN CONVENTION:
 """
 
 import logging
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -129,25 +130,15 @@ class GenericBatterySystemModel:
         ):
             return (0.0, 0.0)
 
-        # Discharge power limits (+W)
         if self.soc_pct <= self.config.min_soc_pct:
             avail_dis_w = 0.0
         else:
-            usable_energy_wh = self.config.capacity_wh * (
-                (self.soc_pct - self.config.min_soc_pct) / 100.0
-            )
-            max_dis_power_from_energy = usable_energy_wh * self.config.discharge_efficiency
-            avail_dis_w = min(self.config.max_discharge_power_w, max_dis_power_from_energy)
+            avail_dis_w = self.config.max_discharge_power_w
 
-        # Charge power limits (-W magnitude)
         if self.soc_pct >= self.config.max_soc_pct:
             avail_ch_w = 0.0
         else:
-            headroom_energy_wh = self.config.capacity_wh * (
-                (self.config.max_soc_pct - self.soc_pct) / 100.0
-            )
-            max_ch_power_from_energy = headroom_energy_wh / self.config.charge_efficiency
-            avail_ch_w = min(self.config.max_charge_power_w, max_ch_power_from_energy)
+            avail_ch_w = self.config.max_charge_power_w
 
         return (avail_ch_w, avail_dis_w)
 
@@ -161,27 +152,23 @@ class GenericBatterySystemModel:
         self.last_step_timestamp_ns = timestamp_ns
         avail_ch_w, avail_dis_w = self.get_available_power_limits()
 
-        # Clamp requested power against available limits
-        if power_demand_w > 0.0:  # Discharging
+        if power_demand_w > 0.0:
             actual_p_w = min(power_demand_w, avail_dis_w)
-        elif power_demand_w < 0.0:  # Charging
+        elif power_demand_w < 0.0:
             actual_p_w = max(power_demand_w, -avail_ch_w)
         else:
             actual_p_w = 0.0
 
         self.active_power_w = actual_p_w
-
-        # Update OCV terminal voltage approximation based on SoC
         self.voltage_v = self.config.nominal_voltage_v * (0.85 + 0.30 * (self.soc_pct / 100.0))
         self.current_a = actual_p_w / max(self.voltage_v, 1.0)
 
-        # 1. Chemical energy change calculation
-        if actual_p_w > 0.0:  # Discharging: draws P_bat / eta_dis
+        if actual_p_w > 0.0:
             chem_power_w = actual_p_w / self.config.discharge_efficiency
             delta_e_chem_wh = (chem_power_w * delta_t_s) / 3600.0
             delta_soc_pct = -(delta_e_chem_wh / self.config.capacity_wh) * 100.0
             losses_w = chem_power_w - actual_p_w
-        elif actual_p_w < 0.0:  # Charging: stores |P_bat| * eta_ch
+        elif actual_p_w < 0.0:
             abs_p_w = abs(actual_p_w)
             chem_power_w = abs_p_w * self.config.charge_efficiency
             delta_e_chem_wh = (chem_power_w * delta_t_s) / 3600.0
@@ -193,30 +180,63 @@ class GenericBatterySystemModel:
             delta_soc_pct = 0.0
             losses_w = 0.0
 
-        # 2. Continuous Auxiliary Power Consumption
         aux_e_wh = (self.config.aux_power_w * delta_t_s) / 3600.0
         aux_soc_pct = (aux_e_wh / self.config.capacity_wh) * 100.0
 
-        # Update SoC and clamp between min and max limits
         new_soc = self.soc_pct + delta_soc_pct - aux_soc_pct
         self.soc_pct = max(self.config.min_soc_pct, min(self.config.max_soc_pct, new_soc))
-
-        # Accumulate energy throughput
         self.total_throughput_wh += abs(actual_p_w * delta_t_s) / 3600.0
 
-        # 3. Lumped Thermal Mass Update (Losses + Aux heat - Passive cooling)
         delta_q_joules = (losses_w + self.config.aux_power_w) * delta_t_s
         temp_rise_c = delta_q_joules / self.config.thermal_mass_j_per_c
         cooling_c = (self.temperature_c - 25.0) * (0.01 * delta_t_s)
         self.temperature_c += temp_rise_c - cooling_c
 
-        # Update operating state
         if not self.is_available or self.operating_state == OperatingState.FAULTED:
             pass
         elif actual_p_w != 0.0:
             self.operating_state = OperatingState.RUNNING
         else:
             self.operating_state = OperatingState.STANDBY
+
+    def get_model_state(self) -> dict[str, Any]:
+        """Return internal physical state dictionary for snapshot serialization."""
+        return {
+            "soc_pct": self.soc_pct,
+            "soh_pct": self.soh_pct,
+            "temperature_c": self.temperature_c,
+            "active_power_w": self.active_power_w,
+            "current_a": self.current_a,
+            "voltage_v": self.voltage_v,
+            "operating_state": self.operating_state.value,
+            "is_available": self.is_available,
+            "total_throughput_wh": self.total_throughput_wh,
+        }
+
+    def set_model_state(self, state: dict[str, Any]) -> None:
+        """Restore internal physical state from snapshot state dictionary."""
+        self.soc_pct = float(state.get("soc_pct", self.config.initial_soc_pct))
+        self.soh_pct = float(state.get("soh_pct", self.config.initial_soh_pct))
+        self.temperature_c = float(state.get("temperature_c", self.config.initial_temp_c))
+        self.active_power_w = float(state.get("active_power_w", 0.0))
+        self.current_a = float(state.get("current_a", 0.0))
+        self.voltage_v = float(state.get("voltage_v", self.config.nominal_voltage_v))
+        if "operating_state" in state:
+            self.operating_state = OperatingState(state["operating_state"])
+        self.is_available = bool(state.get("is_available", True))
+        self.total_throughput_wh = float(state.get("total_throughput_wh", 0.0))
+
+    def reset_to_initial_conditions(self) -> None:
+        """Reset battery state to initial configured conditions."""
+        self.soc_pct = self.config.initial_soc_pct
+        self.soh_pct = self.config.initial_soh_pct
+        self.temperature_c = self.config.initial_temp_c
+        self.active_power_w = 0.0
+        self.current_a = 0.0
+        self.voltage_v = self.config.nominal_voltage_v
+        self.operating_state = OperatingState.STANDBY
+        self.is_available = True
+        self.active_alarms.clear()
 
     def set_fault(self, alarm_code: str, description: str) -> None:
         """Trigger an equipment fault state."""

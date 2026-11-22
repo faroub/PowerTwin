@@ -83,6 +83,28 @@ class BasePlugin(SimulationTask, ABC):
             )
             raise
 
+    def get_task_state(self) -> dict[str, Any]:
+        """Return task state including plugin health and underlying physical model state."""
+        state = super().get_task_state()
+        state["health_status"] = self.health_status.value
+        if hasattr(self, "physical_model") and hasattr(
+            self.physical_model, "get_model_state"
+        ):
+            state["physical_model"] = self.physical_model.get_model_state()
+        return state
+
+    def set_task_state(self, state: dict[str, Any]) -> None:
+        """Restore task state including plugin health and underlying physical model state."""
+        super().set_task_state(state)
+        if "health_status" in state:
+            self.health_status = PluginHealthStatus(state["health_status"])
+        if (
+            "physical_model" in state
+            and hasattr(self, "physical_model")
+            and hasattr(self.physical_model, "set_model_state")
+        ):
+            self.physical_model.set_model_state(state["physical_model"])
+
     def get_equipment_state(self) -> UniversalEquipmentState | None:
         """Return underlying equipment state if interface attached."""
         if isinstance(self, BaseEquipmentInterface):

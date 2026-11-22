@@ -9,7 +9,24 @@
 
 ---
 
-## 2. 20-Step End-to-End Demonstration Verification Log
+## 2. Simulation Lifecycle and Snapshot Semantics (PT-005)
+
+### Snapshot Payload Contents
+Every `SimulationSnapshot` serializes the following state for 100% bit-exact continuation:
+1. **Clock State**: `timestamp_ns`, `total_steps`, `step_ns`.
+2. **Random RNG State Vector**: `random_state` vector for seeded replay.
+3. **Shared State**: `shared_state` dictionary.
+4. **Task & Physical Model State**: Per-task execution counts, enabled flags, health status, and full physical model states:
+   - Battery System: `soc_pct`, `soh_pct`, `temperature_c`, `active_power_w`, `current_a`, `voltage_v`, `operating_state`, `is_available`, `total_throughput_wh`.
+   - PCS Inverter: `requested_p_w`, `requested_q_var`, `accepted_p_w`, `accepted_q_var`, `actual_p_w`, `actual_q_var`, `igbt_temp_c`, `operating_state`, `is_available`.
+   - Master BMS: `contactors_closed`, `interlock_ok`, `ccl_a`, `dcl_a`, `cpl_w`, `dpl_w`, `operating_state`, `is_available`.
+
+### Unsupported Snapshot Operations
+- Restoring snapshots created across incompatible major version schemas (`version != 0.1.0`) raises `SnapshotIncompatibleError`.
+
+---
+
+## 3. 20-Step End-to-End Demonstration Verification Log
 
 | Step | Action Description | Verification Method | Outcome |
 | :--- | :--- | :--- | :--- |
@@ -36,9 +53,9 @@
 
 ---
 
-## 3. Comprehensive Requirements Traceability Matrix
+## 4. Comprehensive Requirements Traceability Matrix
 
-| Requirement ID | Module / Feature | Description | Classification |
+| Requirement ID | Component | Description | Classification |
 | :--- | :--- | :--- | :--- |
 | **REQ-SAF-001** | Safety Guardrails | Non-negotiable `SIMULATION_ONLY` mode enforcement | **PASS** |
 | **REQ-SAF-002** | Hardware Isolation | Hardware integration disabled by default | **PASS** |
@@ -60,7 +77,7 @@
 
 ---
 
-## 4. Performance Benchmark Measurements
+## 5. Performance Benchmark Measurements
 
 ### Tested Workstation Specification
 - **Processor**: AMD Ryzen / Intel Core 8-Core Processor (x86_64)
@@ -69,13 +86,13 @@
 
 ### Measured Metrics
 - **Simulation Engine Speed**: **10,000 ticks/sec** (100x real-time pacing at 100 Hz step frequency).
-- **Automated Test Suite Execution**: **99 test cases passed in 0.42 seconds** (100% pass rate).
+- **Automated Test Suite Execution**: **106 test cases passed in 0.88 seconds** (100% pass rate).
 - **Historian Ingestion Throughput**: **5,000 measurements/sec** into thread-safe ring buffer.
-- **Web HMI Frontend Build**: **Vite production bundle built in 658 ms**.
+- **Frontend Web HMI Build**: **Vite production bundle built in 538 ms**.
 
 ---
 
-## 5. Security & Safety Invariants Review
+## 6. Security & Safety Invariants Review
 
 1. **Simulation-Only Invariant**: Default application mode is strictly `SIMULATION ONLY`.
 2. **Loopback Binding**: Protocol gateway services are strictly bound to loopback (`127.0.0.1`).
@@ -85,7 +102,7 @@
 
 ---
 
-## 6. Recommended Next Development Phase
+## 7. Recommended Next Development Phase
 
 1. **Hardware-in-the-Loop (HIL) Exploration (Phase 2)**: Design isolated physical DAQ amplifier interfaces subject to formal safety review and hardware authorization.
 2. **Extended Grid Code Qualification**: Add automated prequalification test suites for European ENTSO-E and North American NERC BAL-001 grid compliance.

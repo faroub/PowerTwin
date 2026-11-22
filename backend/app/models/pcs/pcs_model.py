@@ -251,6 +251,52 @@ class GenericPCSModel:
         cooling = (self.igbt_temp_c - 25.0) * (0.02 * delta_t_s)
         self.igbt_temp_c += temp_rise - cooling
 
+    def get_model_state(self) -> dict[str, Any]:
+        """Return internal physical state dictionary for snapshot serialization."""
+        return {
+            "requested_p_w": self.requested_p_w,
+            "requested_q_var": self.requested_q_var,
+            "accepted_p_w": self.accepted_p_w,
+            "accepted_q_var": self.accepted_q_var,
+            "actual_p_w": self.actual_p_w,
+            "actual_q_var": self.actual_q_var,
+            "measured_p_w": self.measured_p_w,
+            "measured_q_var": self.measured_q_var,
+            "igbt_temp_c": self.igbt_temp_c,
+            "operating_state": self.operating_state.value,
+            "is_available": self.is_available,
+        }
+
+    def set_model_state(self, state: dict[str, Any]) -> None:
+        """Restore internal physical state from snapshot state dictionary."""
+        self.requested_p_w = float(state.get("requested_p_w", 0.0))
+        self.requested_q_var = float(state.get("requested_q_var", 0.0))
+        self.accepted_p_w = float(state.get("accepted_p_w", 0.0))
+        self.accepted_q_var = float(state.get("accepted_q_var", 0.0))
+        self.actual_p_w = float(state.get("actual_p_w", 0.0))
+        self.actual_q_var = float(state.get("actual_q_var", 0.0))
+        self.measured_p_w = float(state.get("measured_p_w", 0.0))
+        self.measured_q_var = float(state.get("measured_q_var", 0.0))
+        self.igbt_temp_c = float(state.get("igbt_temp_c", 25.0))
+        if "operating_state" in state:
+            self.operating_state = OperatingState(state["operating_state"])
+        self.is_available = bool(state.get("is_available", True))
+
+    def reset_to_initial_conditions(self) -> None:
+        """Reset PCS state to initial configured conditions."""
+        self.requested_p_w = 0.0
+        self.requested_q_var = 0.0
+        self.accepted_p_w = 0.0
+        self.accepted_q_var = 0.0
+        self.actual_p_w = 0.0
+        self.actual_q_var = 0.0
+        self.measured_p_w = 0.0
+        self.measured_q_var = 0.0
+        self.igbt_temp_c = 25.0
+        self.operating_state = OperatingState.STANDBY
+        self.is_available = True
+        self.active_alarms.clear()
+
     def _trigger_fault(self, code: str, description: str, timestamp_ns: int) -> None:
         """Helper to trip PCS into fault state."""
         self.operating_state = OperatingState.FAULTED
