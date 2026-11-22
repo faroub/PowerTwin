@@ -38,7 +38,7 @@ class CATLEnerOneBatteryPlugin(BasePlugin, BatterySystemInterface):
             max_charge_power_w=self.max_continuous_power_w,
             max_discharge_power_w=self.max_continuous_power_w,
         )
-        self.physical_model = GenericBatterySystemModel(
+        self.physical_model: GenericBatterySystemModel = GenericBatterySystemModel(
             equipment_id=equipment_id, config=b_cfg
         )
 

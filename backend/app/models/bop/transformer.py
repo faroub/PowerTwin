@@ -46,6 +46,22 @@ class TransformerConfigModel(BaseModel):
         return self.secondary_voltage_v / self.primary_voltage_v
 
 
+def _restore_measurement(
+    measurements: dict[str, TelemetryPoint], name: str, default: float
+) -> float:
+    """Restore a float telemetry measurement, rejecting non-finite values.
+
+    Returns `default` when the measurement is missing or not finite.
+    """
+    point = measurements.get(name)
+    if point is None:
+        return default
+    value = point.value
+    if not math.isfinite(value):
+        return default
+    return value
+
+
 class GenericTransformerModel:
     """Configurable Step-Up Transformer Model with core and copper loss calculations."""
 
@@ -158,6 +174,30 @@ class GenericTransformerModel:
             is_available=self.is_available,
             timestamp_ns=self.last_step_timestamp_ns,
             measurements={
+                "primary_power_w": TelemetryPoint(
+                    value=self.primary_power_w,
+                    unit="W",
+                    timestamp_ns=self.last_step_timestamp_ns,
+                    source_id=self.equipment_id,
+                ),
+                "primary_power_var": TelemetryPoint(
+                    value=self.primary_power_var,
+                    unit="VAR",
+                    timestamp_ns=self.last_step_timestamp_ns,
+                    source_id=self.equipment_id,
+                ),
+                "secondary_power_w": TelemetryPoint(
+                    value=self.secondary_power_w,
+                    unit="W",
+                    timestamp_ns=self.last_step_timestamp_ns,
+                    source_id=self.equipment_id,
+                ),
+                "secondary_power_var": TelemetryPoint(
+                    value=self.secondary_power_var,
+                    unit="VAR",
+                    timestamp_ns=self.last_step_timestamp_ns,
+                    source_id=self.equipment_id,
+                ),
                 "primary_voltage_v": TelemetryPoint(
                     value=self.primary_voltage_v,
                     unit="V",
@@ -186,3 +226,37 @@ class GenericTransformerModel:
             active_limits={"rating_va": self.config.rating_va},
             alarms=[a for a in self.active_alarms if not a.cleared],
         )
+
+    def restore_state_snapshot(self, state: UniversalEquipmentState) -> None:
+        """Restore transformer physical and thermal state from a snapshot."""
+        self.last_step_timestamp_ns = state.timestamp_ns
+        self.operating_state = state.operating_state
+        self.is_available = state.is_available
+        self.primary_power_w = _restore_measurement(state.measurements, "primary_power_w", 0.0)
+        self.primary_power_var = _restore_measurement(state.measurements, "primary_power_var", 0.0)
+        self.secondary_power_w = _restore_measurement(state.measurements, "secondary_power_w", 0.0)
+        self.secondary_power_var = _restore_measurement(
+            state.measurements, "secondary_power_var", 0.0
+        )
+        self.primary_voltage_v = _restore_measurement(
+            state.measurements, "primary_voltage_v", self.config.primary_voltage_v
+        )
+        self.secondary_voltage_v = _restore_measurement(
+            state.measurements, "secondary_voltage_v", self.config.secondary_voltage_v
+        )
+        self.winding_temp_c = _restore_measurement(state.measurements, "winding_temp_c", 25.0)
+        self.active_alarms = list(state.alarms)
+
+    def reset_to_initial_conditions(self) -> None:
+        """Reset transformer thermal and control state to its configured initial conditions."""
+        self.primary_power_w = 0.0
+        self.primary_power_var = 0.0
+        self.secondary_power_w = 0.0
+        self.secondary_power_var = 0.0
+        self.primary_voltage_v = self.config.primary_voltage_v
+        self.secondary_voltage_v = self.config.secondary_voltage_v
+        self.winding_temp_c = 25.0
+        self.operating_state = OperatingState.STANDBY
+        self.is_available = True
+        self.active_alarms.clear()
+        self.last_step_timestamp_ns = 0

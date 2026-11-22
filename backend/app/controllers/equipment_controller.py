@@ -307,6 +307,16 @@ class BESSEquipmentController:
             self.is_available = True
             logger.info("Emergency Stop latched state reset to STANDBY.")
 
+    def reset_to_initial_conditions(self) -> None:
+        """Reset the equipment controller to its initial (STANDBY) conditions."""
+        self.log_state_transition(
+            self.last_heartbeat_ns or 0, self.operating_state.value, OperatingState.STANDBY.value
+        )
+        self.operating_state = OperatingState.STANDBY
+        self.is_available = True
+        self.active_alarms = []
+        logger.info("EquipmentController reset to initial conditions (STANDBY).")
+
     def update_heartbeat(self, current_time_ns: int) -> None:
         """Update communication watchdog heartbeat timestamp."""
         self.last_heartbeat_ns = current_time_ns

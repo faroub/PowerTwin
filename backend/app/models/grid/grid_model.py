@@ -4,6 +4,7 @@ Models synthetic grid voltage, grid frequency, grid impedance (R + jX),
 short-circuit strength (SCR/MVA), and configurable grid disturbances (steps, ramps, disconnections).
 """
 
+import math
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator
@@ -16,6 +17,22 @@ from backend.app.equipment.models import (
     UniversalEquipmentState,
 )
 from backend.app.simulation.exceptions import InvalidTimeStepError
+
+
+def _restore_measurement(
+    measurements: dict[str, "TelemetryPoint"], name: str, default: float
+) -> float:
+    """Restore a float telemetry measurement, rejecting non-finite values.
+
+    Returns `default` when the measurement is missing or not finite.
+    """
+    point = measurements.get(name)
+    if point is None:
+        return default
+    value = point.value
+    if not math.isfinite(value):
+        return default
+    return value
 
 
 class GridOperatingState(StrEnum):
@@ -162,6 +179,30 @@ class GenericGridModel:
         self.frequency_hz = target_f
 
         return (self.voltage_v, self.frequency_hz)
+
+    def restore_state_snapshot(self, state: UniversalEquipmentState) -> None:
+        """Restore grid model physical state from a universal equipment state snapshot."""
+        self.last_step_timestamp_ns = state.timestamp_ns
+        self.is_available = state.is_available
+        self.voltage_v = _restore_measurement(state.measurements, "voltage_v", 0.0)
+        self.frequency_hz = _restore_measurement(
+            state.measurements, "frequency_hz", self.config.nominal_frequency_hz
+        )
+        self.is_islanding = bool(_restore_measurement(state.measurements, "islanding", 0.0) > 0.0)
+        if state.operating_state == OperatingState.RUNNING:
+            self.grid_state = GridOperatingState.GRID_CONNECTED
+        else:
+            self.grid_state = GridOperatingState.DISCONNECTED
+
+    def reset_to_initial_conditions(self) -> None:
+        """Reset the grid model to its configured initial and connected state."""
+        self.voltage_v = self.config.nominal_voltage_v
+        self.frequency_hz = self.config.nominal_frequency_hz
+        self.grid_state = GridOperatingState.GRID_CONNECTED
+        self.is_available = True
+        self.is_islanding = False
+        self.last_step_timestamp_ns = 0
+        self._active_disturbances.clear()
 
     def get_state(self) -> UniversalEquipmentState:
         """Return universal equipment state snapshot."""

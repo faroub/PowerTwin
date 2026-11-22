@@ -227,7 +227,12 @@ class SimulationRunManager:
             time.sleep(sleep_needed_s)
 
     def reset(self, config_override: SimulationConfiguration | None = None) -> None:
-        """Reset simulation engine to initial conditions, preserving task enabled states."""
+        """Reset simulation engine to initial conditions, preserving task enabled states.
+
+        The simulation clock, RNG, events, shared state and task counters are reset.
+        Every task resets its own models (plugins and plant-level tasks) to their
+        initial conditions so the plant starts from a clean physical state.
+        """
         if config_override is not None:
             self.config = config_override
 
@@ -255,6 +260,8 @@ class SimulationRunManager:
                 task.physical_model, "reset_to_initial_conditions"
             ):
                 task.physical_model.reset_to_initial_conditions()
+            if hasattr(task, "restore_to_initial"):
+                task.restore_to_initial()
 
         self.state = SimulationState.STOPPED
 

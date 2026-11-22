@@ -37,7 +37,7 @@ class TeslaMegapackBatteryPlugin(BasePlugin, BatterySystemInterface):
             max_discharge_power_w=self.max_continuous_power_w,
             aux_power_w=15_000.0,
         )
-        self.physical_model = GenericBatterySystemModel(
+        self.physical_model: GenericBatterySystemModel = GenericBatterySystemModel(
             equipment_id=equipment_id, config=b_cfg
         )
 

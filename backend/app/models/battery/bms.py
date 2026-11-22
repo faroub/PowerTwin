@@ -28,6 +28,22 @@ from backend.app.equipment.models import (
 logger = logging.getLogger(__name__)
 
 
+def _restore_measurement(
+    measurements: dict[str, TelemetryPoint], name: str, default: float
+) -> float:
+    """Restore a float telemetry measurement, rejecting non-finite values.
+
+    Returns `default` when the measurement is missing or not finite.
+    """
+    point = measurements.get(name)
+    if point is None:
+        return default
+    value = point.value
+    if not math.isfinite(value):
+        return default
+    return value
+
+
 class BMSProtectionLimits(BaseModel):
     """BMS safety protection and warning thresholds."""
 
@@ -287,6 +303,12 @@ class GenericBMSModel:
                     timestamp_ns=self.last_step_timestamp_ns,
                     source_id=self.equipment_id,
                 ),
+                "active_warnings": TelemetryPoint(
+                    value=float(len(self.active_warnings)),
+                    unit="count",
+                    timestamp_ns=self.last_step_timestamp_ns,
+                    source_id=self.equipment_id,
+                ),
             },
             active_limits={
                 "charge_current_limit_a": self.ccl_a,
@@ -294,3 +316,43 @@ class GenericBMSModel:
             },
             alarms=[a for a in self.active_alarms if not a.cleared],
         )
+
+    def reset_to_initial_conditions(self) -> None:
+        """Reset BMS protection and state to its configured initial conditions."""
+        self.operating_state = OperatingState.STANDBY
+        self.contactors_closed = False
+        self.is_available = True
+        self.interlock_ok = True
+        self.ccl_a = self.limits.max_charge_current_a
+        self.dcl_a = self.limits.max_discharge_current_a
+        self.cpl_w = self.limits.max_charge_current_a * 1000.0
+        self.dpl_w = self.limits.max_discharge_current_a * 1000.0
+        self.active_warnings.clear()
+        self.active_alarms.clear()
+        self.last_step_timestamp_ns = 0
+
+    def restore_state_snapshot(self, state: UniversalEquipmentState) -> None:
+        """Restore BMS protection and state from a universal equipment state snapshot.
+
+        The dynamic limits (CCL/DCL/CPL/DPL) are restored from the measurements
+        captured when the snapshot was taken.
+        """
+        self.last_step_timestamp_ns = state.timestamp_ns
+        self.operating_state = state.operating_state
+        self.is_available = state.is_available
+        self.ccl_a = _restore_measurement(
+            state.measurements, "ccl_a", self.limits.max_charge_current_a
+        )
+        self.dcl_a = _restore_measurement(
+            state.measurements, "dcl_a", self.limits.max_discharge_current_a
+        )
+        self.cpl_w = _restore_measurement(
+            state.measurements, "cpl_w", self.limits.max_charge_current_a * 1000.0
+        )
+        self.dpl_w = _restore_measurement(
+            state.measurements, "dpl_w", self.limits.max_discharge_current_a * 1000.0
+        )
+        # Active warnings are recomputed live by evaluate_protection, they are
+        # not durable state; alarms and limits are restored verbatim.
+        self.active_warnings = []
+        self.active_alarms = list(state.alarms)

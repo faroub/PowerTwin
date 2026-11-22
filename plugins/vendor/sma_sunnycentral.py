@@ -33,7 +33,9 @@ class SMASunnyCentralPCSPlugin(BasePlugin, PCSInterface):
             dc_voltage_min_v=880.0,
             dc_voltage_max_v=1500.0,
         )
-        self.physical_model = GenericPCSModel(equipment_id=equipment_id, config=pcs_cfg)
+        self.physical_model: GenericPCSModel = GenericPCSModel(
+            equipment_id=equipment_id, config=pcs_cfg
+        )
 
         self.supported_capabilities: list[str] = [
             "Q_ON_DEMAND_NIGHT",

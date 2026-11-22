@@ -29,6 +29,11 @@ from backend.app.models.meter.meter_model import GenericMeterModel, MeterConfigM
 from backend.app.models.pcs.pcs_model import GenericPCSModel
 from backend.app.simulation.config import SimulationConfiguration
 from backend.app.simulation.manager import SimulationRunManager
+from backend.app.simulation.tasks import (
+    PlantBatteryDistributionTask,
+    PlantControlTask,
+    PlantNetworkTask,
+)
 from backend.app.topology.schema import PlantTopologyConfig
 from backend.app.topology.validator import TopologyValidator
 
@@ -257,6 +262,45 @@ class PlantTopologyFactory:
             meter=meters,
             grid=grid,
         )
+
+        # 8. Register the authoritative simulation pipeline tasks.
+
+        # Phase 2: EMS -> PPC dispatch and per-PCS setpoint wiring.
+        control_task = PlantControlTask(
+            ems=ems,
+            ppc=ppc,
+            equipment_controller=eq_ctrl,
+            battery_systems=battery_systems,
+            bms_units=bms_units,
+            pcs_units=pcs_units,
+            grid=grid,
+            transformers=transformers,
+            switches=switchgear_list,
+            meters=meters,
+            poi=poi,
+        )
+        simulation_engine.register_task(control_task)
+
+        # Phase 3 is owned by the PCS plugins (terminals 3, `GenericPCSPlugin`).
+
+        # Phase 4: PCS actual power is split into per-battery commands.
+        distribution_task = PlantBatteryDistributionTask(
+            battery_systems=battery_systems,
+            pcs_units=pcs_units,
+        )
+        simulation_engine.register_task(distribution_task)
+
+        # Phase 5: BOP network physics (transformers -> switchgear -> POI -> meters).
+        network_task = PlantNetworkTask(
+            network=network,
+            grid=grid,
+            transformers=transformers,
+            switches=switchgear_list,
+            meters=meters,
+            poi=poi,
+            pcs_units=pcs_units,
+        )
+        simulation_engine.register_task(network_task)
 
         return BuiltPlantInstance(
             topology_config=parsed_config,

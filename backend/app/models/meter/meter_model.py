@@ -20,6 +20,22 @@ from backend.app.equipment.models import (
 from backend.app.simulation.exceptions import InvalidTimeStepError
 
 
+def _restore_measurement(
+    measurements: dict[str, TelemetryPoint], name: str, default: float
+) -> float:
+    """Restore a float telemetry measurement, rejecting non-finite values.
+
+    Returns `default` when the measurement is missing or not finite.
+    """
+    point = measurements.get(name)
+    if point is None:
+        return default
+    value = point.value
+    if not math.isfinite(value):
+        return default
+    return value
+
+
 class MeterConfigModel(BaseModel):
     """Configuration schema for Meter Model."""
 
@@ -199,3 +215,48 @@ class GenericMeterModel:
                 ),
             },
         )
+
+    def restore_state_snapshot(self, state: UniversalEquipmentState) -> None:
+        """Restore meter physical and accumulated state from a universal equipment state snapshot.
+
+        Energy registers are restored verbatim so that an exact continuation
+        from the restored point is possible.
+        """
+        self.last_step_timestamp_ns = state.timestamp_ns
+        self.quality = state.quality
+        self.operating_state = state.operating_state
+        self.is_available = state.is_available
+        self.active_power_w = _restore_measurement(state.measurements, "active_power_w", 0.0)
+        self.reactive_power_var = _restore_measurement(
+            state.measurements, "reactive_power_var", 0.0
+        )
+        self.voltage_v = _restore_measurement(state.measurements, "voltage_v", 0.0)
+        self.current_a = _restore_measurement(state.measurements, "current_a", 0.0)
+        self.power_factor = _restore_measurement(state.measurements, "power_factor", 1.0)
+        self.frequency_hz = _restore_measurement(state.measurements, "frequency_hz", 0.0)
+        self.energy_export_wh = _restore_measurement(state.measurements, "energy_export_wh", 0.0)
+        self.energy_import_wh = _restore_measurement(state.measurements, "energy_import_wh", 0.0)
+        self.reactive_export_varh = _restore_measurement(
+            state.measurements, "reactive_export_varh", 0.0
+        )
+        self.reactive_import_varh = _restore_measurement(
+            state.measurements, "reactive_import_varh", 0.0
+        )
+
+    def reset_to_initial_conditions(self) -> None:
+        """Reset meter physical and accumulated state to the initial conditions."""
+        self.active_power_w = 0.0
+        self.reactive_power_var = 0.0
+        self.apparent_power_va = 0.0
+        self.voltage_v = self.config.nominal_voltage_v
+        self.current_a = 0.0
+        self.power_factor = 1.0
+        self.frequency_hz = 60.0
+        self.energy_export_wh = 0.0
+        self.energy_import_wh = 0.0
+        self.reactive_export_varh = 0.0
+        self.reactive_import_varh = 0.0
+        self.quality = QualityFlag.GOOD
+        self.operating_state = OperatingState.RUNNING
+        self.is_available = True
+        self.last_step_timestamp_ns = 0

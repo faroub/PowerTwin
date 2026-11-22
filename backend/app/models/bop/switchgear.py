@@ -154,3 +154,24 @@ class GenericSwitchgearModel:
             },
             alarms=[a for a in self.active_alarms if not a.cleared],
         )
+
+    def restore_state_snapshot(self, state: UniversalEquipmentState) -> None:
+        """Restore switchgear physical and operator state from a snapshot."""
+        self.last_step_timestamp_ns = state.timestamp_ns
+        self.operating_state = state.operating_state
+        self.is_available = state.is_available
+        breaker_point = state.measurements.get("breaker_closed")
+        self.breaker_closed = bool(breaker_point.value) if breaker_point is not None else False
+        interlock_point = state.measurements.get("interlock_ok")
+        self.interlock_ok = bool(interlock_point.value) if interlock_point is not None else True
+        self.active_alarms = list(state.alarms)
+
+    def reset_to_initial_conditions(self) -> None:
+        """Reset switchgear to its configured safe and idle defaults."""
+        self.breaker_closed = False
+        self.interlock_ok = True
+        self.trip_coil_healthy = True
+        self.operating_state = OperatingState.STANDBY
+        self.is_available = True
+        self.active_alarms.clear()
+        self.last_step_timestamp_ns = 0

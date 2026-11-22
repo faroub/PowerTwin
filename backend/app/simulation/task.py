@@ -33,6 +33,10 @@ class SimulationTask(ABC):
         self.execution_count: int = 0
         self.last_execution_tick_ns: int | None = None
 
+        # One authoritative physical model owned by this task, if any. Tasks
+        # like PlantControlTask own a cluster of models they reset directly.
+        self.physical_model: Any = None
+
     @abstractmethod
     def execute(self, ctx: SimulationContext) -> None:
         """Execute task logic for a single simulation tick.
@@ -44,7 +48,7 @@ class SimulationTask(ABC):
 
     def get_task_state(self) -> dict[str, Any]:
         """Return task internal state dictionary for snapshot serialization."""
-        return {
+        state = {
             "name": self.name,
             "phase": self.phase,
             "priority": self.priority,
@@ -53,6 +57,21 @@ class SimulationTask(ABC):
             "execution_count": self.execution_count,
             "last_execution_tick_ns": self.last_execution_tick_ns,
         }
+        if self.physical_model is not None:
+            state["physical_model"] = self.physical_model.get_model_state()
+        return state
+
+    def restore_to_initial(self) -> None:
+        """Reset the task-owned physical model to its initial conditions (no-op by default).
+
+        Tasks that own an equipment cluster (PlantControlTask, PlantNetworkTask)
+        override this to restore their full fleet. Plugins rely on the default
+        physical-model reset provided here.
+        """
+        if self.physical_model is not None and hasattr(
+            self.physical_model, "reset_to_initial_conditions"
+        ):
+            self.physical_model.reset_to_initial_conditions()
 
     def set_task_state(self, state: dict[str, Any]) -> None:
         """Restore task internal state from snapshot state dictionary."""

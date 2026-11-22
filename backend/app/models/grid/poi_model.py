@@ -31,6 +31,31 @@ class FlowDirection(StrEnum):
     ZERO = "ZERO"
 
 
+def _restore_measurement_value(
+    measurements: dict[str, TelemetryPoint], name: str, default: float
+) -> float:
+    """Restore a float telemetry measurement, rejecting non-finite values.
+
+    Returns `default` when the measurement is missing or not finite.
+    """
+    point = measurements.get(name)
+    if point is None:
+        return default
+    value = point.value
+    if not math.isfinite(value):
+        return default
+    return value
+
+
+def _direction_of_power(active_power_w: float) -> FlowDirection:
+    """Restore the POI flow direction for a restored active power value."""
+    if active_power_w > 0.001:
+        return FlowDirection.EXPORTING
+    if active_power_w < -0.001:
+        return FlowDirection.IMPORTING
+    return FlowDirection.ZERO
+
+
 class POIConfigModel(BaseModel):
     """Configuration schema for Point of Interconnection (POI)."""
 
@@ -224,3 +249,42 @@ class POIModel:
             },
             alarms=[a for a in self.active_alarms if not a.cleared],
         )
+
+    def restore_state_snapshot(self, state: UniversalEquipmentState) -> None:
+        """Restore POI physical model state from a universal equipment state snapshot.
+
+        The measured values and alarms are restored verbatim so that an exact
+        continuation from the restored point is possible.
+        """
+        self.last_step_timestamp_ns = state.timestamp_ns
+        self.operating_state = state.operating_state
+        self.is_available = state.is_available
+        self.active_power_w = _restore_measurement_value(state.measurements, "active_power_w", 0.0)
+        self.reactive_power_var = _restore_measurement_value(
+            state.measurements, "reactive_power_var", 0.0
+        )
+        self.voltage_v = _restore_measurement_value(
+            state.measurements, "voltage_v", self.config.nominal_voltage_v
+        )
+        self.current_a = _restore_measurement_value(state.measurements, "current_a", 0.0)
+        self.frequency_hz = _restore_measurement_value(
+            state.measurements, "frequency_hz", self.config.nominal_frequency_hz
+        )
+        self.power_factor = _restore_measurement_value(state.measurements, "power_factor", 1.0)
+        self.flow_direction = _direction_of_power(self.active_power_w)
+        self.active_alarms = list(state.alarms)
+
+    def reset_to_initial_conditions(self) -> None:
+        """Reset the POI metering model to its configured initial conditions."""
+        self.active_power_w = 0.0
+        self.reactive_power_var = 0.0
+        self.apparent_power_va = 0.0
+        self.voltage_v = self.config.nominal_voltage_v
+        self.current_a = 0.0
+        self.frequency_hz = self.config.nominal_frequency_hz
+        self.power_factor = 1.0
+        self.flow_direction = FlowDirection.ZERO
+        self.operating_state = OperatingState.RUNNING
+        self.is_available = True
+        self.active_alarms = []
+        self.last_step_timestamp_ns = 0
