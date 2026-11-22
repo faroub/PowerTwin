@@ -40,7 +40,10 @@ class SMASunnyCentralPCSPlugin(BasePlugin, PCSInterface):
             "SUNSPEC_MODBUS_MAP",
             "GRID_FORMING_CAPABLE",
         ]
-        self.known_limitations: str = "Active power derates linearly above 45 deg C ambient temperature down to 80% at 60 deg C."
+        self.known_limitations: str = (
+            "Active power derates linearly above 45 deg C ambient "
+            "temperature down to 80% at 60 deg C."
+        )
 
     @property
     def manifest(self) -> PluginManifest:

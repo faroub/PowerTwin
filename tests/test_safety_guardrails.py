@@ -41,7 +41,8 @@ def test_validate_safety_invariants_success_in_dev_mode() -> None:
 def test_validate_safety_invariants_rejection_in_production_with_dev_secrets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify safety validation raises RuntimeError in production mode when default secrets exist."""
+    """Verify safety validation raises RuntimeError in production mode when
+    default secrets exist."""
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(
         settings,

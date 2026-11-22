@@ -49,7 +49,10 @@ class CATLEnerOneBatteryPlugin(BasePlugin, BatterySystemInterface):
             "MODBUS_TCP_MONITORING",
             "HIGH_SAFETY_IP55",
         ]
-        self.known_limitations: str = "LFP voltage plateau between 30% and 70% SoC requires coulomb counting for precision."
+        self.known_limitations: str = (
+            "LFP voltage plateau between 30% and 70% SoC requires coulomb "
+            "counting for precision."
+        )
 
     @property
     def manifest(self) -> PluginManifest:

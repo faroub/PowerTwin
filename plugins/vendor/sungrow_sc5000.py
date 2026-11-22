@@ -39,7 +39,10 @@ class SungrowSC5000PCSPlugin(BasePlugin, PCSInterface):
             "FOUR_QUADRANT_OPERATION",
             "MODBUS_SUNSPEC_COMPLIANT",
         ]
-        self.known_limitations: str = "Minimum DC operating voltage is 1000 V DC; inverter trips under-voltage below 950 V DC."
+        self.known_limitations: str = (
+            "Minimum DC operating voltage is 1000 V DC; "
+            "inverter trips under-voltage below 950 V DC."
+        )
 
     @property
     def manifest(self) -> PluginManifest:

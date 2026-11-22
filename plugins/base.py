@@ -120,7 +120,8 @@ class BasePlugin(SimulationTask, ABC):
         return None
 
     def get_alarms(self) -> list[AlarmRecord]:
-        """Return active alarms from underlying physical model or equipment interface without recursion."""
+        """Return active alarms from underlying physical model or equipment
+        interface without recursion."""
         if hasattr(self, "physical_model") and hasattr(
             self.physical_model, "active_alarms"
         ):

@@ -1,4 +1,5 @@
-"""Automated Test Suite for WP02 Independent Deterministic Simulation Engine & PT-005 Lifecycle/Snapshot Semantics."""
+"""Automated Test Suite for WP02 Independent Deterministic Simulation Engine &
+PT-005 Lifecycle/Snapshot Semantics."""
 
 import pytest
 

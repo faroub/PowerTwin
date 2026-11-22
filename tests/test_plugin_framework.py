@@ -180,7 +180,8 @@ def test_plugin_lifecycle_and_execution() -> None:
 
 
 def test_engine_independence_with_new_custom_plugin() -> None:
-    """Demonstrate a new custom plugin can be registered and run without altering simulation engine."""
+    """Demonstrate a new custom plugin can be registered and run without
+    altering simulation engine."""
     registry = PluginRegistry()
     registry.register_plugin_class(CustomSolarPVPlugin)
 

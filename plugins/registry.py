@@ -58,7 +58,8 @@ class PluginRegistry:
         return manifest_major == supported_major
 
     def get_registered_manifests(self) -> list[PluginManifest]:
-        """Return list of manifests for all registered plugin classes without instantiating objects."""
+        """Return list of manifests for all registered plugin classes without
+        instantiating objects."""
         return list(self._registered_manifests.values())
 
     def validate_dependencies(self, instance_key: str) -> bool:
@@ -108,7 +109,8 @@ class PluginRegistry:
         try:
             plugin.initialize(config)
             plugin.health_status = PluginHealthStatus.HEALTHY
-            plugin.enabled = False  # Plugins remain disabled by default until enable_plugin() is called
+            plugin.enabled = False  # Plugins remain disabled by default until
+            # enable_plugin() is called
             self._active_plugins[key] = plugin
             return plugin
         except Exception as e:

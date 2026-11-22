@@ -18,7 +18,8 @@ def test_unauthenticated_requests_rejected(client: TestClient) -> None:
 def test_observer_role_can_read_telemetry_but_cannot_modify_simulation(
     client: TestClient,
 ) -> None:
-    """Test OBSERVER role can read overview SCADA metrics but is denied simulation control actions."""
+    """Test OBSERVER role can read overview SCADA metrics but is denied
+    simulation control actions."""
     factory = PlantTopologyFactory()
     plant = factory.build_plant(
         factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
@@ -70,7 +71,8 @@ def test_simulation_control_returns_503_when_no_engine_connected(
 def test_simulation_control_executes_action_on_active_engine(
     client: TestClient,
 ) -> None:
-    """Test simulation control API executes action on active SimulationRunManager engine instance."""
+    """Test simulation control API executes action on active
+    SimulationRunManager engine instance."""
     factory = PlantTopologyFactory()
     plant = factory.build_plant(
         factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")

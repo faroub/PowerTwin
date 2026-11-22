@@ -30,7 +30,8 @@ def test_modbus_non_loopback_binding_rejection() -> None:
 
 
 def test_modbus_write_rejection_when_writes_disabled() -> None:
-    """Test safety invariant: Modbus writes are rejected when ALLOW_EXTERNAL_MODBUS_WRITES is False."""
+    """Test safety invariant: Modbus writes are rejected when
+    ALLOW_EXTERNAL_MODBUS_WRITES is False."""
     server = ModbusTCPGatewayServer(host="127.0.0.1", port=5020)
     server.allow_writes = False
 

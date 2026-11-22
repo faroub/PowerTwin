@@ -46,7 +46,10 @@ class TeslaMegapackBatteryPlugin(BasePlugin, BatterySystemInterface):
             "UTILITY_SCALE_PACKAGING",
             "HIGH_EFFICIENCY_RTE",
         ]
-        self.known_limitations: str = "Baseline auxiliary cooling load increases to 15 kW when ambient temperature exceeds 40 deg C."
+        self.known_limitations: str = (
+            "Baseline auxiliary cooling load increases to 15 kW when ambient "
+            "temperature exceeds 40 deg C."
+        )
 
     @property
     def manifest(self) -> PluginManifest:

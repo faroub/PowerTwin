@@ -65,7 +65,8 @@ def test_hypothesis_fcr_droop_proportionality(grid_freq: float) -> None:
 
 @given(input_p_w=st.floats(min_value=0.0, max_value=50_000_000.0))
 def test_hypothesis_transformer_power_losses_bound(input_p_w: float) -> None:
-    """Hypothesis Property Test: Transformer efficiency losses reduce exported power (P_sec <= P_pri)."""
+    """Hypothesis Property Test: Transformer efficiency losses reduce
+    exported power (P_sec <= P_pri)."""
     xfrm = GenericTransformerModel()
     xfrm.step(
         primary_power_w=input_p_w,

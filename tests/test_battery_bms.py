@@ -82,7 +82,8 @@ def test_soc_min_max_limits_enforcement() -> None:
 
 
 def test_auxiliary_power_consumption_and_unserved_tracking() -> None:
-    """Test continuous auxiliary load depletes energy and tracks unserved aux energy when at min SoC."""
+    """Test continuous auxiliary load depletes energy and tracks unserved aux
+    energy when at min SoC."""
     config = BatterySystemConfigModel(
         capacity_wh=10_000.0,
         initial_soc_pct=5.0,

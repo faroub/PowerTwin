@@ -1,5 +1,6 @@
 """Automated Unit Tests for WP07 Historian, Database, and Audit Trail."""
 
+import asyncio
 import os
 import pathlib
 from typing import cast
@@ -9,6 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.historian import service as historian_service
 from backend.app.historian.service import HistorianService
+
+
+def _read_overflow_file(path: str) -> list[str]:
+    """Read all lines from the historian overflow file (blocking, worker-safe)."""
+    with open(path, encoding="utf-8") as f:
+        return f.read().strip().splitlines()
 
 
 def test_historian_telemetry_buffering_and_timestamp_consistency() -> None:
@@ -72,7 +79,8 @@ def test_emergency_disk_overflow_flush_on_buffer_full(
     assert historian.record_telemetry("TAG1", "EQ1", 10.0, "V", 100) is True
     assert historian.record_telemetry("TAG2", "EQ1", 12.0, "V", 200) is True
 
-    # 3rd item triggers emergency overflow write to disk (Returns False for memory queue, writes to disk)
+    # 3rd item triggers emergency overflow write to disk (Returns False for memory
+    # queue, writes to disk)
     overflow_occurred = historian.record_telemetry("TAG3", "EQ1", 14.0, "V", 300)
     assert overflow_occurred is False
 
@@ -137,7 +145,8 @@ async def test_flush_buffer_to_db_rollback_preserves_overflow(
     assert events_written == 0
 
     # Buffered items were preserved to disk again (no silent data loss)
-    with open(overflow_file, encoding="utf-8") as f:
-        content = f.read().strip().splitlines()
+    # Read the file on a worker thread: running `open()` inside the event loop
+    # blocks the loop, which ruff flags as ASYNC230.
+    content = await asyncio.to_thread(_read_overflow_file, overflow_file)
     assert len(content) >= 2
     assert any("TAG3" in line for line in content)

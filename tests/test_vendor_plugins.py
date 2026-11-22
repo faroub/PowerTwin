@@ -86,10 +86,8 @@ def test_sungrow_sc5000_pcs_plugin_instantiation() -> None:
 
 
 def test_multi_vendor_plant_topology_without_modifying_core_engine() -> None:
-    """Demonstrate that a second/third vendor implementation can be added and dispatched in a single plant
-
-    topology without modifying the generic simulation engine, PPC (Layer B), or EMS (Layer C).
-    """
+    """Demonstrate that a second/third vendor implementation can be added and
+    dispatched in a single plant topology without modifying the core engine."""
     # 1. Register vendor plugins with PluginRegistry
     registry = PluginRegistry()
     registry.register_plugin_class(CATLEnerOneBatteryPlugin)
