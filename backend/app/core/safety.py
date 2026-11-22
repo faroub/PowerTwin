@@ -17,6 +17,13 @@ HARDWARE_INTEGRATION_ENABLED: Final[bool] = False
 AUTOMATIC_DEVICE_DISCOVERY_ENABLED: Final[bool] = False
 APPLICATION_MODE: Final[str] = "SIMULATION ONLY"
 
+# Minimum length of the JWT signing secret in bytes. Secrets shorter than this
+# cannot withstand offline dictionary attacks and must be rejected in production.
+JWT_SECRET_MIN_BYTES: Final[int] = 32
+
+# Minimum length of the database password in characters.
+POSTGRES_PASSWORD_MIN_BYTES: Final[int] = 20
+
 
 class SafetyGuardrailsReport(TypedDict):
     application_mode: str
@@ -37,6 +44,63 @@ def get_safety_report() -> SafetyGuardrailsReport:
         "automatic_device_discovery_enabled": AUTOMATIC_DEVICE_DISCOVERY_ENABLED,
         "safety_status": "ACTIVE_SIMULATION_GUARDRAILS_ENFORCED",
     }
+
+
+def _validate_token_secret() -> None:
+    """Reject an empty or weak JWT signing secret in production deployments.
+
+    Development and testing environments generate a per-process random secret,
+    while production deployments that rely on the default value can never sign
+    tokens securely. Failing closed here prevents accidental acceptance of an
+    unprotected process.
+    """
+    if settings.ENVIRONMENT not in ("production",):
+        return
+
+    if not settings.JWT_SECRET_KEY or len(settings.JWT_SECRET_KEY) < JWT_SECRET_MIN_BYTES:
+        msg = (
+            "SECURITY VIOLATION: The JWT signing secret must be at least "
+            f"{JWT_SECRET_MIN_BYTES} characters; an empty secret can never "
+            "protect session tokens in a production deployment."
+        )
+        logger.critical(msg)
+        raise RuntimeError(msg)
+
+
+def _validate_database_password() -> None:
+    """Reject a default or weak database password in production deployments."""
+    if settings.ENVIRONMENT not in ("production",):
+        return
+
+    if not settings.POSTGRES_PASSWORD:
+        msg = (
+            "SECURITY VIOLATION: The database password must be at least "
+            f"{POSTGRES_PASSWORD_MIN_BYTES} characters; a default or weak "
+            "password enables offline brute-force attacks against the historian."
+        )
+        logger.critical(msg)
+        raise RuntimeError(msg)
+
+    if len(settings.POSTGRES_PASSWORD) < POSTGRES_PASSWORD_MIN_BYTES:
+        msg = (
+            "SECURITY VIOLATION: The database password must be at least "
+            f"{POSTGRES_PASSWORD_MIN_BYTES} characters; a default or weak "
+            "password enables offline brute-force attacks against the historian."
+        )
+        logger.critical(msg)
+        raise RuntimeError(msg)
+
+
+def _validate_login_limits() -> None:
+    """Reject unreasonable authentication rate-limit settings."""
+    if settings.LOGIN_RATE_LIMIT > 0 and settings.LOGIN_LOCKOUT_SECONDS > 0:
+        return
+    msg = (
+        "SECURITY VIOLATION: LOGIN_RATE_LIMIT and LOGIN_LOCKOUT_SECONDS must "
+        "both be positive; an invalid rate limit disables login throttling."
+    )
+    logger.critical(msg)
+    raise RuntimeError(msg)
 
 
 def validate_safety_invariants() -> None:
@@ -63,23 +127,9 @@ def validate_safety_invariants() -> None:
             logger.critical(msg)
             raise RuntimeError(msg)
 
-    # 3. Production Security & Secret Invariant Validation
-    if settings.ENVIRONMENT == "production":
-        dev_secret = "default_powertwin_dev_secret_key_change_in_production"
-        if settings.JWT_SECRET_KEY == dev_secret:
-            msg = (
-                "SECURITY VIOLATION: Default development JWT_SECRET_KEY "
-                "cannot be used in production."
-            )
-            logger.critical(msg)
-            raise RuntimeError(msg)
-
-        if settings.POSTGRES_PASSWORD == "powertwin_secret":
-            msg = (
-                "SECURITY VIOLATION: Default POSTGRES_PASSWORD "
-                "cannot be used in production environment."
-            )
-            logger.critical(msg)
-            raise RuntimeError(msg)
+    # 3. Authentication and Secret Invariant Validation
+    _validate_token_secret()
+    _validate_database_password()
+    _validate_login_limits()
 
     logger.info("All application safety and security invariants validated successfully.")

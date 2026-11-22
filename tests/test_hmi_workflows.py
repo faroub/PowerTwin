@@ -17,6 +17,7 @@ def test_unauthenticated_requests_rejected(client: TestClient) -> None:
 
 def test_observer_role_can_read_telemetry_but_cannot_modify_simulation(
     client: TestClient,
+    dev_test_password: str,
 ) -> None:
     """Test OBSERVER role can read overview SCADA metrics but is denied
     simulation control actions."""
@@ -28,7 +29,8 @@ def test_observer_role_can_read_telemetry_but_cannot_modify_simulation(
     set_active_simulation_engine(plant.simulation_engine)
 
     login_res = client.post(
-        "/api/v1/auth/login", json={"username": "observer", "password": "observer123"}
+        "/api/v1/auth/login",
+        json={"username": "observer", "password": dev_test_password},
     )
     assert login_res.status_code == 200
     token = login_res.json()["access_token"]
@@ -50,12 +52,14 @@ def test_observer_role_can_read_telemetry_but_cannot_modify_simulation(
 
 def test_simulation_control_returns_503_when_no_engine_connected(
     client: TestClient,
+    dev_test_password: str,
 ) -> None:
     """Test simulation control API returns 503 NOT_CONNECTED when no active engine is attached."""
     set_active_simulation_engine(None)
 
     login_res = client.post(
-        "/api/v1/auth/login", json={"username": "engineer", "password": "engineer123"}
+        "/api/v1/auth/login",
+        json={"username": "engineer", "password": dev_test_password},
     )
     token = login_res.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -70,6 +74,7 @@ def test_simulation_control_returns_503_when_no_engine_connected(
 
 def test_simulation_control_executes_action_on_active_engine(
     client: TestClient,
+    dev_test_password: str,
 ) -> None:
     """Test simulation control API executes action on active
     SimulationRunManager engine instance."""
@@ -81,7 +86,8 @@ def test_simulation_control_executes_action_on_active_engine(
     set_active_simulation_engine(plant.simulation_engine)
 
     login_res = client.post(
-        "/api/v1/auth/login", json={"username": "engineer", "password": "engineer123"}
+        "/api/v1/auth/login",
+        json={"username": "engineer", "password": dev_test_password},
     )
     token = login_res.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -107,10 +113,14 @@ def test_simulation_control_executes_action_on_active_engine(
     set_active_simulation_engine(None)
 
 
-def test_simulation_control_rejects_unknown_action(client: TestClient) -> None:
+def test_simulation_control_rejects_unknown_action(
+    client: TestClient,
+    dev_test_password: str,
+) -> None:
     """Test simulation control API rejects unknown/invalid action string with 422."""
     login_res = client.post(
-        "/api/v1/auth/login", json={"username": "engineer", "password": "engineer123"}
+        "/api/v1/auth/login",
+        json={"username": "engineer", "password": dev_test_password},
     )
     token = login_res.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}

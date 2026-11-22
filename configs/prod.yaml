@@ -3,6 +3,9 @@ project_name: "PowerTwin BESS Simulator (Prod)"
 environment: "production"
 debug: false
 
+# Required: a strong database password must be supplied via the
+# `POSTGRES_PASSWORD` environment variable on both the server and the
+# client container.  No placeholder value is embedded here.
 safety:
   application_mode: "SIMULATION ONLY"
   simulation_only: true
@@ -12,14 +15,13 @@ safety:
 
 server:
   host: "0.0.0.0"
-  port: 8000
 
 database:
-  server: "timescaledb"
+  server: "${POSTGRES_SERVER}"
   port: 5432
-  user: "powertwin"
-  password: "powertwin_prod_secure_password"
-  db_name: "powertwin_prod_db"
+  user: "${POSTGRES_USER:-powertwin}"
+  password: "${POSTGRES_PASSWORD}"
+  db_name: "${POSTGRES_DB}"
 
 simulation_defaults:
   tick_rate_hz: 100

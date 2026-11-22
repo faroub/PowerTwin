@@ -4,6 +4,10 @@
  * The role/permission sets are deliberately read-only on the frontend: the backend
  * validates permissions server-side for every endpoint. The UI uses this information
  * only for rendering, never for enforcing access.
+ *
+ * NOTE: Local credential storage exists only on the backend. The frontend neverVALIDATES
+ * or stores user passwords; every login request is forwarded to the backend
+ * (`/api/v1/auth/login`) for authentication.
  */
 
 export type Permission =
@@ -24,17 +28,17 @@ export interface UserSession {
 /** Map of user role → set of granted permission identifiers. */
 export type RolePermissions = Record<string, Set<Permission>>;
 
-/** Mirrors the backend `ROLE_PERMISSIONS` RBAC table for UI rendering only. */
+/** Mirrors the backend `USER_ROLES` RBAC table for UI rendering only. */
 export const rolePermissions: RolePermissions = {
-  observer: new Set(['READ_TELEMETRY', 'READ_CONFIG']),
-  engineer: new Set([
+  OBSERVER: new Set(['READ_TELEMETRY', 'READ_CONFIG']),
+  ENGINEER: new Set([
     'READ_TELEMETRY',
     'READ_CONFIG',
     'EXECUTE_SCENARIO',
     'INJECT_FAULT',
     'MODIFY_SIMULATION',
   ]),
-  admin: new Set([
+  ADMINISTRATOR: new Set([
     'READ_TELEMETRY',
     'READ_CONFIG',
     'EXECUTE_SCENARIO',
@@ -57,25 +61,15 @@ export function hasPermission(session: UserSession | null, permission: Permissio
   return session.permissions.has(permission);
 }
 
-type CmdResult<T> = { ok: true; data: T } | { ok: false; error: string };
-
-/** Known development user accounts, mirrored from the backend development database. */
-export const devUsers: Record<string, string> = {
-  observer: 'observer123',
-  engineer: 'engineer123',
-  admin: 'admin123',
-};
-
 /**
- * Validate local user credentials against the pre-seeded development account set.
- *
- * In production (non-development ENVIRONMENT in the backend) this endpoint returns 401
- * and the frontend will report an authentication failure.
+ * Translate the role reported by the backend (`OBSERVER`, `ENGINEER`, `ADMINISTRATOR`)
+ * into the frontend permission sets. Unknown roles receive an empty permission set;
+ * the backend remains the authority for permission enforcement on every request.
  */
-export async function checkLocalLogin(username: string, password: string): Promise<CmdResult<void>> {
-  const expected = devUsers[username.toLowerCase()];
-  if (!expected || expected !== password) {
-    return { ok: false, error: 'Incorrect username or password.' };
+export function roleToPermissions(role: string): Set<Permission> {
+  const known = rolePermissions[role];
+  if (!known) {
+    return new Set<Permission>();
   }
-  return { ok: true, data: undefined };
+  return known;
 }

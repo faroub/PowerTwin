@@ -1,14 +1,13 @@
 /**
  * Platform login view.
  *
- * Operators authenticate with a development account before any HMI control page renders.
- * The session token lives exclusively in memory (`platformSession`), and the backend
- * enforces permissions server-side on every endpoint.
+ * Operators authenticate against the backend (`/api/v1/auth/login`) before any HMI
+ * control page renders. No credentials are validated or stored in the frontend: the
+ * backend is the sole authority for authentication, permissions and session validation.
  */
 
 import React, { useState } from 'react';
 
-import { checkLocalLogin } from '../services/auth';
 import { fetchUserDetails, login, logout, platformSession } from '../services/api';
 
 interface LoginViewProps {
@@ -32,22 +31,16 @@ export const LoginView: React.FC<LoginViewProps> = (props) => {
     setError(null);
     setLoading(true);
 
-    const validation = await checkLocalLogin(username, password);
-    if (!validation.ok) {
-      setError(validation.error);
-      return;
-    }
-
     const tokenResponse = await login({ username, password });
     if (!tokenResponse) {
-      setError('Login failed: invalid credentials or backend unavailable.');
+      setError('Login failed: invalid credentials, or the backend is unavailable.');
       setLoading(false);
       return;
     }
 
     const user = await fetchUserDetails(tokenResponse.access_token);
     if (!user) {
-      setError('Login failed: could not verify session details.');
+      setError('Login failed: could not verify the session details.');
       setLoading(false);
       return;
     }
@@ -144,8 +137,6 @@ export const LoginView: React.FC<LoginViewProps> = (props) => {
           Disassociate (Session: {platformSession.user?.username})
         </div>
       )}
-
-      {children}
     </div>
   );
 };

@@ -78,26 +78,6 @@ def create_user_session(username: str, role: UserRole) -> UserSession:
     return UserSession(username=username, role=role, permissions=permissions)
 
 
-# Pre-seeded local development user accounts
-DEV_USERS_DB: dict[str, dict[str, Any]] = {
-    "observer": {
-        "username": "observer",
-        "hashed_password": pbkdf2_sha256.hash("observer123"),
-        "role": UserRole.OBSERVER,
-    },
-    "engineer": {
-        "username": "engineer",
-        "hashed_password": pbkdf2_sha256.hash("engineer123"),
-        "role": UserRole.ENGINEER,
-    },
-    "admin": {
-        "username": "admin",
-        "hashed_password": pbkdf2_sha256.hash("admin123"),
-        "role": UserRole.ADMINISTRATOR,
-    },
-}
-
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify plain password against hashed password."""
     return bool(pbkdf2_sha256.verify(plain_password, hashed_password))

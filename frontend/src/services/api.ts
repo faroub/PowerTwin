@@ -11,7 +11,7 @@
  * SIMULATION ONLY posture and avoids persisting credentials.
  */
 
-import { rolePermissions } from './auth';
+import { roleToPermissions } from './auth';
 import type { Permission, UserSession } from './auth';
 
 export interface SafetyReport {
@@ -217,13 +217,18 @@ export async function fetchUserDetails(token: string): Promise<UserSession | nul
     const res = await fetch(`${BASE_URL}/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (res.ok) {
-      const user = await res.json();
-      const role = user.role;
-      const permissions = rolePermissions[role] ?? new Set<Permission>();
-      return { username: user.username, role, permissions };
+    if (!res.ok) {
+      return null;
     }
-    return null;
+    const user = await res.json();
+    const role = user.role;
+    const backendPermissions = Array.isArray(user.permissions)
+      ? user.permissions.map((p: string): Permission => p as Permission)
+      : [];
+    const permissions = backendPermissions.length > 0
+      ? new Set<Permission>(backendPermissions)
+      : roleToPermissions(role);
+    return { username: user.username, role, permissions };
   } catch {
     return null;
   }

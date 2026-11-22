@@ -14,7 +14,10 @@ from backend.app.simulation.fault_injection import (
 from backend.app.topology.factory import PlantTopologyFactory
 
 
-def test_25_step_e2e_scheduler_driven_workflow() -> None:
+def test_25_step_e2e_scheduler_driven_workflow(
+    client: TestClient,
+    dev_test_password: str,
+) -> None:
     """Execute the full 25-step scheduler-driven end-to-end BESS plant simulation demonstration."""
     # Step 1: Load and validate the 10 MW / 20 MWh reference plant
     factory = PlantTopologyFactory()
@@ -128,7 +131,8 @@ def test_25_step_e2e_scheduler_driven_workflow() -> None:
 
     client = TestClient(app)
     login_res = client.post(
-        "/api/v1/auth/login", json={"username": "observer", "password": "observer123"}
+        "/api/v1/auth/login",
+        json={"username": "observer", "password": dev_test_password},
     )
     token = login_res.json()["access_token"]
 

@@ -7,6 +7,8 @@ from backend.app.core.safety import (
     APPLICATION_MODE,
     AUTOMATIC_DEVICE_DISCOVERY_ENABLED,
     HARDWARE_INTEGRATION_ENABLED,
+    JWT_SECRET_MIN_BYTES,
+    POSTGRES_PASSWORD_MIN_BYTES,
     SIMULATION_ONLY,
     get_safety_report,
     validate_safety_invariants,
@@ -38,19 +40,102 @@ def test_validate_safety_invariants_success_in_dev_mode() -> None:
     validate_safety_invariants()
 
 
-def test_validate_safety_invariants_rejection_in_production_with_dev_secrets(
+def test_validate_safety_invariants_rejection_of_missing_token_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify safety validation raises RuntimeError in production mode when
-    default secrets exist."""
+    """Verify safety validation raises RuntimeError when the production secret is empty."""
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", "")
     monkeypatch.setattr(
-        settings,
-        "JWT_SECRET_KEY",
-        "default_powertwin_dev_secret_key_change_in_production",
+        settings, "POSTGRES_PASSWORD", "a" * POSTGRES_PASSWORD_MIN_BYTES
     )
 
     with pytest.raises(RuntimeError) as exc_info:
         validate_safety_invariants()
 
     assert "SECURITY VIOLATION" in str(exc_info.value)
+    assert "JWT signing secret" in str(exc_info.value)
+
+
+def test_validate_safety_invariants_rejection_of_weak_token_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify safety validation raises RuntimeError when the production secret is weak."""
+    weak_secret = "very" * 6
+    assert len(weak_secret) < JWT_SECRET_MIN_BYTES
+
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", weak_secret)
+    monkeypatch.setattr(
+        settings, "POSTGRES_PASSWORD", "a" * POSTGRES_PASSWORD_MIN_BYTES
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_safety_invariants()
+
+    assert "SECURITY VIOLATION" in str(exc_info.value)
+    assert "JWT signing secret" in str(exc_info.value)
+
+
+def test_validate_safety_invariants_rejection_of_weak_database_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify safety validation raises RuntimeError when the production password is weak."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", "a" * JWT_SECRET_MIN_BYTES)
+    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "short_password")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_safety_invariants()
+
+    assert "SECURITY VIOLATION" in str(exc_info.value)
+    assert "database password" in str(exc_info.value)
+
+
+def test_validate_safety_invariants_rejection_of_invalid_login_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify safety validation raises RuntimeError when login limits are unusable."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", "a" * JWT_SECRET_MIN_BYTES)
+    monkeypatch.setattr(
+        settings, "POSTGRES_PASSWORD", "a" * POSTGRES_PASSWORD_MIN_BYTES
+    )
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT", -1)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_safety_invariants()
+
+    assert "SECURITY VIOLATION" in str(exc_info.value)
+
+
+def test_validate_safety_invariants_production_with_strong_config_ok(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify safety validation passes with a strong production configuration."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", "a" * JWT_SECRET_MIN_BYTES)
+    monkeypatch.setattr(
+        settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES
+    )
+
+    validate_safety_invariants()
+
+
+def test_validate_safety_invariants_rejects_nonloopback_modbus_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify Modbus writes refuse a non-loopback host binding in production mode."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "JWT_SECRET_KEY", "a" * JWT_SECRET_MIN_BYTES)
+    monkeypatch.setattr(
+        settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES
+    )
+    monkeypatch.setattr(settings, "ALLOW_EXTERNAL_MODBUS_WRITES", True)
+    monkeypatch.setattr(settings, "PROTOCOL_GATEWAY_HOST", "192.168.1.1")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_safety_invariants()
+
+    assert "INVARIANT VIOLATION" in str(exc_info.value)
+    assert "non-loopback host interface" in str(exc_info.value)

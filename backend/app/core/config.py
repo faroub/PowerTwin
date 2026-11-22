@@ -1,11 +1,14 @@
 """Application configuration management using Pydantic BaseSettings."""
 
+import logging
 import os
 import secrets
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -17,19 +20,60 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._validate_password_config()
+
+    def _validate_password_config(self) -> None:
+        """Warn (never block) when a database password is weaker than the guidance."""
+        password = self.POSTGRES_PASSWORD
+        if password and len(password) < 20:
+            logger.warning(
+                "POSTGRES_PASSWORD should be at least 20 characters; this strongly "
+                "reduces the cost of offline brute-force attacks."
+            )
+
     # General Project Information
     PROJECT_NAME: str = "PowerTwin BESS Simulator"
     ENVIRONMENT: Literal["development", "production", "testing"] = "development"
     DEBUG: bool = True
     API_V1_STR: str = "/api/v1"
 
+    @staticmethod
+    def _generate_jwt_secret() -> str:
+        """Generate a cryptographically secure JWT signing key.
+
+        Production deployments inherit no default; `validate_safety_invariants`
+        treat a missing key as a fatal failure so that an unprotected secret can
+        never accidentally sign production tokens.
+        """
+        env_value = os.getenv("JWT_SECRET_KEY", "").strip()
+        if env_value:
+            return env_value
+        if os.getenv("ENVIRONMENT", "development") == "production":
+            return ""
+        return secrets.token_hex(32)
+
     # Authentication & Security
+    #
+    # No default secret is embedded: in development/testing a new cryptographically
+    # secure key is generated on startup, while production deployments require an
+    # explicit and strong key (checked at startup in `validate_safety_invariants`).
     JWT_SECRET_KEY: str = Field(
-        default="default_powertwin_dev_secret_key_change_in_production",
-        description="Secret key for JWT signing. MUST be overridden in production.",
+        default_factory=lambda: Settings._generate_jwt_secret(),
+        description="Secret key for JWT signing. Must be set to a strong secret in production.",
     )
+    JWT_SECRET_MIN_BYTES: int = 32
     JWT_ALGORITHM: str = "HS256"
+    JWT_AUDIENCE: str = "powertwin"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    LOGIN_RATE_LIMIT: int = Field(
+        default=5,
+        description="Maximum authentication attempts over the lockout window.",
+    )
+    LOGIN_LOCKOUT_SECONDS: int = Field(
+        default=60, description="Duration of a single authentication lockout window."
+    )
 
     # Server Configuration
     HOST: str = "0.0.0.0"
