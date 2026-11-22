@@ -1,6 +1,7 @@
 """Modbus TCP Gateway Server Adapter for CIL External Controller Interoperability."""
 
 import logging
+import math
 
 from backend.app.communication.adapter import (
     ModbusRegisterMapSpec,
@@ -52,6 +53,22 @@ DEFAULT_REGISTER_MAP: dict[int, ModbusRegisterMapSpec] = {
         is_writable=False,
         description="Plant Average State of Charge",
     ),
+    10: ModbusRegisterMapSpec(
+        address=10,
+        name="EQUIPMENT_AVAILABILITY_PCT",
+        data_type=RegisterDataType.FLOAT32,
+        unit="pct",
+        is_writable=False,
+        description="Plant Equipment Availability Percentage",
+    ),
+    12: ModbusRegisterMapSpec(
+        address=12,
+        name="ACTIVE_ALARMS_COUNT",
+        data_type=RegisterDataType.UINT32,
+        unit="count",
+        is_writable=False,
+        description="Total Active Critical Alarms Count",
+    ),
     100: ModbusRegisterMapSpec(
         address=100,
         name="COMMAND_ACTIVE_POWER_W",
@@ -81,6 +98,26 @@ DEFAULT_REGISTER_MAP: dict[int, ModbusRegisterMapSpec] = {
         min_value=0.0,
         max_value=4294967295.0,
         description="External Controller Watchdog Heartbeat Counter",
+    ),
+    106: ModbusRegisterMapSpec(
+        address=106,
+        name="COMMAND_EMS_MODE",
+        data_type=RegisterDataType.UINT16,
+        unit="enum",
+        is_writable=True,
+        min_value=0.0,
+        max_value=3.0,
+        description="EMS Operational Mode (0=MANUAL, 1=SCHEDULED, 2=PEAK, 3=DROOP)",
+    ),
+    108: ModbusRegisterMapSpec(
+        address=108,
+        name="COMMAND_RESET_FAULTS",
+        data_type=RegisterDataType.UINT16,
+        unit="flag",
+        is_writable=True,
+        min_value=0.0,
+        max_value=1.0,
+        description="Reset Active Equipment Faults (1 = Reset)",
     ),
 }
 
@@ -135,6 +172,9 @@ class ModbusTCPGatewayServer(ProtocolAdapterInterface):
         self, address: int, value: float, client_id: str = "EXTERNAL_CIL_CONTROLLER"
     ) -> tuple[bool, str]:
         """Validate and execute inbound Modbus write command from external controller."""
+        if math.isnan(value) or math.isinf(value):
+            return (False, f"REJECTED_NON_FINITE: Value {value} is non-finite.")
+
         if not self.allow_writes:
             return (
                 False,
