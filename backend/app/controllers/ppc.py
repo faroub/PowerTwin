@@ -117,7 +117,8 @@ class PowerPlantController:
         # 2. Control Mode Modifications (Volt-VAR / Power Factor)
         effective_q_req = requested_q_var
         if self.control_mode == PPCControlMode.VOLT_VAR:
-            v_dev_pct = (poi_voltage_v - 13800.0) / 13800.0
+            v_nom = transformer.config.secondary_voltage_v if transformer else poi_voltage_v
+            v_dev_pct = (poi_voltage_v - v_nom) / max(1.0, v_nom)
             if abs(v_dev_pct) > 0.01:
                 effective_q_req = -v_dev_pct * 10.0 * (plant_avail_s_max * 0.1)
 
@@ -128,6 +129,9 @@ class PowerPlantController:
 
         # 3. Enforce Plant Apparent Power Capability Circle (P^2 + Q^2 <= S_plant_max^2)
         s_max_cap = min(self.config.plant_rated_apparent_power_va, plant_avail_s_max)
+        if transformer is not None:
+            s_max_cap = min(s_max_cap, transformer.config.rating_va)
+
         p_cap = min(self.config.plant_rated_active_power_w, plant_avail_p_max)
 
         if self.config.priority_mode == PPCPriorityMode.ACTIVE_POWER_PRIORITY:
@@ -144,13 +148,14 @@ class PowerPlantController:
         self.accepted_p_w = p_accepted
         self.accepted_q_var = q_accepted
 
-        # 4. Power Allocation Among Available PCS Units
-        num_units = len(available_pcs)
-        unit_p_w = p_accepted / num_units
-        unit_q_var = q_accepted / num_units
+        # 4. Proportional Power Allocation Among Available PCS Units
+        total_s_avail = sum(pcs.config.rated_apparent_power_va for pcs in available_pcs)
 
         for pcs in pcs_units:
             if pcs in available_pcs:
+                ratio = pcs.config.rated_apparent_power_va / max(1.0, total_s_avail)
+                unit_p_w = p_accepted * ratio
+                unit_q_var = q_accepted * ratio
                 pcs.process_command({"requested_p_w": unit_p_w, "requested_q_var": unit_q_var})
             else:
                 pcs.process_command({"requested_p_w": 0.0, "requested_q_var": 0.0})
