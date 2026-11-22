@@ -153,42 +153,55 @@ class HistorianService:
     async def flush_buffer_to_db(self, session: AsyncSession) -> tuple[int, int, int]:
         """Flush in-memory buffered telemetry, commands, and alarms to TimescaleDB.
 
-        Returns:
-            Tuple of (telemetry_flushed, commands_flushed, events_flushed)
+        Rolls back and preserves data on disk overflow if database commit fails.
         """
-        telemetry_items: list[TelemetryDataModel] = []
+        raw_telemetry: list[dict[str, Any]] = []
         while not self._telemetry_queue.empty():
             try:
-                item = self._telemetry_queue.get_nowait()
-                telemetry_items.append(TelemetryDataModel(**item))
+                raw_telemetry.append(self._telemetry_queue.get_nowait())
             except queue.Empty:
                 break
 
-        command_items: list[CommandRecordModel] = []
+        raw_commands: list[dict[str, Any]] = []
         while not self._command_queue.empty():
             try:
-                item = self._command_queue.get_nowait()
-                command_items.append(CommandRecordModel(**item))
+                raw_commands.append(self._command_queue.get_nowait())
             except queue.Empty:
                 break
 
-        event_items: list[AlarmsAndEventsModel] = []
+        raw_events: list[dict[str, Any]] = []
         while not self._event_queue.empty():
             try:
-                item = self._event_queue.get_nowait()
-                event_items.append(AlarmsAndEventsModel(**item))
+                raw_events.append(self._event_queue.get_nowait())
             except queue.Empty:
                 break
 
-        if telemetry_items:
-            session.add_all(telemetry_items)
-        if command_items:
-            session.add_all(command_items)
-        if event_items:
-            session.add_all(event_items)
+        telemetry_models = [TelemetryDataModel(**item) for item in raw_telemetry]
+        command_models = [CommandRecordModel(**item) for item in raw_commands]
+        event_models = [AlarmsAndEventsModel(**item) for item in raw_events]
 
-        await session.commit()
-        return (len(telemetry_items), len(command_items), len(event_items))
+        try:
+            if telemetry_models:
+                session.add_all(telemetry_models)
+            if command_models:
+                session.add_all(command_models)
+            if event_models:
+                session.add_all(event_models)
+
+            await session.commit()
+            return (len(telemetry_models), len(command_models), len(event_models))
+        except Exception as err:
+            logger.error("Database commit failed (%s). Preserving data in overflow.", err)
+            await session.rollback()
+
+            for item in raw_telemetry:
+                self._write_overflow_to_disk("telemetry_overflow.json", item)
+            for item in raw_commands:
+                self._write_overflow_to_disk("command_overflow.json", item)
+            for item in raw_events:
+                self._write_overflow_to_disk("event_overflow.json", item)
+
+            return (0, 0, 0)
 
     def get_buffer_status(self) -> dict[str, Any]:
         """Return current buffer usage metrics."""

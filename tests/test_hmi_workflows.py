@@ -3,7 +3,7 @@
 from fastapi.testclient import TestClient
 
 from backend.app.api.v1.simulation_ctrl import set_active_simulation_engine
-from backend.app.simulation.manager import SimulationRunManager
+from backend.app.topology.factory import PlantTopologyFactory
 
 
 def test_unauthenticated_requests_rejected(client: TestClient) -> None:
@@ -19,6 +19,13 @@ def test_observer_role_can_read_telemetry_but_cannot_modify_simulation(
     client: TestClient,
 ) -> None:
     """Test OBSERVER role can read overview SCADA metrics but is denied simulation control actions."""
+    factory = PlantTopologyFactory()
+    plant = factory.build_plant(
+        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
+    )
+    plant.simulation_engine.shared_state["plant_instance"] = plant
+    set_active_simulation_engine(plant.simulation_engine)
+
     login_res = client.post(
         "/api/v1/auth/login", json={"username": "observer", "password": "observer123"}
     )
@@ -28,13 +35,16 @@ def test_observer_role_can_read_telemetry_but_cannot_modify_simulation(
 
     overview_res = client.get("/api/v1/overview", headers=headers)
     assert overview_res.status_code == 200
-    assert overview_res.json()["active_power_mw"] == 4.85
+    assert overview_res.json()["simulation_state"] == "STOPPED"
+    assert overview_res.json()["total_energy_mwh"] == 20.0
 
     control_res = client.post(
         "/api/v1/simulation/control", json={"action": "PAUSE"}, headers=headers
     )
     assert control_res.status_code == 403
     assert "Access denied" in control_res.json()["detail"]
+
+    set_active_simulation_engine(None)
 
 
 def test_simulation_control_returns_503_when_no_engine_connected(
@@ -61,9 +71,12 @@ def test_simulation_control_executes_action_on_active_engine(
     client: TestClient,
 ) -> None:
     """Test simulation control API executes action on active SimulationRunManager engine instance."""
-    engine = SimulationRunManager()
-
-    set_active_simulation_engine(engine)
+    factory = PlantTopologyFactory()
+    plant = factory.build_plant(
+        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
+    )
+    plant.simulation_engine.shared_state["plant_instance"] = plant
+    set_active_simulation_engine(plant.simulation_engine)
 
     login_res = client.post(
         "/api/v1/auth/login", json={"username": "engineer", "password": "engineer123"}

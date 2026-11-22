@@ -18,6 +18,8 @@ export const PlantOverviewView: React.FC = () => {
     };
   }, []);
 
+  const isConnected = overview && overview.simulation_state !== 'NOT_CONNECTED';
+
   return (
     <div>
       <div className="view-header">
@@ -26,14 +28,14 @@ export const PlantOverviewView: React.FC = () => {
       </div>
 
       <div className="notice-box">
-        <strong>SCADA TELEMETRY MONITORING:</strong> Real-time operational state metrics streamed from the central simulation engine.
+        <strong>SCADA TELEMETRY MONITORING (SIMULATED DATA ONLY):</strong> Real-time operational state metrics streamed from the central simulation engine.
       </div>
 
       <div className="grid-cards">
         <div className="card">
           <div className="card-title">Plant Active Power</div>
           <div className="card-value" style={{ color: '#38bdf8' }}>
-            {overview ? `${overview.active_power_mw.toFixed(2)} MW` : '0.00 MW'}
+            {isConnected && overview?.active_power_mw !== null ? `${overview.active_power_mw.toFixed(2)} MW` : 'N/A'}
           </div>
           <div className="card-note">Net Export (+MW Discharge)</div>
         </div>
@@ -41,7 +43,7 @@ export const PlantOverviewView: React.FC = () => {
         <div className="card">
           <div className="card-title">Plant Reactive Power</div>
           <div className="card-value" style={{ color: '#38bdf8' }}>
-            {overview ? `${overview.reactive_power_mvar.toFixed(2)} MVAR` : '0.00 MVAR'}
+            {isConnected && overview?.reactive_power_mvar !== null ? `${overview.reactive_power_mvar.toFixed(2)} MVAR` : 'N/A'}
           </div>
           <div className="card-note">+VAR Supplying</div>
         </div>
@@ -49,7 +51,9 @@ export const PlantOverviewView: React.FC = () => {
         <div className="card">
           <div className="card-title">Avail. Charge / Discharge</div>
           <div className="card-value">
-            {overview ? `-${overview.avail_charge_mw.toFixed(1)} / +${overview.avail_discharge_mw.toFixed(1)} MW` : '0 MW'}
+            {isConnected && overview?.avail_charge_mw !== null && overview?.avail_discharge_mw !== null
+              ? `-${overview.avail_charge_mw.toFixed(1)} / +${overview.avail_discharge_mw.toFixed(1)} MW`
+              : 'N/A'}
           </div>
           <div className="card-note">Headroom Limits</div>
         </div>
@@ -57,7 +61,9 @@ export const PlantOverviewView: React.FC = () => {
         <div className="card">
           <div className="card-title">Average SoC / Energy</div>
           <div className="card-value" style={{ color: '#22c55e' }}>
-            {overview ? `${overview.average_soc_pct.toFixed(1)} % (${overview.total_energy_mwh.toFixed(1)} MWh)` : '0%'}
+            {isConnected && overview?.average_soc_pct !== null && overview?.total_energy_mwh !== null
+              ? `${overview.average_soc_pct.toFixed(1)} % (${overview.total_energy_mwh.toFixed(1)} MWh)`
+              : 'N/A'}
           </div>
           <div className="card-note">Plant Stored Energy</div>
         </div>
@@ -65,15 +71,19 @@ export const PlantOverviewView: React.FC = () => {
         <div className="card">
           <div className="card-title">Grid Freq / POI Voltage</div>
           <div className="card-value">
-            {overview ? `${overview.grid_frequency_hz.toFixed(2)} Hz | ${overview.poi_voltage_kv.toFixed(2)} kV` : '0 Hz'}
+            {isConnected && overview?.grid_frequency_hz !== null && overview?.poi_voltage_kv !== null
+              ? `${overview.grid_frequency_hz.toFixed(2)} Hz | ${overview.poi_voltage_kv.toFixed(2)} kV`
+              : 'N/A'}
           </div>
-          <div className="card-note">Nominal 50 Hz / 13.8 kV</div>
+          <div className="card-note">POI Bus Metrics</div>
         </div>
 
         <div className="card">
           <div className="card-title">Active Alarms / Availability</div>
           <div className="card-value" style={{ color: overview?.active_alarms_count === 0 ? '#22c55e' : '#ef4444' }}>
-            {overview ? `${overview.active_alarms_count} Alarms | ${overview.equipment_availability_pct.toFixed(0)}%` : '0 Alarms'}
+            {isConnected
+              ? `${overview?.active_alarms_count} Alarms | ${overview?.equipment_availability_pct.toFixed(0)}%`
+              : 'NOT CONNECTED'}
           </div>
           <div className="card-note">System Availability</div>
         </div>
