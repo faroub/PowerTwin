@@ -22,10 +22,11 @@ class PluginRegistry:
     def __init__(self, api_version: str = CURRENT_API_VERSION) -> None:
         self.api_version: str = api_version
         self._registered_classes: dict[str, type[BasePlugin]] = {}
+        self._registered_manifests: dict[str, PluginManifest] = {}
         self._active_plugins: dict[str, BasePlugin] = {}
 
     def register_plugin_class(self, plugin_cls: type[BasePlugin]) -> None:
-        """Register a plugin class into the approved registry.
+        """Register a plugin class into the approved registry and cache manifest.
 
         Args:
             plugin_cls: Subclass of BasePlugin.
@@ -40,9 +41,12 @@ class PluginRegistry:
             )
 
         if manifest.plugin_id in self._registered_classes:
-            logger.info("Updating plugin class registration: '%s'", manifest.plugin_id)
+            logger.info(
+                "Updating existing plugin class registration: '%s'", manifest.plugin_id
+            )
 
         self._registered_classes[manifest.plugin_id] = plugin_cls
+        self._registered_manifests[manifest.plugin_id] = manifest
         logger.info(
             "Registered plugin class '%s' (v%s)", manifest.plugin_id, manifest.version
         )
@@ -54,11 +58,8 @@ class PluginRegistry:
         return manifest_major == supported_major
 
     def get_registered_manifests(self) -> list[PluginManifest]:
-        """Return list of manifests for all registered plugin classes."""
-        manifests: list[PluginManifest] = []
-        for cls in self._registered_classes.values():
-            manifests.append(cls().manifest)
-        return manifests
+        """Return list of manifests for all registered plugin classes without instantiating objects."""
+        return list(self._registered_manifests.values())
 
     def validate_dependencies(self, instance_key: str) -> bool:
         """Verify all dependencies for a plugin instance are currently registered and enabled."""
@@ -85,13 +86,7 @@ class PluginRegistry:
     ) -> BasePlugin:
         """Instantiate, validate configuration, and initialize a registered plugin.
 
-        Args:
-            plugin_id: Unique string identifier of registered plugin class.
-            config: Configuration dictionary.
-            instance_id: Optional unique equipment instance identifier (e.g. 'CONTAINER_01').
-
-        Returns:
-            Initialized BasePlugin instance.
+        Plugins remain DISABLED after initialization until explicitly enabled via enable_plugin().
         """
         if plugin_id not in self._registered_classes:
             raise InitializationError(f"Plugin ID '{plugin_id}' is not registered.")
@@ -104,6 +99,8 @@ class PluginRegistry:
             object.__setattr__(plugin, "equipment_id", key)
 
         if not plugin.validate_config(config):
+            plugin.health_status = PluginHealthStatus.FAULTED
+            plugin.enabled = False
             raise InitializationError(
                 f"Configuration validation failed for plugin '{plugin_id}' (instance '{key}')"
             )
@@ -111,10 +108,12 @@ class PluginRegistry:
         try:
             plugin.initialize(config)
             plugin.health_status = PluginHealthStatus.HEALTHY
+            plugin.enabled = False  # Plugins remain disabled by default until enable_plugin() is called
             self._active_plugins[key] = plugin
             return plugin
         except Exception as e:
             plugin.health_status = PluginHealthStatus.FAULTED
+            plugin.enabled = False
             raise InitializationError(
                 f"Plugin '{plugin_id}' instance '{key}' initialization failed: {e}"
             ) from e
