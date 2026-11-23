@@ -14,11 +14,13 @@ Every plugin MUST include a metadata declaration class conforming to the `Plugin
 from pydantic import BaseModel
 from enum import Enum
 
+
 class PluginCategory(str, Enum):
     BATTERY_MODEL = "BATTERY_MODEL"
     PCS_MODEL = "PCS_MODEL"
     CONTROLLER = "CONTROLLER"
     GRID_SCENARIO = "GRID_SCENARIO"
+
 
 class PluginManifest(BaseModel):
     plugin_id: str  # e.g., "vendor_acme_lfp_cell_v2"
@@ -40,6 +42,7 @@ All equipment or controller plugins MUST implement the `BasePlugin` abstract bas
 
 ```python
 from abc import ABC, abstractmethod
+
 
 class BasePlugin(ABC):
     @property

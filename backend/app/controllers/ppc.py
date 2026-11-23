@@ -158,12 +158,58 @@ class PowerPlantController:
 
         p_cap = min(self.config.plant_rated_active_power_w, plant_avail_p_max)
 
+        # 3b. Ramp Rate Limiting (based on last accepted setpoint and time delta)
+        if self.config.max_ramp_rate_w_per_s > 0:
+            # Track last dispatch timestamp for ramp rate calculation
+            if not hasattr(self, "_last_dispatch_timestamp_ns"):
+                self._last_dispatch_timestamp_ns = -1
+
+            if self._last_dispatch_timestamp_ns >= 0 and self.accepted_p_w != 0.0:
+                delta_t_s = (timestamp_ns - self._last_dispatch_timestamp_ns) / 1e9
+                if delta_t_s > 0.0:
+                    max_delta_p = self.config.max_ramp_rate_w_per_s * delta_t_s
+                    # Handle sign changes: if requested and accepted have different signs,
+                    # we must pass through zero. The ramp rate limits the rate of magnitude change.
+                    if (requested_p_w >= 0.0 and self.accepted_p_w >= 0.0) or (
+                        requested_p_w <= 0.0 and self.accepted_p_w <= 0.0
+                    ):
+                        # Same sign: normal ramp limiting
+                        if requested_p_w > self.accepted_p_w:
+                            requested_p_w = min(requested_p_w, self.accepted_p_w + max_delta_p)
+                        elif requested_p_w < self.accepted_p_w:
+                            requested_p_w = max(requested_p_w, self.accepted_p_w - max_delta_p)
+                    else:
+                        # Sign change: limit the magnitude change from |accepted| towards |requested|
+                        # We ramp towards zero first, then towards the target sign
+                        # The maximum change in magnitude is max_delta_p
+                        if abs(requested_p_w) > abs(self.accepted_p_w):
+                            # Magnitude increasing (e.g., +1MW -> -5MW, or -1MW -> +5MW)
+                            # Can only increase magnitude by max_delta_p
+                            new_magnitude = min(
+                                abs(self.accepted_p_w) + max_delta_p, abs(requested_p_w)
+                            )
+                            requested_p_w = math.copysign(new_magnitude, requested_p_w)
+                        else:
+                            # Magnitude decreasing (e.g., +5MW -> -1MW, crossing zero)
+                            # Can decrease magnitude by max_delta_p
+                            new_magnitude = max(
+                                abs(self.accepted_p_w) - max_delta_p, abs(requested_p_w)
+                            )
+                            requested_p_w = math.copysign(new_magnitude, requested_p_w)
+
+        # Record current timestamp for next ramp limit calculation
+        self._last_dispatch_timestamp_ns = timestamp_ns
+
         if self.config.priority_mode == PPCPriorityMode.ACTIVE_POWER_PRIORITY:
+            # Active power priority: P gets priority, Q limited by S circle
             p_accepted = max(-p_cap, min(p_cap, requested_p_w))
+            # Clamp P by S capability circle as well
+            p_accepted = max(-s_max_cap, min(s_max_cap, p_accepted))
             q_headroom_sq = max(0.0, (s_max_cap**2) - (p_accepted**2))
             q_max_avail = math.sqrt(q_headroom_sq)
             q_accepted = max(-q_max_avail, min(q_max_avail, effective_q_req))
         else:  # REACTIVE_POWER_PRIORITY
+            # Reactive power priority: Q gets priority, P limited by S circle
             q_accepted = max(-s_max_cap, min(s_max_cap, effective_q_req))
             p_headroom_sq = max(0.0, (s_max_cap**2) - (q_accepted**2))
             p_max_avail = min(p_cap, math.sqrt(p_headroom_sq))

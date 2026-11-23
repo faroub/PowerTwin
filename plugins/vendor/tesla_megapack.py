@@ -14,7 +14,11 @@ from backend.app.models.battery.system import (
 )
 from backend.app.simulation.context import SimulationContext
 from plugins.base import BasePlugin
-from plugins.generic_battery import KEY_BATTERY_CMD_P_W_PREFIX, KEY_BATTERY_CMD_P_W, _read_setpoint
+from plugins.generic_battery import (
+    KEY_BATTERY_CMD_P_W_PREFIX,
+    KEY_BATTERY_CMD_P_W,
+    _read_setpoint,
+)
 from plugins.manifest import PluginCategory, PluginHealthStatus, PluginManifest
 
 

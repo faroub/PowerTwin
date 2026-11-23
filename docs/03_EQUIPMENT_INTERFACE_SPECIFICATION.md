@@ -13,11 +13,13 @@ from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field
 
+
 class QualityFlag(str, Enum):
     GOOD = "GOOD"
     BAD = "BAD"
     UNCERTAIN = "UNCERTAIN"
     STALE = "STALE"
+
 
 class TelemetryPoint(BaseModel):
     value: float
@@ -26,11 +28,13 @@ class TelemetryPoint(BaseModel):
     quality: QualityFlag = QualityFlag.GOOD
     source_id: str
 
+
 class SwitchState(str, Enum):
     OPEN = "OPEN"
     CLOSED = "CLOSED"
     TRIPPED = "TRIPPED"
     FAULT = "FAULT"
+
 
 class OperatingState(str, Enum):
     OFF = "OFF"
@@ -59,9 +63,12 @@ class BatteryRackState(BaseModel):
     min_cell_voltage_v: TelemetryPoint
     contactor_state: SwitchState
 
+
 class BatteryRackInterface:
     def initialize(self, config: dict) -> None: ...
-    def step(self, current_demand_a: float, ambient_temp_c: float, delta_t_s: float) -> BatteryRackState: ...
+    def step(
+        self, current_demand_a: float, ambient_temp_c: float, delta_t_s: float
+    ) -> BatteryRackState: ...
     def get_state(self) -> BatteryRackState: ...
 ```
 
@@ -73,6 +80,7 @@ class BMSCommand(BaseModel):
     close_contactors_request: bool
     reset_faults_request: bool
 
+
 class BMSStatus(BaseModel):
     bms_id: str
     operating_state: OperatingState
@@ -82,6 +90,7 @@ class BMSStatus(BaseModel):
     total_current_a: TelemetryPoint
     active_alarms: list[str]
     active_faults: list[str]
+
 
 class BMSMasterInterface:
     def process_command(self, cmd: BMSCommand) -> bool: ...
@@ -97,6 +106,7 @@ class PCSCommand(BaseModel):
     enable_inverter: bool
     reset_fault: bool
 
+
 class PCSStatus(BaseModel):
     pcs_id: str
     operating_state: OperatingState
@@ -108,9 +118,16 @@ class PCSStatus(BaseModel):
     efficiency_pct: TelemetryPoint
     igbt_temp_c: TelemetryPoint
 
+
 class PCSInterface:
     def process_command(self, cmd: PCSCommand) -> bool: ...
-    def step(self, dc_voltage_v: float, ac_grid_voltage_v: float, ac_grid_freq_hz: float, delta_t_s: float) -> PCSStatus: ...
+    def step(
+        self,
+        dc_voltage_v: float,
+        ac_grid_voltage_v: float,
+        ac_grid_freq_hz: float,
+        delta_t_s: float,
+    ) -> PCSStatus: ...
 ```
 
 ### 3.4 Transformer Interface (`TransformerInterface`)
@@ -125,8 +142,15 @@ class TransformerStatus(BaseModel):
     top_oil_temp_c: TelemetryPoint
     tap_position: int
 
+
 class TransformerInterface:
-    def step(self, primary_power_w: float, primary_power_var: float, ambient_temp_c: float, delta_t_s: float) -> TransformerStatus: ...
+    def step(
+        self,
+        primary_power_w: float,
+        primary_power_var: float,
+        ambient_temp_c: float,
+        delta_t_s: float,
+    ) -> TransformerStatus: ...
 ```
 
 ### 3.5 Switchgear Interface (`SwitchgearInterface`)
@@ -135,11 +159,13 @@ class TransformerInterface:
 class SwitchgearCommand(BaseModel):
     target_state: SwitchState
 
+
 class SwitchgearStatus(BaseModel):
     breaker_id: str
     current_state: SwitchState
     interlock_ok: bool
     trip_coil_healthy: bool
+
 
 class SwitchgearInterface:
     def execute_command(self, cmd: SwitchgearCommand) -> bool: ...
@@ -155,8 +181,11 @@ class HVACStatus(BaseModel):
     power_consumption_w: TelemetryPoint
     fan_speed_pct: TelemetryPoint
 
+
 class AuxiliaryHVACInterface:
-    def step(self, target_temp_c: float, current_container_temp_c: float, delta_t_s: float) -> HVACStatus: ...
+    def step(
+        self, target_temp_c: float, current_container_temp_c: float, delta_t_s: float
+    ) -> HVACStatus: ...
 ```
 
 ### 3.7 Point of Interconnection (POI) Interface (`POIInterface`)
@@ -170,6 +199,9 @@ class POIStatus(BaseModel):
     net_reactive_power_var: TelemetryPoint
     power_factor: TelemetryPoint
 
+
 class POIInterface:
-    def step(self, total_plant_p_w: float, total_plant_q_var: float, delta_t_s: float) -> POIStatus: ...
+    def step(
+        self, total_plant_p_w: float, total_plant_q_var: float, delta_t_s: float
+    ) -> POIStatus: ...
 ```

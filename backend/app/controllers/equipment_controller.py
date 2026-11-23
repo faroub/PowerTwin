@@ -246,6 +246,10 @@ class BESSEquipmentController:
         current_time_ns: int = 0,
     ) -> None:
         """Execute coordinated graceful shutdown sequence."""
+        self.log_state_transition(
+            current_time_ns, self.operating_state.value, OperatingState.STANDBY.value
+        )
+
         stop_cmd = {"enable_inverter": False, "requested_p_w": 0.0, "requested_q_var": 0.0}
         for pcs in pcs_list:
             pcs.process_command(stop_cmd)

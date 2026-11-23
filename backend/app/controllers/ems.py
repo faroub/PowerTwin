@@ -323,6 +323,16 @@ class EnergyManagementSystem:
                 droop_p = -(plant_p_rated / (self.config.droop_pct / 100.0)) * (f_diff / f_nom)
                 target_p = droop_p
 
+        # 1b. Scheduled Profile Mode (Time-of-Use Dispatch)
+        if self.active_mode == EMSMode.SCHEDULED_PROFILE and self.schedule:
+            for item in self.schedule:
+                start_ns = item.start_time_ns
+                end_ns = start_ns + int(item.duration_s * 1e9)
+                if start_ns <= timestamp_ns < end_ns:
+                    target_p = item.p_demand_w
+                    target_q = item.q_demand_var
+                    break
+
         # 2. Feasibility Evaluation
         feasibility = self.check_feasibility(
             target_p,
