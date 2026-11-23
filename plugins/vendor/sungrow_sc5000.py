@@ -12,12 +12,12 @@ from backend.app.models.pcs.pcs_model import GenericPCSModel, PCSConfigModel
 from backend.app.simulation.context import SimulationContext
 from plugins.base import BasePlugin
 from plugins.generic_pcs import (
-    KEY_PCS_CMD_ACTIVE_W_PREFIX,
-    KEY_PCS_CMD_REACTIVE_W_PREFIX,
-    KEY_PCS_CMD_ACTIVE_W,
-    KEY_PCS_CMD_REACTIVE_W,
     KEY_BATTERY_DC_VOLTAGE_V,
     KEY_PCS_AC_GRID_VOLTAGE_V,
+    KEY_PCS_CMD_ACTIVE_W,
+    KEY_PCS_CMD_ACTIVE_W_PREFIX,
+    KEY_PCS_CMD_REACTIVE_W,
+    KEY_PCS_CMD_REACTIVE_W_PREFIX,
     _read_setpoint,
 )
 from plugins.manifest import PluginCategory, PluginHealthStatus, PluginManifest

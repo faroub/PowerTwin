@@ -179,9 +179,10 @@ class PowerPlantController:
                         elif requested_p_w < self.accepted_p_w:
                             requested_p_w = max(requested_p_w, self.accepted_p_w - max_delta_p)
                     else:
-                        # Sign change: limit the magnitude change from |accepted| towards |requested|
-                        # We ramp towards zero first, then towards the target sign
-                        # The maximum change in magnitude is max_delta_p
+                        # Sign change: limit the magnitude change from |accepted|
+                        # towards |requested|. Ramp towards zero first, then towards
+                        # the target sign. The maximum change in magnitude is
+                        # max_delta_p.
                         if abs(requested_p_w) > abs(self.accepted_p_w):
                             # Magnitude increasing (e.g., +1MW -> -5MW, or -1MW -> +5MW)
                             # Can only increase magnitude by max_delta_p

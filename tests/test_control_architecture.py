@@ -716,8 +716,9 @@ def test_ppc_volt_var_control_mode() -> None:
 
 def test_ppc_power_factor_control_mode() -> None:
     """Test PPC POWER_FACTOR mode maintains target power factor."""
-    from backend.app.controllers.ppc import PPCControlMode
     import math
+
+    from backend.app.controllers.ppc import PPCControlMode
 
     config = PPCConfigModel(
         default_control_mode=PPCControlMode.POWER_FACTOR,
@@ -902,7 +903,7 @@ def test_ems_peak_shaving_mode() -> None:
     pcs.operating_state = OperatingState.RUNNING
 
     # Facility demand 8 MW, threshold 5 MW -> shave 3 MW
-    acc_p, _ = ems.dispatch_step(
+    _acc_p, _ = ems.dispatch_step(
         requested_p_w=0.0,
         requested_q_var=0.0,
         ppc=ppc,
@@ -1058,7 +1059,7 @@ def test_ppc_transformer_rating_limits_plant_capability() -> None:
     )
 
     # Request 50 MW -> limited by 30 MVA transformer
-    acc_p, acc_q = ppc.dispatch_poi_setpoint(
+    acc_p, _acc_q = ppc.dispatch_poi_setpoint(
         requested_p_w=50_000_000.0,
         requested_q_var=0.0,
         pcs_units=pcs_units,
