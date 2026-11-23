@@ -55,3 +55,59 @@ To enforce Safety Rule **SR-003** and **SR-012**:
 - Zero default passwords allowed; all database credentials and secret keys must be passed via secure environment files (`.env`) excluded from version control.
 - `deployment/docker-compose.yml` and the root `docker-compose.yml` publish every port bound to a loopback address (`127.0.0.1`) unless explicit published networking is required. No service is exposed to arbitrary networks by default.
 - Web application firewall, secret scanning, and dependency vulnerability checks run on every CI push and on a scheduled nightly cycle.
+
+### 3.4 Secrets & Credential Hygiene
+
+The following rules are enforced by the code and covered by
+`tests/test_config_secrets_hygiene.py` and `tests/test_deployment_binding.py`.
+
+**No credential is ever written to an audit trail.**
+`backend/app/core/secrets.py` provides the single redaction implementation used by
+every audit path. A value is redacted when its *parameter name* matches a known
+sensitive fragment (password, secret, token, credential, api key, private key,
+passphrase, authorization, salt, signature) or when a free-form string embeds
+credentials in a URL userinfo section (`scheme://user:password@host`). The
+placeholder `***REDACTED***` carries no information about the original value.
+
+| Audit path | Redaction applied |
+| --- | --- |
+| `AuditLog.record` / `AuditLog.record_failure` | `details` payload walked recursively; sensitive keys replaced, URL credentials rewritten |
+| `ConfigChangeAuditLog.log_change` | `old_value` / `new_value` replaced when `parameter_name` is sensitive; otherwise URL credentials in the value are rewritten |
+
+**A blank secret is never treated as a configured secret.**
+`Settings` applies field validators to `POSTGRES_PASSWORD` and `JWT_SECRET_KEY`.
+A variable that is exported but empty (or whitespace only) is replaced by a
+cryptographically random per-process value, so a Compose file that expands an
+undefined variable to an empty string can never authenticate with no password.
+In production the blank `JWT_SECRET_KEY` is preserved deliberately so that
+`validate_safety_invariants()` fails the start-up closed.
+
+**Connection strings are logged redacted.**
+`Settings.REDACTED_DATABASE_URL` returns the database URL with its password
+replaced by the placeholder. Any log line, error message or API response that
+mentions the database URL must use this property; `Settings.DATABASE_URL` must
+never leave the process.
+
+**Deployment fails fast on a missing secret.**
+Both Compose files reference the database password with the Compose fail-fast
+form `${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set - ...}`. An unset or
+empty variable aborts `docker compose config` and `docker compose up` with a
+non-zero exit status instead of starting the historian with an empty password.
+
+**Templates carry placeholders only.**
+`.env.example` and `configs/.env.example` list every supported setting and leave
+every credential *empty* — a placeholder such as `<your-secure-password>` would
+become a publicly known credential the moment the template is copied verbatim.
+Both templates bind the API server and the protocol gateway to `127.0.0.1`, and
+`ALLOW_EXTERNAL_MODBUS_WRITES=False` is present in both, so the external
+controller write path is never enabled by copying a template.
+
+**Known limitations.**
+
+- The redaction rules are name-based and pattern-based. A secret stored under a
+  name that carries no sensitive fragment (for example `POSTGRES_USER` used as
+  a password) is not redacted. The rule set is deliberately conservative and
+  errs towards redacting.
+- The JWT signing key is generated per process in development. Tokens therefore
+  do not survive a backend restart; this is intentional and must not be changed
+  for production deployments, which must set an explicit `JWT_SECRET_KEY`.

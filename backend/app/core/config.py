@@ -5,9 +5,10 @@ import os
 import secrets
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from backend.app.core.secrets import REDACTED_PLACEHOLDER
 from backend.app.simulation.config import SimulationConfiguration
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,34 @@ class Settings(BaseSettings):
         env_value = os.getenv("JWT_SECRET_KEY", "").strip()
         if env_value:
             return env_value
+        if os.getenv("ENVIRONMENT", "development") == "production":
+            return ""
+        return secrets.token_hex(32)
+
+    @staticmethod
+    def _secret_from_env(name: str) -> str:
+        """Read a secret from the environment, treating a blank value as unset.
+
+        This is the fallback used when the settings source supplies no value
+        at all. The authoritative guard against a blank secret is the
+        `_reject_blank_*` field validator, which also covers a value that the
+        settings source resolves to an empty string.
+        """
+        value = os.getenv(name, "")
+        return value if value.strip() else ""
+
+    @field_validator("JWT_SECRET_KEY", mode="after")
+    @classmethod
+    def _reject_blank_jwt_secret(cls, value: str) -> str:
+        """Replace a blank JWT signing key outside production.
+
+        A key that is exported but empty must never sign session tokens. In
+        production the blank value is preserved so that
+        `validate_safety_invariants` fails the start-up closed; in every other
+        environment a random per-process key is generated instead.
+        """
+        if value.strip():
+            return value
         if os.getenv("ENVIRONMENT", "development") == "production":
             return ""
         return secrets.token_hex(32)
@@ -106,16 +135,45 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int = Field(default_factory=lambda: int(os.getenv("POSTGRES_PORT", "5432")))
     POSTGRES_USER: str = Field(default_factory=lambda: os.getenv("POSTGRES_USER", "powertwin"))
     POSTGRES_PASSWORD: str = Field(
-        default_factory=lambda: os.getenv("POSTGRES_PASSWORD", secrets.token_hex(32)),
+        default_factory=lambda: (
+            Settings._secret_from_env("POSTGRES_PASSWORD") or secrets.token_hex(32)
+        ),
         description="Override: MUST be set to a strong secret in production.",
     )
     POSTGRES_DB: str = Field(default_factory=lambda: os.getenv("POSTGRES_DB", "powertwin_db"))
+
+    @field_validator("POSTGRES_PASSWORD", mode="after")
+    @classmethod
+    def _reject_blank_database_password(cls, value: str) -> str:
+        """Replace a blank database password with a random per-process secret.
+
+        A password that is exported but empty (for example by a Compose file
+        that expands an undefined `${POSTGRES_PASSWORD}` to an empty string)
+        must never be used to authenticate against the historian. An empty
+        credential is replaced by a random value so the connection fails
+        closed instead of succeeding with no password at all.
+        """
+        if value.strip():
+            return value
+        return secrets.token_hex(32)
 
     @property
     def DATABASE_URL(self) -> str:
         """Construct PostgreSQL async connection URL."""
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
+
+    @property
+    def REDACTED_DATABASE_URL(self) -> str:
+        """Return the connection URL with its password replaced by a placeholder.
+
+        Use this property for any log line, error message or API response that
+        mentions the database URL; the real URL must never leave the process.
+        """
+        return (
+            f"postgresql+asyncpg://{self.POSTGRES_USER}:{REDACTED_PLACEHOLDER}"
             f"@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
 

@@ -66,28 +66,46 @@ def test_environment_example_does_not_ship_a_password() -> None:
 
 
 def test_deployment_docker_compose_gets_password_from_environment() -> None:
-    """Test the deployment Compose file reads the password from the environment."""
+    """Test the deployment Compose file reads the password from the environment.
+
+    The reference must use the Compose fail-fast form (``${VAR:?message}``) so
+    that a missing secret aborts the deployment instead of silently starting a
+    database with an empty password.
+    """
     deployment = _load("deployment/docker-compose.yml")
 
     for service_name, service_definition in deployment["services"].items():
         if "POSTGRES_PASSWORD" in service_definition.get("environment", {}):
             reference = service_definition["environment"]["POSTGRES_PASSWORD"]
-            assert "${POSTGRES_PASSWORD}" in reference, (
+            assert "${POSTGRES_PASSWORD" in reference, (
                 f"Service '{service_name}' must read the database password "
                 "from the environment."
+            )
+            assert "${POSTGRES_PASSWORD:?}" in reference or ":?" in reference, (
+                f"Service '{service_name}' must fail fast when POSTGRES_PASSWORD "
+                "is not set; an unset secret must never become an empty password."
             )
 
 
 def test_root_docker_compose_gets_password_from_environment() -> None:
-    """Test the root Compose file reads the password from the environment."""
+    """Test the root Compose file reads the password from the environment.
+
+    The reference must use the Compose fail-fast form (``${VAR:?message}``) so
+    that a missing secret aborts the deployment instead of silently starting a
+    database with an empty password.
+    """
     root = _load("docker-compose.yml")
 
     for service_name, service_definition in root["services"].items():
         if "POSTGRES_PASSWORD" in service_definition.get("environment", {}):
             reference = service_definition["environment"]["POSTGRES_PASSWORD"]
-            assert "${POSTGRES_PASSWORD}" in reference, (
+            assert "${POSTGRES_PASSWORD" in reference, (
                 f"Service '{service_name}' must read the database password "
                 "from the environment."
+            )
+            assert "${POSTGRES_PASSWORD:?}" in reference or ":?" in reference, (
+                f"Service '{service_name}' must fail fast when POSTGRES_PASSWORD "
+                "is not set; an unset secret must never become an empty password."
             )
 
 

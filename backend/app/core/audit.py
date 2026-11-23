@@ -18,6 +18,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from backend.app.core.secrets import redact_details
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,7 +65,11 @@ class AuditLog:
         self._log_file = os.path.join(log_dir, "audit_events.json")
 
     def record(self, action: str, actor: str, target: str, *, details: Any = None) -> AuditEvent:
-        """Record an audit event with the given action and target (default: success)."""
+        """Record an audit event with the given action and target (default: success).
+
+        Sensitive values inside ``details`` are redacted before the event is
+        stored, so an audit trail never becomes a secondary store of secrets.
+        """
         event = AuditEvent(
             event_id=_event_id(),
             timestamp_ns=_now_ns(),
@@ -72,7 +78,7 @@ class AuditLog:
             actor=actor,
             target=target,
             outcome="SUCCESS",
-            details=details or {},
+            details=redact_details(details) if details else {},
         )
         return self._append_and_flush(event)
 
@@ -84,7 +90,11 @@ class AuditLog:
         *,
         details: Any = None,
     ) -> AuditEvent:
-        """Record a failed audit event."""
+        """Record a failed audit event.
+
+        Sensitive values inside ``details`` are redacted before the event is
+        stored.
+        """
         event = AuditEvent(
             event_id=_event_id(),
             timestamp_ns=_now_ns(),
@@ -93,7 +103,7 @@ class AuditLog:
             actor=actor,
             target=target,
             outcome="FAILURE",
-            details=details or {},
+            details=redact_details(details) if details else {},
         )
         return self._append_and_flush(event)
 
