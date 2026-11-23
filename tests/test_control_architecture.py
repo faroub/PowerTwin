@@ -537,7 +537,9 @@ def test_battery_distribution_respects_mixed_container_capacities() -> None:
     )
 
     # A single PCS unit representing the full 40 MW fleet.
-    fleet_pcs = GenericPCSModel(config=PCSConfigModel(rated_active_power_w=40_000_000.0))
+    fleet_pcs = GenericPCSModel(
+        config=PCSConfigModel(rated_active_power_w=40_000_000.0)
+    )
     fleet_pcs.actual_p_w = 40_000_000.0
 
     task = PlantBatteryDistributionTask(
