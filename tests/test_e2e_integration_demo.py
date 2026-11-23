@@ -126,10 +126,12 @@ def test_25_step_e2e_scheduler_driven_workflow(
     assert historian.get_buffer_status()["telemetry_buffer_size"] == 1
 
     # Step 17: Verify live HMI telemetry with authenticated session token
-    plant.simulation_engine.shared_state["plant_instance"] = plant
-    set_active_simulation_engine(plant.simulation_engine)
-
     client = TestClient(app)
+    plant.simulation_engine.shared_state["plant_instance"] = plant
+    # Bind the engine to the *app-scoped* runtime so the overview endpoint reads
+    # the plant attached to this very app.
+    set_active_simulation_engine(plant.simulation_engine, app=client.app)
+
     login_res = client.post(
         "/api/v1/auth/login",
         json={"username": "observer", "password": dev_test_password},

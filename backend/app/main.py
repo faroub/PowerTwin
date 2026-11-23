@@ -10,6 +10,7 @@ from backend.app.api import health, router
 from backend.app.core.config import settings
 from backend.app.core.logging import setup_logging
 from backend.app.core.safety import get_safety_report, validate_safety_invariants
+from backend.app.simulation.application import close_simulation, init_simulation
 
 
 @asynccontextmanager
@@ -23,8 +24,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print(f"  MODE: {safety_report['application_mode']}")
     print(f"  SAFETY STATUS: {safety_report['safety_status']}")
     print("===========================================================")
+    init_simulation(app)
     yield
     print("Shutting down PowerTwin BESS Platform.")
+    close_simulation(app)
 
 
 def create_application() -> FastAPI:

@@ -1,31 +1,33 @@
-"""Plant Overview and Telemetry Stream Endpoints."""
+"""Plant Overview and Telemetry Stream Endpoints.
+
+All telemetry is read from the application-scoped runtime so a Plant Overview
+load-balanced across any number of engine instances reflects the attached plant
+only.
+"""
 
 import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
-from backend.app.api.v1.simulation_ctrl import get_active_simulation_engine
 from backend.app.core.rbac import Permission, require_permission
 from backend.app.core.safety import get_safety_report
-from backend.app.simulation.engine_stub import engine_stub
+from backend.app.simulation.runtime import get_simulation_runtime
 
 router = APIRouter(tags=["Plant Overview"])
 
 
 @router.get("/overview")
 async def get_plant_overview(
+    request: Request,
     _user: Any = Depends(require_permission(Permission.READ_TELEMETRY)),
 ) -> dict[str, Any]:
     """Return real-time Plant Overview SCADA metrics from active plant instance."""
     now_wall = datetime.datetime.now(datetime.UTC).strftime("%H:%M:%S UTC")
-    engine = get_active_simulation_engine()
+    runtime = get_simulation_runtime(request=request)
+    engine = runtime.engine
 
-    if (
-        engine is None
-        or not hasattr(engine, "context")
-        or "plant_instance" not in engine.shared_state
-    ):
+    if engine is None:
         return {
             "plant_name": "PowerTwin BESS Plant (Disconnected)",
             "active_power_mw": None,
@@ -42,10 +44,36 @@ async def get_plant_overview(
             "simulation_time_str": "00:00:00.000.000",
             "wall_clock_time_str": now_wall,
             "safety": get_safety_report(),
-            "engine": engine_stub.get_status(),
+            "engine": runtime.status(),
         }
 
-    plant = engine.shared_state["plant_instance"]
+    # The plant owner is the app-scoped plant; the legacy ``plant_instance``
+    # key in shared state is still honoured so plugins can publish their own.
+    plant = (
+        engine.shared_state.get("plant_instance", runtime.active_plant)
+        if runtime.active_plant is None
+        else runtime.active_plant
+    )
+    if plant is None:
+        return {
+            "plant_name": "PowerTwin BESS Plant (Disconnected)",
+            "active_power_mw": None,
+            "reactive_power_mvar": None,
+            "avail_charge_mw": None,
+            "avail_discharge_mw": None,
+            "total_energy_mwh": None,
+            "average_soc_pct": None,
+            "grid_frequency_hz": None,
+            "poi_voltage_kv": None,
+            "active_alarms_count": 0,
+            "equipment_availability_pct": 0.0,
+            "simulation_state": "NOT_CONNECTED",
+            "simulation_time_str": "00:00:00.000.000",
+            "wall_clock_time_str": now_wall,
+            "safety": get_safety_report(),
+            "engine": runtime.status(),
+        }
+
     poi_state = plant.poi.get_state()
     p_w = poi_state.measurements.get("active_power_w")
     q_var = poi_state.measurements.get("reactive_power_var")
@@ -100,5 +128,5 @@ async def get_plant_overview(
         "simulation_time_str": engine.clock.format_timestamp(),
         "wall_clock_time_str": now_wall,
         "safety": get_safety_report(),
-        "engine": engine_stub.get_status(),
+        "engine": runtime.status(),
     }

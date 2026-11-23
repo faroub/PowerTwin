@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from backend.app.api.v1.simulation_ctrl import get_active_simulation_engine
+from backend.app.simulation.runtime import get_active_simulation_engine
 
 
 class SimulationEngineStatusProvider:

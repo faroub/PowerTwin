@@ -1,5 +1,10 @@
 """Simulation Runner — authoritative, thread-safe execution loop.
 
+.. admonition:: Simulation-only
+
+    This module is part of the lifecycle-secure simulation-only platform, see
+    ``docs/04_SIMULATION_ENGINE_SPECIFICATION.md``.
+
 An active simulation needs more than a state machine: ``start()`` must begin a
 continuous, paced tick loop, and the API must be able to control the loop
 without ever blocking the FastAPI event loop.
@@ -11,25 +16,51 @@ runner owns the *thread* and the *control* surface:
     * deterministic wall-clock pacing around the fixed ``tick_step_ns``
     * isolated reset, start, pause, resume, single-step, and shutdown paths
     * clean teardown on application shutdown
+
+The runner keeps a weak reference to the engine: every lifecycle call and every
+loop iteration resolves the executing engine from the application-scoped
+runtime so an overridden engine (tests, secondary engines) is adopted without
+leaking plant or clock state.
 """
+
+from __future__ import annotations
 
 import logging
 import threading
 import time
 from collections import deque
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from backend.app.simulation.exceptions import SimulationError
 from backend.app.simulation.manager import SimulationRunManager
+from backend.app.simulation.state import SimulationState
+
+if TYPE_CHECKING:
+    from backend.app.simulation.runtime import SimulationRuntime
 
 logger = logging.getLogger(__name__)
 
 
 class SimulationRunner:
-    """API-facing simulation runner backed by a dedicated execution thread."""
+    """API-facing simulation runner backed by a dedicated execution thread.
 
-    def __init__(self, manager: SimulationRunManager, plant: Any = None) -> None:
+    * ``start()`` begins the continuous execution loop,
+    * ``pause()``/``resume()`` freeze and unfreeze the loop at tick boundaries,
+    * ``stop()``/``shutdown()`` tear the thread down cleanly,
+    * ``single_step()``/``step()`` execute ticks outside of the loop thread,
+    * the loop never blocks the caller and never busy-waits without an engine.
+    """
+
+    def __init__(
+        self,
+        manager: SimulationRunManager,
+        plant: Any = None,
+        runtime: SimulationRuntime | None = None,
+    ) -> None:
         self._manager: SimulationRunManager = manager
         self._plant: Any = plant
+        # The runtime owns the authoritative engine; every iteration resolves it.
+        self._runtime: SimulationRuntime | None = runtime
 
         self._thread: threading.Thread | None = None
         self._running: bool = False
@@ -47,14 +78,14 @@ class SimulationRunner:
     # ---------------------------------------------------------------- #
 
     @property
-    def manager(self) -> SimulationRunManager:
+    def manager(self) -> SimulationRunManager | None:
         """Underlying simulation engine instance."""
-        return self._manager
+        return self._resolve_manager()
 
     @property
-    def state(self) -> Any:
-        """Current engine state (mirrors SimulationRunManager.state)."""
-        return self._manager.state
+    def plant(self) -> Any:
+        """Underlying built plant instance."""
+        return self._plant
 
     @property
     def is_running(self) -> bool:
@@ -64,6 +95,19 @@ class SimulationRunner:
     @property
     def speed_factor(self) -> float:
         return self._speed_factor
+
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def _resolve_manager(self) -> SimulationRunManager | None:
+        """Resolve the authoritative engine; prefer an overridden runtime engine."""
+        if self._runtime is not None:
+            # The runtime owns the authoritative engine; follow the override.
+            engine = self._runtime.engine
+            if engine is not None:
+                return engine
+        return self._manager
 
     def start(self) -> None:
         """Start or resume the continuous execution loop."""
@@ -78,11 +122,10 @@ class SimulationRunner:
             self._paused = False
             self._stop_event.clear()
 
-        self._manager.start()
+        manager = self._resolve_manager()
+        if manager is not None:
+            manager.start()
         self._started_at_wall = time.perf_counter()
-
-        if not self._running:
-            self._running = True
 
         if self._thread is None or not self._thread.is_alive():
             self._thread = threading.Thread(
@@ -96,13 +139,17 @@ class SimulationRunner:
         """Pause the execution loop at the next tick boundary."""
         with self._action_lock:
             self._paused = True
-        self._manager.pause()
+        manager = self._resolve_manager()
+        if manager is not None:
+            manager.pause()
 
     def resume(self) -> None:
         """Resume a paused execution loop."""
         with self._action_lock:
             self._paused = False
-        self._manager.resume()
+        manager = self._resolve_manager()
+        if manager is not None:
+            manager.resume()
 
     def stop(self) -> None:
         """Stop the execution loop and mark the engine as stopped."""
@@ -110,55 +157,85 @@ class SimulationRunner:
             self._running = False
             self._paused = False
             self._stop_event.set()
-        self._manager.stop()
+        manager = self._resolve_manager()
+        if manager is not None:
+            manager.stop()
 
     def stop_with_timeout(self, timeout_s: float = 10.0) -> bool:
-        """Stop the runner and wait for the thread to finish cleanly."""
+        """Stop the runner and wait for the thread to finish cleanly.
+
+        The thread's local reference is captured before joining: the loop
+        clears ``self._thread`` in its finally block, so the liveness check
+        must not read the instance attribute after the join.
+        """
         self.stop()
-        if self._thread is not None:
-            self._thread.join(timeout=timeout_s)
-            return not self._thread.is_alive()
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=timeout_s)
+            return not thread.is_alive()
         return True
 
     def shutdown(self) -> None:
         """Graceful teardown: stop the loop, reset the engine, clean up resources."""
         self.stop_with_timeout()
         try:
-            self._manager.reset()
+            manager = self._resolve_manager()
+            if manager is not None:
+                manager.reset()
         except Exception as err:
             logger.error("Error resetting simulation engine on shutdown: %s", err)
 
     def single_step(self) -> list[str]:
-        """Execute exactly one tick outside the loop thread."""
-        return self._enqueue_action_now("STEP", steps=1)
+        """Execute exactly one tick outside of the loop thread."""
+        return self._execute_steps(1)
 
     def step(self, num_ticks: int = 1) -> list[str]:
-        """Execute num_ticks ticks outside the loop thread."""
-        return self._enqueue_action_now("STEP", steps=num_ticks)
+        """Execute num_ticks ticks outside of the loop thread."""
+        return self._execute_steps(num_ticks)
+
+    def _execute_steps(self, num_ticks: int) -> list[str]:
+        """Execute a tick batch directly on the authoritative resolver manager."""
+        manager = self._resolve_manager()
+        if manager is None:
+            raise SimulationError("No simulation engine attached to this runner")
+        return manager.step(num_ticks)
 
     def run_headless(self, max_ticks: int) -> int:
         """Run max_ticks at maximum speed (no wall-clock pacing)."""
-        return self._manager.run_headless(max_ticks)
+        manager = self._resolve_manager()
+        if manager is None:
+            raise SimulationError("No simulation engine attached to this runner")
+        return manager.run_headless(max_ticks)
 
     def set_speed_factor(self, multiplier: float) -> None:
         """Update simulation wall-clock speed pacing factor."""
         if multiplier < 0.0:
             raise ValueError("Speed factor multiplier must be >= 0.0")
         self._speed_factor = multiplier
-        self._manager.set_speed_factor(multiplier)
+        manager = self._resolve_manager()
+        if manager is not None:
+            manager.set_speed_factor(multiplier)
 
     def reset(self) -> None:
         """Reset the engine to its initial conditions."""
         self.stop()
-        self._manager.reset()
+        manager = self._resolve_manager()
+        if manager is not None:
+            manager.reset()
 
     def create_snapshot(self) -> Any:
         """Capture engine state snapshot."""
-        return self._manager.create_snapshot()
+        manager = self._resolve_manager()
+        if manager is None:
+            raise SimulationError("No simulation engine attached to this runner")
+        return manager.create_snapshot()
 
     def restore_snapshot(self, snapshot: Any) -> None:
         """Restore engine state from a snapshot."""
-        self._manager.restore_snapshot(snapshot)
+        manager = self._resolve_manager()
+        if manager is None:
+            raise SimulationError("No simulation engine attached to this runner")
+        manager.restore_snapshot(snapshot)
 
     # ---------------------------------------------------------------- #
     # Action queue
@@ -166,17 +243,24 @@ class SimulationRunner:
 
     def _enqueue_action_now(self, action: str, **kwargs: Any) -> list[str]:
         """Execute an action immediately (used by the API layer)."""
-        with self._action_lock:
-            self._action_queue.append(
-                {"action": action, "kwargs": kwargs, "queue_time_ns": time.perf_counter_ns()}
-            )
-        logger.debug("Enqueued simulation action '%s'", action)
+        logger.debug("Simulation action '%s'", action)
 
-        # Direct execution for one-shot commands so the API never queues a
-        # tick it must actually run.
+        # Tick commands are executed synchronously so the API never races the
+        # run loop thread or queues a tick it must actually run.
         if action == "STEP":
             steps = max(1, kwargs.get("steps", 1))
-            return self._manager.step(steps)
+            return self._execute_steps(steps)
+
+        # Control actions are queued so the running loop thread executes them.
+        with self._action_lock:
+            self._action_queue.append(
+                {
+                    "action": action,
+                    "kwargs": kwargs,
+                    "queue_time_ns": time.perf_counter_ns(),
+                }
+            )
+        return []
         if action == "START":
             self.start()
         elif action == "PAUSE":
@@ -204,38 +288,53 @@ class SimulationRunner:
             self._action_queue.clear()
 
         for item in actions:
-            action = item["action"]
-            kwargs = item["kwargs"]
             try:
-                if action == "STEP":
-                    self._manager.step(max(1, kwargs.get("steps", 1)))
-                elif action == "START":
-                    self.start()
-                elif action == "PAUSE":
-                    self.pause()
-                elif action == "RESUME":
-                    self.resume()
-                elif action == "STOP":
-                    self.stop()
-                elif action == "RESET":
-                    self.reset()
-                elif action == "SET_SPEED":
-                    self.set_speed_factor(kwargs.get("speed_factor"))
-                else:
-                    logger.warning("Unknown simulation action: %r", action)
+                self._process_actions_now(item)
             except Exception as err:  # noqa: BLE001
-                logger.error("Simulation action %r failed: %s", action, err)
+                logger.error("Simulation action %r failed: %s", item, err)
                 self._error = err
                 self._running = False
                 self._paused = False
                 self._stop_event.set()
+
+    def _process_actions_now(self, item: dict[str, Any]) -> None:
+        """Execute a single API action (legacy ITEM path)."""
+        action = item["action"]
+        kwargs = item["kwargs"]
+        try:
+            if action == "STEP":
+                self.step(max(1, kwargs.get("steps", 1)))
+            elif action == "START":
+                self.start()
+            elif action == "PAUSE":
+                self.pause()
+            elif action == "RESUME":
+                self.resume()
+            elif action == "STOP":
+                self.stop()
+            elif action == "RESET":
+                self.reset()
+            elif action == "SET_SPEED":
+                self.set_speed_factor(kwargs.get("speed_factor"))
+            else:
+                logger.warning("Unknown simulation action: %r", action)
+        except Exception as err:  # noqa: BLE001
+            logger.error("Simulation action %r failed: %s", action, err)
+            self._error = err
+            self._running = False
+            self._paused = False
+            self._stop_event.set()
 
     # ---------------------------------------------------------------- #
     # Execution loop
     # ---------------------------------------------------------------- #
 
     def _execution_loop(self) -> None:
-        """Loop thread: advance the engine at the configured simulation rate."""
+        """Loop thread: advance the engine at the configured simulation rate.
+
+        Every iteration resolves the engine from the application-scoped runtime
+        so an overridden engine is adopted without leaking plant state.
+        """
         try:
             last_pace_wall = time.perf_counter()
             while True:
@@ -249,29 +348,46 @@ class SimulationRunner:
                         continue
 
                 # Any API enqueued action takes priority over the loop.
-                if self._action_queue:
-                    self._process_actions()
+                with self._action_lock:
+                    queue = list(self._action_queue)
+                if queue:
+                    for item in queue:
+                        try:
+                            self._process_actions_now(item)
+                        except Exception as err:  # noqa: BLE001
+                            logger.error("Simulation action %r failed: %s", item, err)
+                            self._error = err
+                            self._running = False
+                            self._paused = False
+                            self._stop_event.set()
                     if not self._running:
                         break
                     continue
 
+                manager = self._resolve_manager()
+                if manager is None:
+                    # No engine attached: the loop stays alive and waits so an
+                    # engine attached later is picked up by the thread.
+                    if self._stop_event.wait(timeout=0.25):
+                        break
+                    continue
+
                 try:
-                    self._manager.step(1)
+                    state = manager.state
+                    if state != SimulationState.RUNNING:
+                        manager.start()
+                    manager.step(1)
                 except Exception as err:  # noqa: BLE001
                     logger.exception("Runner tick failed: %s", err)
                     self._error = err
                     self._running = False
                     self._paused = False
                     self._stop_event.set()
-                    with self._action_lock:
-                        self._running = False
                     break
 
                 # Wall-clock pacing when speed_factor is configured.
                 if self._speed_factor > 0.0:
-                    target_duration_s = (
-                        self._manager.config.tick_step_ns / 1e9
-                    ) / self._speed_factor
+                    target_duration_s = manager.config.tick_step_ns / 1e9 / self._speed_factor
                     elapsed_s = time.perf_counter() - last_pace_wall
                     sleep_s = target_duration_s - elapsed_s
                     if sleep_s > 0:

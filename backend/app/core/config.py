@@ -8,6 +8,8 @@ from typing import Any, Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from backend.app.simulation.config import SimulationConfiguration
+
 logger = logging.getLogger(__name__)
 
 
@@ -117,9 +119,36 @@ class Settings(BaseSettings):
             f"@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
 
+    # Simulation Defaults
+    SIMULATION_TICK_RATE_HZ: int = Field(
+        default=100, description="Simulation tick rate in Hz (default: 100 Hz)"
+    )
+    SIMULATION_SPEED_FACTOR: float = Field(
+        default=1.0,
+        description="Wall-clock pacing multiplier. 1.0 = real-time, 0.0 = max speed",
+    )
+    SIMULATION_RANDOM_SEED: int = Field(
+        default=42, description="Seed for deterministic pseudo-random number generator"
+    )
+    TOPOLOGY_CONFIG_PATH: str | None = Field(
+        default=None,
+        description="Path to the plant topology YAML loaded at application start-up",
+    )
+
     # Logging
     LOG_LEVEL: str = "INFO"
     JSON_LOGS: bool = False
+
+    def create_simulation_configuration(self) -> "SimulationConfiguration":
+        """Build the simulation engine configuration from these settings."""
+        from backend.app.simulation.config import SimulationConfiguration
+
+        tick_step_ns = int(1_000_000_000 / max(1, self.SIMULATION_TICK_RATE_HZ))
+        return SimulationConfiguration(
+            tick_step_ns=tick_step_ns,
+            speed_factor=self.SIMULATION_SPEED_FACTOR,
+            random_seed=self.SIMULATION_RANDOM_SEED,
+        )
 
 
 settings = Settings()

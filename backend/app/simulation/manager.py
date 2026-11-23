@@ -1,6 +1,7 @@
 """Simulation Run Manager — Master Simulation Lifecycle Controller."""
 
 import logging
+import threading
 import time
 import uuid
 from typing import Any
@@ -22,7 +23,13 @@ logger = logging.getLogger(__name__)
 
 
 class SimulationRunManager:
-    """Master controller managing simulation clock, scheduler, state, and execution loop."""
+    """Master controller managing simulation clock, scheduler, state, and execution loop.
+
+    The state machine is driven by one dedicated run loop thread (``SimulationRunner``)
+    and by FastAPI request handler threads that request start/pause/resume/step/stop.
+    A ``threading.Lock`` serializes all transitions so no thread ever observes an
+    engine half transitioned between states.
+    """
 
     def __init__(self, config: SimulationConfiguration | None = None) -> None:
         self.config: SimulationConfiguration = (
@@ -45,6 +52,7 @@ class SimulationRunManager:
         )
 
         self.state: SimulationState = SimulationState.STOPPED
+        self._execution_lock: threading.Lock = threading.Lock()
 
     def register_task(self, task: SimulationTask) -> None:
         """Register a task with the simulation scheduler."""
@@ -58,63 +66,67 @@ class SimulationRunManager:
 
     def start(self) -> None:
         """Start or restart simulation execution."""
-        if self.state == SimulationState.FAULTED:
-            raise SimulationError(
-                "Cannot start faulted simulation engine. Please reset engine first."
-            )
+        with self._execution_lock:
+            if self.state == SimulationState.FAULTED:
+                raise SimulationError(
+                    "Cannot start faulted simulation engine. Please reset engine first."
+                )
 
-        if self.state in (SimulationState.RUNNING, SimulationState.PAUSED):
-            logger.warning("Simulation is already started in state %s", self.state)
+            if self.state in (SimulationState.RUNNING, SimulationState.PAUSED):
+                logger.warning("Simulation is already started in state %s", self.state)
+                self.state = SimulationState.RUNNING
+                return
+
             self.state = SimulationState.RUNNING
-            return
-
-        self.state = SimulationState.RUNNING
-        self.context.emit_event(
-            name="SIMULATION_STARTED",
-            source="SIMULATION_ENGINE",
-            payload={"run_id": self.simulation_run_id, "timestamp_ns": self.clock.time_ns},
-        )
+            self.context.emit_event(
+                name="SIMULATION_STARTED",
+                source="SIMULATION_ENGINE",
+                payload={"run_id": self.simulation_run_id, "timestamp_ns": self.clock.time_ns},
+            )
 
     def pause(self) -> None:
         """Pause simulation execution at the current tick."""
-        if self.state != SimulationState.RUNNING:
-            return
+        with self._execution_lock:
+            if self.state != SimulationState.RUNNING:
+                return
 
-        self.state = SimulationState.PAUSED
-        self.context.emit_event(
-            name="SIMULATION_PAUSED",
-            source="SIMULATION_ENGINE",
-            payload={"run_id": self.simulation_run_id, "timestamp_ns": self.clock.time_ns},
-        )
-
-    def resume(self) -> None:
-        """Resume simulation execution from paused state."""
-        if self.state == SimulationState.FAULTED:
-            raise SimulationError(
-                "Cannot resume faulted simulation engine. Please reset engine first."
+            self.state = SimulationState.PAUSED
+            self.context.emit_event(
+                name="SIMULATION_PAUSED",
+                source="SIMULATION_ENGINE",
+                payload={"run_id": self.simulation_run_id, "timestamp_ns": self.clock.time_ns},
             )
 
-        if self.state != SimulationState.PAUSED:
-            return
+    def resume(self) -> None:
+        """Resume simulation execution from paused tick."""
+        with self._execution_lock:
+            if self.state == SimulationState.FAULTED:
+                raise SimulationError(
+                    "Cannot resume faulted simulation engine. Please reset engine first."
+                )
 
-        self.state = SimulationState.RUNNING
-        self.context.emit_event(
-            name="SIMULATION_RESUMED",
-            source="SIMULATION_ENGINE",
-            payload={"run_id": self.simulation_run_id, "timestamp_ns": self.clock.time_ns},
-        )
+            if self.state != SimulationState.PAUSED:
+                return
+
+            self.state = SimulationState.RUNNING
+            self.context.emit_event(
+                name="SIMULATION_RESUMED",
+                source="SIMULATION_ENGINE",
+                payload={"run_id": self.simulation_run_id, "timestamp_ns": self.clock.time_ns},
+            )
 
     def stop(self) -> None:
         """Stop simulation execution."""
-        if self.state == SimulationState.STOPPED:
-            return
+        with self._execution_lock:
+            if self.state == SimulationState.STOPPED:
+                return
 
-        self.state = SimulationState.STOPPED
-        self.context.emit_event(
-            name="SIMULATION_STOPPED",
-            source="SIMULATION_ENGINE",
-            payload={"run_id": self.simulation_run_id, "timestamp_ns": self.clock.time_ns},
-        )
+            self.state = SimulationState.STOPPED
+            self.context.emit_event(
+                name="SIMULATION_STOPPED",
+                source="SIMULATION_ENGINE",
+                payload={"run_id": self.simulation_run_id, "timestamp_ns": self.clock.time_ns},
+            )
 
     def single_step(self) -> list[str]:
         """Execute exactly one simulation tick step.
@@ -136,64 +148,68 @@ class SimulationRunManager:
         if num_ticks <= 0:
             raise ValueError(f"num_ticks must be strictly positive (> 0), got: {num_ticks}")
 
-        if self.state == SimulationState.FAULTED:
-            raise SimulationError(
-                "Cannot step faulted simulation engine. Please reset engine first."
-            )
+        # The run loop thread may call this from the ticker while the API calls
+        # it from a request thread; serialize the whole batch so the visible
+        # state is always a single finished step.
+        with self._execution_lock:
+            if self.state == SimulationState.FAULTED:
+                raise SimulationError(
+                    "Cannot step faulted simulation engine. Please reset engine first."
+                )
 
-        if self.state == SimulationState.COMPLETED:
-            raise SimulationError(
-                "Cannot step completed simulation engine. Please reset engine first."
-            )
+            if self.state == SimulationState.COMPLETED:
+                raise SimulationError(
+                    "Cannot step completed simulation engine. Please reset engine first."
+                )
 
-        initial_state = self.state
-        executed_summary: list[str] = []
+            initial_state = self.state
+            executed_summary: list[str] = []
 
-        try:
-            for _ in range(num_ticks):
+            try:
+                for _ in range(num_ticks):
+                    if (
+                        self.config.max_ticks is not None
+                        and self.clock.total_steps >= self.config.max_ticks
+                    ):
+                        self.state = SimulationState.COMPLETED
+                        self.context.emit_event(
+                            name="SIMULATION_COMPLETED",
+                            source="SIMULATION_ENGINE",
+                            payload={
+                                "run_id": self.simulation_run_id,
+                                "timestamp_ns": self.clock.time_ns,
+                            },
+                        )
+                        break
+
+                    # Advance clock by fixed tick step
+                    self.clock.advance()
+
+                    # Execute scheduled tasks for current tick
+                    tasks_run = self.scheduler.step_scheduler(self.context)
+                    executed_summary.extend(tasks_run)
+
+                # If stepped while PAUSED or STOPPED, keep in PAUSED state
                 if (
-                    self.config.max_ticks is not None
-                    and self.clock.total_steps >= self.config.max_ticks
+                    initial_state in (SimulationState.PAUSED, SimulationState.STOPPED)
+                    and self.state != SimulationState.COMPLETED
                 ):
-                    self.state = SimulationState.COMPLETED
-                    self.context.emit_event(
-                        name="SIMULATION_COMPLETED",
-                        source="SIMULATION_ENGINE",
-                        payload={
-                            "run_id": self.simulation_run_id,
-                            "timestamp_ns": self.clock.time_ns,
-                        },
-                    )
-                    break
+                    self.state = SimulationState.PAUSED
 
-                # Advance clock by fixed tick step
-                self.clock.advance()
+            except Exception as err:
+                self.state = SimulationState.FAULTED
+                self.context.emit_event(
+                    name="SIMULATION_FAULTED",
+                    source="SIMULATION_ENGINE",
+                    payload={
+                        "run_id": self.simulation_run_id,
+                        "timestamp_ns": self.clock.time_ns,
+                        "error": str(err),
+                    },
+                )
+                raise SimulationError(f"Simulation tick step failed: {err}") from err
 
-                # Execute scheduled tasks for current tick
-                tasks_run = self.scheduler.step_scheduler(self.context)
-                executed_summary.extend(tasks_run)
-
-            # If stepped while PAUSED or STOPPED, keep in PAUSED state
-            if (
-                initial_state in (SimulationState.PAUSED, SimulationState.STOPPED)
-                and self.state != SimulationState.COMPLETED
-            ):
-                self.state = SimulationState.PAUSED
-
-        except Exception as err:
-            self.state = SimulationState.FAULTED
-            self.context.emit_event(
-                name="SIMULATION_FAULTED",
-                source="SIMULATION_ENGINE",
-                payload={
-                    "run_id": self.simulation_run_id,
-                    "timestamp_ns": self.clock.time_ns,
-                    "error": str(err),
-                },
-            )
-            raise SimulationError(f"Simulation tick step failed: {err}") from err
-
-        return executed_summary
+            return executed_summary
 
     def run_headless(self, max_ticks: int) -> int:
         """Run engine synchronously for max_ticks at maximum headless speed.
@@ -231,39 +247,43 @@ class SimulationRunManager:
 
         The simulation clock, RNG, events, shared state and task counters are reset.
         Every task resets its own models (plugins and plant-level tasks) to their
-        initial conditions so the plant starts from a clean physical state.
+        initial conditions so the plant starts from a clean physical state.  The
+        reset is atomic so the run loop thread never observes an engine half reset by
+        an API call.
         """
-        if config_override is not None:
-            self.config = config_override
+        with self._execution_lock:
+            if config_override is not None:
+                self.config = config_override
 
-        self.simulation_run_id = str(uuid.uuid4())
-        self.clock.reset(initial_ticks_ns=0, step_ns=self.config.tick_step_ns)
-        self.random.reseed(self.config.random_seed)
-        self.events.clear()
-        self.shared_state.clear()
-        self.scheduler.error_policy = self.config.error_policy
+            self.simulation_run_id = str(uuid.uuid4())
+            self.clock.reset(initial_ticks_ns=0, step_ns=self.config.tick_step_ns)
+            self.random.reseed(self.config.random_seed)
+            self.events.clear()
+            self.shared_state.clear()
+            self.scheduler.error_policy = self.config.error_policy
 
-        # Re-initialize context reference
-        self.context = SimulationContext(
-            clock=self.clock,
-            random=self.random,
-            events=self.events,
-            run_id=self.simulation_run_id,
-            shared_state=self.shared_state,
-        )
+            # Re-initialize context reference
+            self.context = SimulationContext(
+                clock=self.clock,
+                random=self.random,
+                events=self.events,
+                run_id=self.simulation_run_id,
+                shared_state=self.shared_state,
+            )
 
-        # Reset task internal execution counts and physical models, preserving task enabled state
-        for task in self.scheduler._tasks.values():
-            task.execution_count = 0
-            task.last_execution_tick_ns = None
-            if hasattr(task, "physical_model") and hasattr(
-                task.physical_model, "reset_to_initial_conditions"
-            ):
-                task.physical_model.reset_to_initial_conditions()
-            if hasattr(task, "restore_to_initial"):
-                task.restore_to_initial()
+            # Reset task internal execution counts and physical models,
+            # preserving task enabled state
+            for task in self.scheduler._tasks.values():
+                task.execution_count = 0
+                task.last_execution_tick_ns = None
+                if hasattr(task, "physical_model") and hasattr(
+                    task.physical_model, "reset_to_initial_conditions"
+                ):
+                    task.physical_model.reset_to_initial_conditions()
+                if hasattr(task, "restore_to_initial"):
+                    task.restore_to_initial()
 
-        self.state = SimulationState.STOPPED
+            self.state = SimulationState.STOPPED
 
     def create_snapshot(self) -> SimulationSnapshot:
         """Capture engine state snapshot."""
@@ -286,25 +306,26 @@ class SimulationRunManager:
         """
         snapshot.validate_compatibility()
 
-        self.simulation_run_id = snapshot.simulation_run_id
-        self.clock.reset(initial_ticks_ns=snapshot.timestamp_ns, step_ns=snapshot.step_ns)
-        self.clock.restore_total_steps(snapshot.total_steps)
-        self.random.set_state(snapshot.random_state)
-        self.shared_state.clear()
-        self.shared_state.update(snapshot.shared_state)
+        with self._execution_lock:
+            self.simulation_run_id = snapshot.simulation_run_id
+            self.clock.reset(initial_ticks_ns=snapshot.timestamp_ns, step_ns=snapshot.step_ns)
+            self.clock.restore_total_steps(snapshot.total_steps)
+            self.random.set_state(snapshot.random_state)
+            self.shared_state.clear()
+            self.shared_state.update(snapshot.shared_state)
 
-        # Re-link context
-        self.context = SimulationContext(
-            clock=self.clock,
-            random=self.random,
-            events=self.events,
-            run_id=self.simulation_run_id,
-            shared_state=self.shared_state,
-        )
+            # Re-link context
+            self.context = SimulationContext(
+                clock=self.clock,
+                random=self.random,
+                events=self.events,
+                run_id=self.simulation_run_id,
+                shared_state=self.shared_state,
+            )
 
-        # Restore task states
-        for name, task in self.scheduler._tasks.items():
-            if name in snapshot.task_states:
-                task.set_task_state(snapshot.task_states[name])
+            # Restore task states
+            for name, task in self.scheduler._tasks.items():
+                if name in snapshot.task_states:
+                    task.set_task_state(snapshot.task_states[name])
 
-        self.state = SimulationState.PAUSED
+            self.state = SimulationState.PAUSED

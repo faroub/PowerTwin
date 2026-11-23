@@ -1,30 +1,50 @@
-"""Simulation Control API Endpoints for Real Simulation Engine Lifecycle Management."""
+"""Simulation Control API Endpoints for Real Simulation Engine Lifecycle Management.
+
+All values are read from the application-scoped simulation runtime rather than
+a module-level global singleton so that the plant, engine and execution runner
+are the ones attached by the application start-up.
+
+The legacy helpers (``set_active_simulation_engine``) are kept for unit tests
+that build their own plant: writing the engine there lands on the same
+app-scoped runtime that the endpoints resolve.
+"""
 
 from enum import StrEnum
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from backend.app.core.rbac import Permission, require_permission
 from backend.app.core.safety import get_safety_report
-from backend.app.simulation.manager import SimulationRunManager
+from backend.app.simulation.runner import SimulationRunner
+from backend.app.simulation.runtime import (
+    get_simulation_runtime,
+)
 
 router = APIRouter(tags=["Simulation Control"])
 
-# Global reference to active plant simulation engine (set when plant topology is built)
-_active_simulation_engine: SimulationRunManager | None = None
 
+def set_active_simulation_engine(
+    engine: Any = None,
+    plant: Any = None,
+    app: Any = None,
+) -> None:
+    """Attach a plant/engine to the active application-scoped runtime.
 
-def set_active_simulation_engine(engine: SimulationRunManager | None) -> None:
-    """Attach active plant simulation engine instance to control router."""
-    global _active_simulation_engine
-    _active_simulation_engine = engine
-
-
-def get_active_simulation_engine() -> SimulationRunManager | None:
-    """Return active plant simulation engine instance."""
-    return _active_simulation_engine
+    ``engine`` is the ``SimulationRunManager`` of a built plant; ``plant`` is
+    the ``BuiltPlantInstance`` so the overview and telemetry readers can follow
+    the engine. When the engine is set to None the runner (if any) and the
+    plant are detached.
+    """
+    runtime = get_simulation_runtime(app=app)
+    with runtime._lock:
+        runtime.engine = engine
+        runtime.active_plant = plant
+        if engine is not None and runtime.runner is None:
+            runtime.runner = SimulationRunner(engine, plant, runtime=runtime)
+        elif engine is None:
+            runtime.runner = None
 
 
 class SimulationActionEnum(StrEnum):
@@ -66,13 +86,15 @@ class SimulationControlResponse(BaseModel):
 )
 async def dispatch_simulation_control(
     payload: SimulationControlRequest,
+    request: Request,
     _user: Any = Depends(require_permission(Permission.MODIFY_SIMULATION)),
 ) -> SimulationControlResponse:
     """Execute simulation engine lifecycle action on active engine instance.
 
     Returns HTTP 503 Service Unavailable if engine is not connected/running.
     """
-    engine = get_active_simulation_engine()
+    runtime = get_simulation_runtime(request=request)
+    engine = runtime.engine
     safety = get_safety_report()
 
     # 1. Reject if no active simulation engine is attached
@@ -93,25 +115,25 @@ async def dispatch_simulation_control(
     # 2. Execute verified lifecycle action on real simulation engine
     act = payload.action
     if act == SimulationActionEnum.START:
-        engine.start()
+        runtime.start()
     elif act == SimulationActionEnum.PAUSE:
-        engine.pause()
+        runtime.pause()
     elif act == SimulationActionEnum.RESUME:
-        engine.resume()
+        runtime.resume()
     elif act == SimulationActionEnum.STOP:
-        engine.stop()
+        runtime.stop()
     elif act == SimulationActionEnum.STEP:
         num_steps = payload.steps if payload.steps and payload.steps > 0 else 1
-        engine.step(num_steps)
+        runtime.step(num_steps)
     elif act == SimulationActionEnum.RESET:
-        engine.reset()
+        runtime.reset()
     elif act == SimulationActionEnum.SET_SPEED:
         if payload.speed_factor is None or payload.speed_factor < 0.0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="SET_SPEED action requires a non-negative 'speed_factor' parameter.",
             )
-        engine.set_speed_factor(payload.speed_factor)
+        runtime.set_speed_factor(payload.speed_factor)
 
     engine_state_str = engine.state.value if hasattr(engine.state, "value") else str(engine.state)
     msg = f"Action '{act.value}' successfully executed on simulation engine."
@@ -123,3 +145,13 @@ async def dispatch_simulation_control(
         message=msg,
         safety_status=safety["safety_status"],
     )
+
+
+@router.get("/simulation/status", response_model=dict[str, Any])
+async def get_simulation_status(
+    request: Request,
+    _user: Any = Depends(require_permission(Permission.READ_TELEMETRY)),
+) -> dict[str, Any]:
+    """Return the authoritative simulation engine status of the active plant."""
+    runtime = get_simulation_runtime(request=request)
+    return runtime.status()
