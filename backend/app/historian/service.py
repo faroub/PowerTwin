@@ -9,8 +9,12 @@ DOCUMENTED BUFFERING & DATA LOSS POLICY:
   4. If the buffer reaches 100% capacity before database recovers, overflow entries are
      flushed to an emergency append-only JSON file in 'backend/app/historian/overflow/'
      so NO DATA IS SILENTLY DISCARDED.
-  5. When database reconnects, buffered items and overflow file entries are written
-     sequentially to TimescaleDB.
+  5. Overflow files are rotated once they exceed OVERFLOW_MAX_BYTES so a long outage
+     cannot exhaust the host disk; rotated archives are replayed in chronological order.
+  6. When database reconnects, buffered items and overflow file entries are written
+     sequentially to TimescaleDB by flush_buffer_to_db() and replay_overflow_to_db().
+     The overflow file is only truncated after a successful commit, so a failed
+     replay never loses data.
 """
 
 import json
@@ -18,6 +22,7 @@ import logging
 import os
 import queue
 import threading
+import time
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +37,16 @@ logger = logging.getLogger(__name__)
 
 OVERFLOW_DIR: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "overflow")
 MAX_BUFFER_SIZE: int = 10_000
+
+# Maximum size of a single overflow file before it is rotated to an archive.
+OVERFLOW_MAX_BYTES: int = 64 * 1024 * 1024
+
+# Overflow file stem -> (ORM model, attribute name)
+OVERFLOW_STREAMS: dict[str, type[Any]] = {
+    "telemetry_overflow": TelemetryDataModel,
+    "command_overflow": CommandRecordModel,
+    "event_overflow": AlarmsAndEventsModel,
+}
 
 
 class HistorianService:
@@ -146,9 +161,179 @@ class HistorianService:
         """Write item to append-only disk overflow file when memory buffer is 100% full."""
         filepath = os.path.join(OVERFLOW_DIR, filename)
         logger.warning("Historian memory buffer full. Writing emergency overflow to %s", filepath)
+        line = json.dumps(payload) + "\n"
         with self._lock:
+            self._rotate_if_needed(filepath)
             with open(filepath, "a", encoding="utf-8") as f:
-                f.write(json.dumps(payload) + "\n")
+                f.write(line)
+                f.flush()
+                os.fsync(f.fileno())
+
+    def _rotate_if_needed(self, filepath: str) -> None:
+        """Rotate an oversized overflow file to a timestamped archive.
+
+        Rotation keeps a single file from exhausting the host disk during a long
+        database outage. The archive is replayed in chronological order, so no
+        record is lost by rotating.
+        """
+        try:
+            current_size = os.path.getsize(filepath)
+        except OSError:
+            return
+
+        if current_size < OVERFLOW_MAX_BYTES:
+            return
+
+        stem, ext = os.path.splitext(filepath)
+        archive = f"{stem}.{int(time.time() * 1e6)}{ext}"
+        os.rename(filepath, archive)
+        logger.warning("Rotated oversized historian overflow file to %s", archive)
+
+    def _overflow_files(self, stem: str) -> list[str]:
+        """Return overflow file paths for a stream, archives first (oldest first)."""
+        try:
+            names = os.listdir(OVERFLOW_DIR)
+        except OSError:
+            return []
+
+        ext = ".json"
+        prefix = f"{stem}."
+
+        def sort_key(name: str) -> tuple[int, str]:
+            # Rotated archives sort before the live file so they replay first.
+            if name == f"{stem}{ext}":
+                return (1, name)
+            return (0, name)
+
+        matching = [
+            os.path.join(OVERFLOW_DIR, name)
+            for name in names
+            if (name == f"{stem}{ext}" or name.startswith(prefix)) and name.endswith(ext)
+        ]
+        return sorted(matching, key=lambda p: sort_key(os.path.basename(p)))
+
+    def _read_overflow_file(self, filepath: str) -> list[dict[str, Any]]:
+        """Read every valid JSON record from an overflow file.
+
+        Corrupt trailing lines (for example a partially written record after a
+        crash) are skipped rather than aborting the replay of the rest.
+        """
+        records: list[dict[str, Any]] = []
+        try:
+            with open(filepath, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        parsed = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.warning("Skipping corrupt historian overflow record in %s", filepath)
+                        continue
+                    if isinstance(parsed, dict):
+                        records.append(parsed)
+        except OSError as err:
+            logger.error("Could not read historian overflow file %s: %s", filepath, err)
+        return records
+
+    def get_overflow_status(self) -> dict[str, Any]:
+        """Report pending disk-overflow record counts per stream."""
+        status: dict[str, Any] = {}
+        for stem in OVERFLOW_STREAMS:
+            files = self._overflow_files(stem)
+            record_count = 0
+            total_bytes = 0
+            for path in files:
+                record_count += len(self._read_overflow_file(path))
+                try:
+                    total_bytes += os.path.getsize(path)
+                except OSError:
+                    pass
+            status[stem] = {
+                "file_count": len(files),
+                "pending_records": record_count,
+                "total_bytes": total_bytes,
+            }
+        status["total_pending_records"] = sum(
+            int(entry["pending_records"])
+            for key, entry in status.items()
+            if key != "total_pending_records"
+        )
+        return status
+
+    async def replay_overflow_to_db(self, session: AsyncSession) -> tuple[int, int, int]:
+        """Replay disk-overflow records into the database.
+
+        The overflow file is only truncated after a successful commit. A failed
+        commit leaves every record on disk so nothing is silently discarded.
+        """
+        replayed = {"telemetry_overflow": 0, "command_overflow": 0, "event_overflow": 0}
+        pending: dict[str, list[dict[str, Any]]] = {}
+        files_by_stream: dict[str, list[str]] = {}
+
+        for stem in OVERFLOW_STREAMS:
+            files = self._overflow_files(stem)
+            files_by_stream[stem] = files
+            records: list[dict[str, Any]] = []
+            for path in files:
+                records.extend(self._read_overflow_file(path))
+            pending[stem] = records
+            replayed[stem] = len(records)
+
+        if not any(replayed.values()):
+            return (0, 0, 0)
+
+        try:
+            for stem, model in OVERFLOW_STREAMS.items():
+                records = pending[stem]
+                if not records:
+                    continue
+                session.add_all([model(**record) for record in records])
+
+            await session.commit()
+        except Exception as err:
+            logger.error("Overflow replay commit failed (%s). Overflow files preserved.", err)
+            await session.rollback()
+            return (0, 0, 0)
+
+        # Only now that the rows are committed is it safe to clear the files.
+        for files in files_by_stream.values():
+            if not files:
+                continue
+            for path in files:
+                try:
+                    with open(path, "w", encoding="utf-8"):
+                        pass
+                except OSError as err:
+                    logger.error("Could not truncate historian overflow file %s: %s", path, err)
+
+        logger.info(
+            "Historian overflow replay committed: %d telemetry, %d commands, %d events.",
+            replayed["telemetry_overflow"],
+            replayed["command_overflow"],
+            replayed["event_overflow"],
+        )
+        return (
+            replayed["telemetry_overflow"],
+            replayed["command_overflow"],
+            replayed["event_overflow"],
+        )
+
+    async def flush_all_to_db(self, session: AsyncSession) -> tuple[int, int, int]:
+        """Flush the memory buffer and then replay the disk overflow.
+
+        The memory flush drains the in-memory queues first. If its commit fails
+        the drained items are re-persisted to the overflow file by
+        flush_buffer_to_db(), and the subsequent disk replay picks them up, so a
+        record is never written twice and never lost.
+        """
+        telemetry, commands, events = await self.flush_buffer_to_db(session)
+        replayed = await self.replay_overflow_to_db(session)
+        return (
+            telemetry + replayed[0],
+            commands + replayed[1],
+            events + replayed[2],
+        )
 
     async def flush_buffer_to_db(self, session: AsyncSession) -> tuple[int, int, int]:
         """Flush in-memory buffered telemetry, commands, and alarms to TimescaleDB.
