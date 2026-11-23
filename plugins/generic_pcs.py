@@ -77,8 +77,16 @@ class GenericPCSPlugin(BasePlugin, PCSInterface):
             {"enable_inverter": True, "requested_p_w": p_req, "requested_q_var": q_req}
         )
 
+        # The PCS tracks the actual battery DC voltage so the PCS step runs
+        # against the real DC bus, not a hard-coded dummy.
+        dc_v = _read_setpoint(
+            ctx.shared_state,
+            KEY_BATTERY_DC_VOLTAGE_V,
+            KEY_BATTERY_DC_VOLTAGE_V,
+            1000.0,
+        )
         self.physical_model.step(
-            dc_voltage_v=1000.0,
+            dc_voltage_v=dc_v,
             ac_grid_voltage_v=self._ac_grid_voltage(ctx),
             delta_t_s=delta_t_s,
             timestamp_ns=ctx.current_tick_ns,
@@ -132,6 +140,11 @@ KEY_PCS_ACTUAL_Q_PREFIX = "pcs_actual_reactive_power_var_"
 
 # Authoritative AC grid voltage read by all PCS units in Phase 3.
 KEY_PCS_AC_GRID_VOLTAGE_V = "pcs_ac_grid_voltage_v"
+
+# Authoritative DC bus voltage computed by the PlantBatteryDistributionTask
+# (Phase 4) from the available battery voltages; the PCS plugins read it in
+# Phase 3 for the *next* tick's DC operating point.
+KEY_BATTERY_DC_VOLTAGE_V = "battery_dc_voltage_v"
 
 
 def _read_setpoint(

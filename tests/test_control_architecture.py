@@ -14,12 +14,18 @@ from backend.app.controllers.ppc import (
     PPCPriorityMode,
 )
 from backend.app.equipment.models import OperatingState
-from backend.app.models.battery.bms import GenericBMSModel
+from backend.app.models.battery.bms import BMSProtectionLimits, GenericBMSModel
 from backend.app.models.battery.system import (
     BatterySystemConfigModel,
     GenericBatterySystemModel,
 )
 from backend.app.models.bop.switchgear import GenericSwitchgearModel
+from backend.app.models.bop.transformer import (
+    GenericTransformerModel,
+    TransformerConfigModel,
+)
+from backend.app.models.grid.grid_model import GenericGridModel
+from backend.app.models.grid.poi_model import POIConfigModel, POIModel
 from backend.app.models.pcs.pcs_model import GenericPCSModel, PCSConfigModel
 
 
@@ -206,6 +212,145 @@ def test_ems_dispatch_infeasibility_when_battery_empty() -> None:
     assert audit_log.entries[-1].status == CommandStatus.REJECTED_INFEASIBLE
 
 
+def test_ems_watchdog_stale_heartbeat_rejects_dispatch() -> None:
+    """Test EMS rejects a dispatch when the equipment controller heartbeat is stale."""
+    audit_log = ControlCommandLog()
+    ems = EnergyManagementSystem(audit_log=audit_log)
+    ppc = PowerPlantController()
+    eq_ctrl = BESSEquipmentController(
+        config=EquipmentControllerConfig(watchdog_timeout_ns=1_000_000_000)
+    )
+    eq_ctrl.operating_state = OperatingState.RUNNING
+    eq_ctrl.update_heartbeat(1_000_000_000)
+
+    battery = GenericBatterySystemModel(
+        config=BatterySystemConfigModel(initial_soc_pct=50.0)
+    )
+    bms = GenericBMSModel(
+        limits=BMSProtectionLimits(
+            max_discharge_current_a=6000.0, max_charge_current_a=6000.0
+        )
+    )
+    bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
+    pcs = GenericPCSModel()
+    pcs.operating_state = OperatingState.RUNNING
+
+    # Heartbeat is stale by 1.5 s, far beyond the 1 s watchdog window.
+    acc_p, _acc_q = ems.dispatch_step(
+        requested_p_w=1_000_000.0,
+        requested_q_var=0.0,
+        ppc=ppc,
+        battery=battery,
+        bms_list=[bms],
+        pcs_list=[pcs],
+        equipment_controller=eq_ctrl,
+        timestamp_ns=2_500_000_000,
+    )
+
+    # Dispatch is rejected: a non-finite accepted value would be worse than zero.
+    assert acc_p == 0.0
+    assert audit_log.entries[-1].status == CommandStatus.REJECTED_INFEASIBLE
+    assert audit_log.entries[-1].reason == "EQUIPMENT_CONTROLLER_WATCHDOG_STALE"
+
+    # A fresh heartbeat restores acceptance.
+    eq_ctrl.update_heartbeat(3_000_000_000)
+    acc_p2, _acc_q2 = ems.dispatch_step(
+        requested_p_w=1_000_000.0,
+        requested_q_var=0.0,
+        ppc=ppc,
+        battery=battery,
+        bms_list=[bms],
+        pcs_list=[pcs],
+        equipment_controller=eq_ctrl,
+        timestamp_ns=3_500_000_000,
+    )
+    assert acc_p2 == 1_000_000.0
+
+
+def test_ems_respects_configured_poi_import_export_limits() -> None:
+    """Test the EMS limits dispatch to the POI's configured export/import bounds.
+
+    All equipment (PCS fleet, BMS fleet, battery cluster) is sized above the POI
+    limit so the grid interconnection is the binding constraint in every call.
+    """
+    audit_log = ControlCommandLog()
+    ems = EnergyManagementSystem(audit_log=audit_log)
+    ppc = PowerPlantController()
+    eq_ctrl = BESSEquipmentController()
+    eq_ctrl.operating_state = OperatingState.RUNNING
+
+    battery = GenericBatterySystemModel(
+        config=BatterySystemConfigModel(
+            initial_soc_pct=50.0,
+            max_discharge_power_w=50_000_000.0,
+            max_charge_power_w=50_000_000.0,
+            capacity_wh=180_000_000.0,
+        )
+    )
+    bms = GenericBMSModel(
+        limits=BMSProtectionLimits(
+            max_discharge_current_a=60_000.0, max_charge_current_a=60_000.0
+        )
+    )
+    bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
+    pcs = GenericPCSModel(
+        config=PCSConfigModel(
+            rated_active_power_w=55_000_000.0, rated_apparent_power_va=60_500_000.0
+        )
+    )
+    pcs.operating_state = OperatingState.RUNNING
+
+    poi = POIModel(
+        "POI_01",
+        config=POIConfigModel(
+            nominal_voltage_v=13800.0,
+            max_export_power_w=5_000_000.0,
+            max_import_power_w=5_000_000.0,
+        ),
+    )
+
+    # A 10 MW discharge request is clamped to the 5 MW POI export limit.
+    acc_p, _acc_q = ems.dispatch_step(
+        requested_p_w=10_000_000.0,
+        requested_q_var=0.0,
+        ppc=ppc,
+        battery=battery,
+        bms_list=[bms],
+        pcs_list=[pcs],
+        equipment_controller=eq_ctrl,
+        timestamp_ns=1000,
+        poi=poi,
+    )
+    assert acc_p == 5_000_000.0
+
+    # A 10 MW charge request is clamped to the 5 MW POI import limit.
+    acc_p2, _acc_q2 = ems.dispatch_step(
+        requested_p_w=-10_000_000.0,
+        requested_q_var=0.0,
+        ppc=ppc,
+        battery=battery,
+        bms_list=[bms],
+        pcs_list=[pcs],
+        equipment_controller=eq_ctrl,
+        timestamp_ns=2000,
+        poi=poi,
+    )
+    assert acc_p2 == -5_000_000.0
+
+    # The default POI limit is authoritative when the POI model is unknown.
+    acc_p3, _acc_q3 = ems.dispatch_step(
+        requested_p_w=100_000_000.0,
+        requested_q_var=0.0,
+        ppc=ppc,
+        battery=battery,
+        bms_list=[bms],
+        pcs_list=[pcs],
+        equipment_controller=eq_ctrl,
+        timestamp_ns=3000,
+    )
+    assert acc_p3 == 50_000_000.0
+
+
 def test_ems_frequency_response_mode() -> None:
     """Test EMS P-f droop frequency response mode."""
     ems = EnergyManagementSystem(config=EMSConfigModel(mode=EMSMode.FREQUENCY_RESPONSE))
@@ -275,3 +420,201 @@ def test_fault_handling_emergency_stop_and_recovery() -> None:
 
     assert started is True
     assert eq_ctrl.operating_state == OperatingState.RUNNING
+
+
+def test_plant_control_task_serializes_dispatch_toPCS_command() -> None:
+    """Test the PlantControlTask forwards the EMS accepted dispatch to every NPC."""
+    from backend.app.simulation.clock import SimulationClock
+    from backend.app.simulation.context import SimulationContext
+    from backend.app.simulation.event import EventDispatcher
+    from backend.app.simulation.random_manager import SeededRandomManager
+    from backend.app.simulation.tasks import PlantControlTask
+
+    ems = EnergyManagementSystem()
+    ppc = PowerPlantController(
+        config=PPCConfigModel(plant_rated_active_power_w=50_000_000.0)
+    )
+    eq_ctrl = BESSEquipmentController()
+    eq_ctrl.operating_state = OperatingState.RUNNING
+    eq_ctrl.update_heartbeat(0)
+
+    battery = GenericBatterySystemModel(
+        config=BatterySystemConfigModel(
+            initial_soc_pct=50.0, max_discharge_power_w=100_000_000.0
+        )
+    )
+    bms = GenericBMSModel(
+        limits=BMSProtectionLimits(
+            max_charge_current_a=60_000.0, max_discharge_current_a=60_000.0
+        )
+    )
+    bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
+    pcs1 = GenericPCSModel(
+        "PCS_01", config=PCSConfigModel(rated_active_power_w=2_500_000.0)
+    )
+    pcs2 = GenericPCSModel(
+        "PCS_02", config=PCSConfigModel(rated_active_power_w=2_500_000.0)
+    )
+    pcs1.operating_state = OperatingState.RUNNING
+    pcs2.operating_state = OperatingState.RUNNING
+
+    grid = GenericGridModel()
+    xfrm = GenericTransformerModel(
+        "XFRM_01",
+        config=TransformerConfigModel(
+            rated_power_w=10_000_000.0,
+            primary_voltage_v=690.0,
+            secondary_voltage_v=13800.0,
+            rating_va=11_000_000.0,
+        ),
+    )
+
+    task = PlantControlTask(
+        ems=ems,
+        ppc=ppc,
+        equipment_controller=eq_ctrl,
+        battery_systems=[battery],
+        bms_units=[bms],
+        pcs_units=[pcs1, pcs2],
+        grid=grid,
+        transformers=[xfrm],
+        poi=POIModel(
+            "POI_01",
+            config=POIConfigModel(
+                nominal_voltage_v=13800.0,
+                max_export_power_w=10_000_000.0,
+                max_import_power_w=10_000_000.0,
+            ),
+        ),
+    )
+
+    clock = SimulationClock(step_ns=1_000_000_000, initial_ticks_ns=0)
+    ctx = SimulationContext(
+        clock=clock,
+        random=SeededRandomManager(seed=1),
+        events=EventDispatcher(),
+        run_id="TEST",
+        shared_state={
+            "ems_requested_p_w": 10_000_000.0,
+            "grid_voltage_v": 13800.0,
+            "grid_frequency_hz": 50.0,
+            "pcs_ac_grid_voltage_v": 13800.0,
+        },
+    )
+    task.execute(ctx)
+
+    # The PCS fleet is the binding constraint (5 MW) and every PCS receives its
+    # 50% share of the fleet capacity.
+    assert task._last_dispatch_p == 5_000_000.0
+    # Each PCS receives one half of the fleet's capability.
+    assert ctx.shared_state["pcs_cmd_active_power_w_PCS_01"] == 2_500_000.0
+    assert ctx.shared_state["pcs_cmd_active_power_w_PCS_02"] == 2_500_000.0
+
+
+def test_battery_distribution_respects_mixed_container_capacities() -> None:
+    """Test the distribution task splits power by capability, not evenly.
+
+    One 5 MWh container and three 20 MWh containers must not all receive the
+    same proportional command even though there are 4 containers.
+    """
+    from backend.app.simulation.clock import SimulationClock
+    from backend.app.simulation.context import SimulationContext
+    from backend.app.simulation.event import EventDispatcher
+    from backend.app.simulation.random_manager import SeededRandomManager
+    from backend.app.simulation.tasks import PlantBatteryDistributionTask
+
+    small = GenericBatterySystemModel(
+        "B5MWH",
+        config=BatterySystemConfigModel(
+            capacity_wh=5_000_000.0, max_discharge_power_w=5_000_000.0
+        ),
+    )
+    large = GenericBatterySystemModel(
+        "B20MWH",
+        config=BatterySystemConfigModel(
+            capacity_wh=20_000_000.0, max_discharge_power_w=20_000_000.0
+        ),
+    )
+
+    # A single PCS unit representing the full 40 MW fleet.
+    fleet_pcs = GenericPCSModel(config=PCSConfigModel(rated_active_power_w=40_000_000.0))
+    fleet_pcs.actual_p_w = 40_000_000.0
+
+    task = PlantBatteryDistributionTask(
+        battery_systems=[small, large, large, large],
+        pcs_units=[fleet_pcs],
+    )
+
+    clock = SimulationClock(step_ns=1_000_000_000, initial_ticks_ns=0)
+    ctx = SimulationContext(
+        clock=clock,
+        random=SeededRandomManager(seed=1),
+        events=EventDispatcher(),
+        run_id="TEST",
+        shared_state={},
+    )
+    task.execute(ctx)
+
+    # All PCS output is 40 MW for the 4 containers; the split ratio is
+    # 5/75 for the small container and 20/75 for each large container.
+    expected_small = 40_000_000.0 * (5_000_000.0 / 65_000_000.0)
+    expected_large = 40_000_000.0 * (20_000_000.0 / 65_000_000.0)
+
+    assert ctx.shared_state["battery_cmd_power_w_B5MWH"] == expected_small
+    assert ctx.shared_state["battery_cmd_power_w_B20MWH"] == expected_large
+
+    # Total command is fully distributed.
+    total = sum(
+        ctx.shared_state[f"battery_cmd_power_w_{bat.equipment_id}"]
+        for bat in task.battery_systems
+    )
+    assert total == 40_000_000.0
+
+
+def test_plant_control_task_rejects_non_finite_setpoints() -> None:
+    """Test the PlantControlTask never passes a non-finite dispatch to the fleet."""
+    from backend.app.simulation.clock import SimulationClock
+    from backend.app.simulation.context import SimulationContext
+    from backend.app.simulation.event import EventDispatcher
+    from backend.app.simulation.random_manager import SeededRandomManager
+    from backend.app.simulation.tasks import PlantControlTask
+
+    ems = EnergyManagementSystem()
+    ppc = PowerPlantController()
+    eq_ctrl = BESSEquipmentController()
+    eq_ctrl.operating_state = OperatingState.RUNNING
+
+    battery = GenericBatterySystemModel(
+        config=BatterySystemConfigModel(initial_soc_pct=50.0)
+    )
+    bms = GenericBMSModel()
+    bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
+    pcs = GenericPCSModel()
+    pcs.operating_state = OperatingState.RUNNING
+
+    task = PlantControlTask(
+        ems=ems,
+        ppc=ppc,
+        equipment_controller=eq_ctrl,
+        battery_systems=[battery],
+        bms_units=[bms],
+        pcs_units=[pcs],
+        grid=GenericGridModel(),
+    )
+
+    clock = SimulationClock(step_ns=1_000_000_000, initial_ticks_ns=0)
+    ctx = SimulationContext(
+        clock=clock,
+        random=SeededRandomManager(seed=1),
+        events=EventDispatcher(),
+        run_id="TEST",
+        shared_state={
+            "ems_requested_p_w": float("nan"),
+            "ems_requested_q_var": float("inf"),
+        },
+    )
+    task.execute(ctx)
+
+    assert ctx.shared_state["ems_accepted_p_w"] >= 0.0
+    assert ctx.shared_state["ems_accepted_q_var"] == 0.0
+    assert ctx.shared_state["pcs_cmd_active_power_w_PCS_01"] == 0.0

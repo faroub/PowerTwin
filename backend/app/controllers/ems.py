@@ -4,7 +4,7 @@ import logging
 import math
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.app.controllers.command_log import CommandStatus, ControlCommandLog
 from backend.app.controllers.equipment_controller import BESSEquipmentController
@@ -12,9 +12,14 @@ from backend.app.controllers.ppc import PowerPlantController
 from backend.app.equipment.models import OperatingState
 from backend.app.models.battery.bms import GenericBMSModel
 from backend.app.models.battery.system import GenericBatterySystemModel
+from backend.app.models.bop.transformer import GenericTransformerModel
+from backend.app.models.grid.poi_model import POIModel
 from backend.app.models.pcs.pcs_model import GenericPCSModel
 
 logger = logging.getLogger(__name__)
+
+# Default POI bound used when the plant POI model is unknown to the EMS.
+DEFAULT_POI_LIMIT_W: float = 50_000_000.0
 
 
 class EMSMode(StrEnum):
@@ -55,6 +60,20 @@ class EMSConfigModel(BaseModel):
     droop_pct: float = Field(default=5.0, description="P-f frequency droop percentage (5%)")
     f_deadband_hz: float = Field(default=0.03, description="Frequency deadband in Hz (+/-0.03 Hz)")
 
+    @field_validator("droop_pct")
+    @classmethod
+    def validate_droop_pct(cls, v: float) -> float:
+        if v <= 0.0 or v > 100.0 or math.isnan(v) or math.isinf(v):
+            raise ValueError(f"EMS droop_pct must be in (0.0, 100.0], got: {v}")
+        return v
+
+    @field_validator("f_deadband_hz")
+    @classmethod
+    def validate_f_deadband_hz(cls, v: float) -> float:
+        if v < 0.0 or v > 10.0 or math.isnan(v) or math.isinf(v):
+            raise ValueError(f"EMS f_deadband_hz must be in [0.0, 10.0], got: {v}")
+        return v
+
 
 class EnergyManagementSystem:
     """Energy Management System (Layer C) executing dispatch optimization and feasibility."""
@@ -86,28 +105,76 @@ class EnergyManagementSystem:
         bms_list: list[GenericBMSModel] | None = None,
         pcs_list: list[GenericPCSModel] | None = None,
         equipment_controller: BESSEquipmentController | None = None,
-        poi_max_export_p_w: float = 50_000_000.0,
-        poi_max_import_p_w: float = 50_000_000.0,
+        poi: POIModel | None = None,
+        poi_max_export_p_w: float | None = None,
+        poi_max_import_p_w: float | None = None,
+        timestamp_ns: int = 0,
         battery: GenericBatterySystemModel | list[GenericBatterySystemModel] | None = None,
     ) -> DispatchFeasibilityResult:
-        """Verify whether a requested dispatch setpoint is physically and operationally feasible."""
+        """Verify whether a requested dispatch setpoint is physically and operationally feasible.
+
+        The authoritative POI import/export limits come from the configured POI model
+        when it is passed to the check; a missed POI falls back to the (default)
+        import/export limits so no unbounded dispatch can be accepted.
+        """
         bat_input = batteries if batteries is not None else battery
         bms_input = bms_list if bms_list is not None else []
         pcs_input = pcs_list if pcs_list is not None else []
 
-        # 1. Equipment Controller Availability Check
+        # 1. Reject every non-finite setpoint before any arithmetic runs.
+        if (
+            not math.isfinite(p_req)
+            or not math.isfinite(q_req)
+            or math.isnan(p_req)
+            or math.isnan(q_req)
+            or math.isinf(p_req)
+            or math.isinf(q_req)
+        ):
+            logger.warning("Rejected non-finite EMS dispatch request (p=%r, q=%r).", p_req, q_req)
+            return DispatchFeasibilityResult(
+                is_feasible=False,
+                status_code="REJECTED_NON_FINITE",
+                requested_p_w=p_req,
+                max_feasible_p_w=0.0,
+                requested_q_var=q_req,
+                max_feasible_q_var=0.0,
+                reason="NON_FINITE_DISPATCH_REQUEST",
+            )
+
+        # 2. Reject stale equipment controller heartbeats (watchdog interlock).
         if equipment_controller is not None and (
             not equipment_controller.is_available
             or equipment_controller.operating_state != OperatingState.RUNNING
         ):
             return DispatchFeasibilityResult(
                 is_feasible=False,
-                status_code="REJECTED_INFEASIBLE",
+                status_code="REJECTED_INTERLOCK",
                 requested_p_w=p_req,
                 max_feasible_p_w=0.0,
                 requested_q_var=q_req,
                 max_feasible_q_var=0.0,
                 reason="EQUIPMENT_CONTROLLER_UNAVAILABLE",
+            )
+
+        if equipment_controller is not None and (
+            equipment_controller.last_heartbeat_ns > 0.0
+            and (timestamp_ns - equipment_controller.last_heartbeat_ns)
+            > equipment_controller.config.watchdog_timeout_ns
+        ):
+            msg = (
+                f"WATCHDOG_TIMEOUT: EquipmentController heartbeat stale "
+                f"{(timestamp_ns - equipment_controller.last_heartbeat_ns) / 1e9:.2f}s "
+                f"(timeout {equipment_controller.config.watchdog_timeout_ns} ns)"
+            )
+            logger.warning(msg)
+            return DispatchFeasibilityResult(
+                is_feasible=False,
+                status_code="REJECTED_INTERLOCK",
+                requested_p_w=p_req,
+                max_feasible_p_w=0.0,
+                requested_q_var=q_req,
+                max_feasible_q_var=0.0,
+                reason="EQUIPMENT_CONTROLLER_WATCHDOG_STALE",
             )
 
         if bat_input is None:
@@ -146,14 +213,20 @@ class EnergyManagementSystem:
 
         sum_pcs_active_power_w = sum(pcs.config.rated_active_power_w for pcs in active_pcs)
 
-        effective_dis_max_w = min(
-            sum_bat_dis_w, sum_bms_dis_w, sum_pcs_active_power_w, poi_max_export_p_w
-        )
-        effective_ch_max_w = min(
-            sum_bat_ch_w, sum_bms_ch_w, sum_pcs_active_power_w, poi_max_import_p_w
-        )
+        # 3. Resolve the authoritative POI import/export limits.
+        export_limit = poi_max_export_p_w if poi_max_export_p_w is not None else DEFAULT_POI_LIMIT_W
+        import_limit = poi_max_import_p_w if poi_max_import_p_w is not None else DEFAULT_POI_LIMIT_W
+        if poi is not None:
+            export_limit = poi.config.max_export_power_w
+            import_limit = poi.config.max_import_power_w
 
-        # 3. Active Power Feasibility
+        # 4. Aggregate the equipment limits under the resolved interconnection limits.
+        effective_dis_max_w = min(
+            sum_bat_dis_w, sum_bms_dis_w, sum_pcs_active_power_w, export_limit
+        )
+        effective_ch_max_w = min(sum_bat_ch_w, sum_bms_ch_w, sum_pcs_active_power_w, import_limit)
+
+        # 5. Active Power Feasibility
         if p_req > 0.0:  # Discharging
             if effective_dis_max_w <= 0.0:
                 return DispatchFeasibilityResult(
@@ -185,7 +258,7 @@ class EnergyManagementSystem:
             feasible_p = 0.0
             p_feasible = True
 
-        # 4. Reactive Power Headroom Aggregation
+        # 6. Reactive Power Headroom Aggregation
         num_active = len(active_pcs)
         unit_p = abs(feasible_p) / max(1, num_active)
 
@@ -226,8 +299,15 @@ class EnergyManagementSystem:
         equipment_controller: BESSEquipmentController,
         grid_frequency_hz: float = 50.0,
         timestamp_ns: int = 0,
+        poi: POIModel | None = None,
+        transformers: list[GenericTransformerModel] | None = None,
     ) -> tuple[float, float]:
-        """Execute EMS dispatch loop, performing feasibility check before forwarding to PPC."""
+        """Execute EMS dispatch loop, performing feasibility check before forwarding to PPC.
+
+        The authoritative POI import/export limits are read from the attached POI
+        model, so the dispatch can never be accepted beyond the configured grid
+        interconnection.
+        """
         self.requested_p_w = requested_p_w
         self.requested_q_var = requested_q_var
 
@@ -251,8 +331,8 @@ class EnergyManagementSystem:
             bms_list=bms_list,
             pcs_list=pcs_list,
             equipment_controller=equipment_controller,
-            poi_max_export_p_w=ppc.config.plant_rated_active_power_w,
-            poi_max_import_p_w=ppc.config.plant_rated_active_power_w,
+            poi=poi,
+            timestamp_ns=timestamp_ns,
         )
 
         if (
@@ -277,7 +357,11 @@ class EnergyManagementSystem:
         dispatch_p = feasibility.max_feasible_p_w
         dispatch_q = feasibility.max_feasible_q_var
         acc_p, acc_q = ppc.dispatch_poi_setpoint(
-            dispatch_p, dispatch_q, pcs_list, timestamp_ns=timestamp_ns
+            dispatch_p,
+            dispatch_q,
+            pcs_list,
+            transformers=transformers,
+            timestamp_ns=timestamp_ns,
         )
 
         status = CommandStatus.ACCEPTED if feasibility.is_feasible else CommandStatus.DERATED

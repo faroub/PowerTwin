@@ -78,7 +78,7 @@ class PowerPlantController:
         requested_p_w: float,
         requested_q_var: float,
         pcs_units: list[GenericPCSModel],
-        transformer: GenericTransformerModel | None = None,
+        transformers: list[GenericTransformerModel] | None = None,
         poi_voltage_v: float = 13800.0,
         timestamp_ns: int = 0,
     ) -> tuple[float, float]:
@@ -114,10 +114,28 @@ class PowerPlantController:
         plant_avail_p_max = sum(pcs.config.rated_active_power_w for pcs in available_pcs)
         plant_avail_s_max = sum(pcs.config.rated_apparent_power_va for pcs in available_pcs)
 
+        # 1b. Non-finite setpoint rejection.
+        if not math.isfinite(requested_p_w) or not math.isfinite(requested_q_var):
+            self.accepted_p_w = 0.0
+            self.accepted_q_var = 0.0
+            for pcs in pcs_units:
+                pcs.process_command({"requested_p_w": 0.0, "requested_q_var": 0.0})
+            self.audit_log.log_entry(
+                timestamp_ns=timestamp_ns,
+                source_layer="PPC",
+                target_component=self.equipment_id,
+                action_name="DISPATCH_POI_SETPOINT",
+                requested_value={"p_w": requested_p_w, "q_var": requested_q_var},
+                accepted_value={"p_w": 0.0, "q_var": 0.0},
+                status=CommandStatus.REJECTED_INFEASIBLE,
+                reason="POI_DISPATCH_NON_FINITE",
+            )
+            return (0.0, 0.0)
+
         # 2. Control Mode Modifications (Volt-VAR / Power Factor)
         effective_q_req = requested_q_var
         if self.control_mode == PPCControlMode.VOLT_VAR:
-            v_nom = transformer.config.secondary_voltage_v if transformer else poi_voltage_v
+            v_nom = self._voltage_nominal_for_mode(transformers, poi_voltage_v)
             v_dev_pct = (poi_voltage_v - v_nom) / max(1.0, v_nom)
             if abs(v_dev_pct) > 0.01:
                 effective_q_req = -v_dev_pct * 10.0 * (plant_avail_s_max * 0.1)
@@ -128,9 +146,15 @@ class PowerPlantController:
                 effective_q_req = requested_p_w * math.tan(math.acos(pf))
 
         # 3. Enforce Plant Apparent Power Capability Circle (P^2 + Q^2 <= S_plant_max^2)
-        s_max_cap = min(self.config.plant_rated_apparent_power_va, plant_avail_s_max)
-        if transformer is not None:
-            s_max_cap = min(s_max_cap, transformer.config.rating_va)
+        # Existing equipment ratings are the foundation of every constraint; the
+        # POI grid interconnection and every transformer in the path limit the
+        # plant from the outside in.
+        s_max_cap = min(
+            self.config.plant_rated_apparent_power_va,
+            plant_avail_s_max,
+        )
+        for xfrm in transformers or []:
+            s_max_cap = min(s_max_cap, xfrm.config.rating_va)
 
         p_cap = min(self.config.plant_rated_active_power_w, plant_avail_p_max)
 
@@ -175,3 +199,15 @@ class PowerPlantController:
         )
 
         return (p_accepted, q_accepted)
+
+    @staticmethod
+    def _voltage_nominal_for_mode(
+        transformers: list[GenericTransformerModel] | None,
+        poi_voltage_v: float,
+    ) -> float:
+        """Return the nominal voltage used by voltage-dependent control modes."""
+        for xfrm in transformers or []:
+            v = xfrm.config.secondary_voltage_v
+            if math.isfinite(v) and v > 0.0:
+                return v
+        return poi_voltage_v

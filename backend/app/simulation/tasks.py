@@ -51,6 +51,9 @@ KEY_PCS_ACTUAL_Q_VAR = "pcs_actual_reactive_power_var"
 KEY_BATTERY_CMD_P_W = "battery_cmd_power_w"
 KEY_BATTERY_CMD_P_W_PREFIX = "battery_cmd_power_w_"
 
+# Authoritative DC bus voltage owned by the PlantBatteryDistributionTask.
+KEY_BATTERY_DC_VOLTAGE_V = "battery_dc_voltage_v"
+
 KEY_GRID_VOLTAGE_V = "grid_voltage_v"
 KEY_GRID_FREQUENCY_HZ = "grid_frequency_hz"
 KEY_PCS_AC_GRID_VOLTAGE_V = "pcs_ac_grid_voltage_v"
@@ -117,12 +120,16 @@ class PlantControlTask(SimulationTask):
         if not math.isfinite(req_p) or not math.isfinite(req_q):
             req_p, req_q = 0.0, 0.0
 
-        # 2. Collapse all NaN/Infinity inputs to a zero dispatch before the
-        #    EMS/PPC chain runs so the plant never accepts a non-finite command.
-        if req_p != req_p or req_q != req_q:
+        # Respiring invalid setpoints is safer than handing a NaN/Infinity
+        # command into the EMS layer; the EMS itself also rejects non-finite
+        # requests, so this guard never doubles as a lone safety net.
+        if req_p != req_p or req_q != req_q or req_p is None or req_q is None:
             req_p, req_q = 0.0, 0.0
 
-        # 2. EMS feasibility check followed by PPC unit allocation.
+        # 2. EMS feasibility check followed by PPC unit allocation. The planner
+        #    passes the actual POI interconnection limits and the transformers
+        #    the plant routes through so the accepted dispatch never exceeds
+        #    what the configured grid connection and transformers support.
         acc_p, acc_q = self.ems.dispatch_step(
             requested_p_w=req_p,
             requested_q_var=req_q,
@@ -133,14 +140,23 @@ class PlantControlTask(SimulationTask):
             equipment_controller=self.equipment_controller,
             grid_frequency_hz=self.grid.config.nominal_frequency_hz,
             timestamp_ns=ctx.current_tick_ns,
+            poi=self.poi,
+            transformers=self.transformers,
         )
+
+        # Safe-guard: a controller can never honor a non-finite accepted value;
+        # the EMS never returns one, but guard it anyway so the PCS setpoint
+        # queue stays finite.
+        if not math.isfinite(acc_p) or not math.isfinite(acc_q):
+            acc_p, acc_q = 0.0, 0.0
+
         self._last_dispatch_p = acc_p
         self._last_dispatch_q = acc_q
 
         ctx.shared_state[KEY_EM_ACC_P_W] = acc_p
         ctx.shared_state[KEY_EM_ACC_Q_VAR] = acc_q
 
-        # 3. Write the per-PCS command setpoints into the shared state.
+        # 4. Write the per-PCS command setpoints into the shared state.
         #    PPC allocation is authoritative; each PCS unit receives its own
         #    key so different weights/capacities are handled correctly.
         for pcs in self.pcs_units:
@@ -149,11 +165,11 @@ class PlantControlTask(SimulationTask):
             ctx.shared_state[key_p] = pcs.requested_p_w
             ctx.shared_state[key_q] = pcs.requested_q_var
 
-        # 4. Plant-level totals remain on the legacy keys for readers.
+        # 5. Plant-level totals remain on the legacy keys for readers.
         ctx.shared_state[KEY_PCS_CMD_ACTIVE_W] = acc_p
         ctx.shared_state[KEY_PCS_CMD_REACTIVE_W] = acc_q
 
-        # 5. Evaluate each BMS against the actual battery measurements so that
+        # 6. Evaluate each BMS against the actual battery measurements so that
         #    protection limits are live for every tick of the pipeline.
         for bms, bat in zip(self.bms_units, self.battery_systems, strict=True):
             bms.evaluate_protection(
@@ -229,8 +245,9 @@ class PlantBatteryDistributionTask(SimulationTask):
     """Phase 4 task: distribute PCS actual output into per-battery commands.
 
     The PCS inverter step feeds each battery container; the active output of
-    the available PCS fleet is split evenly over the available battery
-    containers, keying the command in the shared state per battery ID.
+    the available PCS fleet is split over the available battery containers in
+    proportion to each container's capability, keyed in the shared state per
+    battery ID.
     """
 
     def __init__(
@@ -257,20 +274,50 @@ class PlantBatteryDistributionTask(SimulationTask):
         if not self.enabled:
             return
 
-        total_pcs_p = sum(pcs.actual_p_w for pcs in self.pcs_units if pcs.is_available)
         # The PCS fleet is the single source of truth for the plant active power
         # that each battery must track.
         available = [bat for bat in self.battery_systems if bat.is_available]
-        count = max(1, len(available))
-
-        for bat in self.battery_systems:
-            if bat.is_available:
-                # Active power demand split evenly across available battery containers
-                ctx.shared_state[f"{KEY_BATTERY_CMD_P_W_PREFIX}{bat.equipment_id}"] = (
-                    total_pcs_p / count
-                )
-            else:
+        if not available:
+            # No battery can absorb the dispatched power: park every container.
+            for bat in self.battery_systems:
                 ctx.shared_state[f"{KEY_BATTERY_CMD_P_W_PREFIX}{bat.equipment_id}"] = 0.0
+            return
+
+        total_actual_p = sum(pcs.actual_p_w for pcs in self.pcs_units if pcs.is_available)
+        if not math.isfinite(total_actual_p):
+            total_actual_p = 0.0
+
+        # Split the incremental power in proportion to the capability of every
+        # battery container, so a plant with one 20 MWh and one 5 MWh container
+        # does not dump 50% of the fleet output into the 5 MWh container.
+        if total_actual_p > 0.0:
+            # Discharging: the discharge capability binds the split.
+            capabilities = [b.get_available_power_limits()[1] for b in available]
+        else:
+            # Charging: the charge capability binds the split.
+            capabilities = [b.get_available_power_limits()[0] for b in available]
+        total_cap = sum(capabilities)
+        if total_cap <= 0.0 or not math.isfinite(total_cap):
+            # Degenerate case: fall back to an even split (no constraint).
+            total_cap = float(len(available))
+            capabilities = [1.0] * len(available)
+
+        for bat_index, bat in enumerate(available):
+            ctx.shared_state[f"{KEY_BATTERY_CMD_P_W_PREFIX}{bat.equipment_id}"] = total_actual_p * (
+                capabilities[bat_index] / total_cap
+            )
+
+        # Containers that are unavailable or faulted never receive a command.
+        for bat in self.battery_systems:
+            if not bat.is_available:
+                ctx.shared_state[f"{KEY_BATTERY_CMD_P_W_PREFIX}{bat.equipment_id}"] = 0.0
+
+        # Authoritative plant-level DC voltage for the PCS plugins (Phase 3):
+        # the lowest capable battery voltage keeps the inverter models conservative.
+        dc_voltages = [float(b.voltage_v) for b in available if math.isfinite(b.voltage_v)]
+        dc_v = min(dc_voltages) if dc_voltages else 1000.0
+        if math.isfinite(dc_v):
+            ctx.shared_state[KEY_BATTERY_DC_VOLTAGE_V] = dc_v
 
 
 class PlantNetworkTask(SimulationTask):
