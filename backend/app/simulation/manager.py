@@ -54,6 +54,16 @@ class SimulationRunManager:
         self.state: SimulationState = SimulationState.STOPPED
         self._execution_lock: threading.Lock = threading.Lock()
 
+    @property
+    def execution_lock(self) -> threading.Lock:
+        """Return the lock that serializes every mutation of the simulation state.
+
+        An external controller (controller-in-the-loop) that needs to apply a
+        command to the plant must hold this lock, so a command can never be
+        applied in the middle of a simulation tick.
+        """
+        return self._execution_lock
+
     def register_task(self, task: SimulationTask) -> None:
         """Register a task with the simulation scheduler."""
         self.scheduler.register_task(task)

@@ -120,6 +120,13 @@ class Settings(BaseSettings):
     ]
 
     # Protocol Gateway & CIL Settings (Safety Invariants)
+    PROTOCOL_GATEWAY_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Starts the loopback Modbus TCP CIL gateway. Disabled by default: no "
+            "socket is opened until an operator explicitly enables it."
+        ),
+    )
     ALLOW_EXTERNAL_MODBUS_WRITES: bool = Field(
         default=False, description="Disabled by default; requires explicit CIL configuration"
     )
