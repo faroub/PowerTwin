@@ -72,17 +72,17 @@ attributed to one of them:
 These boundaries are stated so that no reader mistakes an audit finding for a
 verified fact:
 
-1. **No green GitHub Actions run has yet been observed.** The six workflow
-   files **have** been executed on a GitHub runner: the repository has 86
-   recorded runs, and the run on the merged `main` branch is the first that
-   exercised the whole pipeline against a commit carrying all of the
-   remediation work. Every backend, frontend, system-engineering,
-   secret-scanning, dependency-audit and CodeQL job **passed**; two jobs
-   failed and both failures were real defects, which have since been
-   reproduced locally, corrected and re-verified locally. What is still
-   unverified is that the **corrected** files pass on the runner itself: the
-   corrections have been executed locally, step by step and with the same
-   tools, but not yet by GitHub Actions.
+1. **The green GitHub Actions run is now observed.** The six workflow files
+   **have** been executed on a GitHub runner. The first run on the merged
+   `main` branch exercised the whole pipeline against a commit carrying all of
+   the remediation work: every backend, frontend, system-engineering,
+   secret-scanning, dependency-audit and CodeQL job **passed**, and two jobs
+   failed with real defects that were then reproduced locally, corrected and
+   re-verified locally. The corrected files were subsequently merged into
+   `main`, and the run on commit `9928aec` completed with **every job
+   green**. What a green run does *not* establish is that the gates cover
+   every possible defect — the coverage gaps recorded as F-01, F-02, F-03,
+   F-04, F-05 and F-11 are entirely unaffected by it.
 2. **The steps were run locally, in the pipeline's own order.** The backend
    gates were executed on the canonical interpreter **Python 3.12** — the
    interpreter the pipeline uses — in a clean virtual environment built from
@@ -444,14 +444,14 @@ market simulator.
 *Action.* Treat these as roadmap items. They must **not** be represented as
 implemented in any status document.
 
-### F-07 — MEDIUM — RESOLVED IN PART — The workflow definitions have now run on GitHub, and two defects were found
+### F-07 — MEDIUM — RESOLVED — The workflow definitions have now run on GitHub, two defects were found, and the next run was green
 
 The six workflow files **have now been executed by GitHub Actions**. The
-repository has 86 recorded runs, and the run on the merged `main` branch is
-the first one that exercised the whole pipeline against a commit carrying all
-of the remediation work. Every backend, frontend, system-engineering,
-secret-scanning, dependency-audit and CodeQL job **passed**. Two jobs failed,
-and both failures were real defects rather than flakes:
+first run on the merged `main` branch was the first one that exercised the
+whole pipeline against a commit carrying all of the remediation work. Every
+backend, frontend, system-engineering, secret-scanning, dependency-audit
+and CodeQL job **passed**. Two jobs failed, and both failures were real
+defects rather than flakes:
 
 1. **The compose validation failed.** `docker-compose.yml` declares
    `POSTGRES_PASSWORD` as mandatory with the `${POSTGRES_PASSWORD:?...}` form,
@@ -475,12 +475,19 @@ placeholder and still refuses to render without one; the rebuilt image passes
 both scan policies with **zero** fixable findings, starts, reports healthy
 through its own health probe and upholds the safety invariants.
 
-*Residual.* The corrected workflow files have been executed locally, step by
-step and with the same tools the pipeline uses, but they have **not yet been
-executed by GitHub Actions themselves**. The YAML syntax and the expression
-evaluation of the corrections are confirmed only when the next run completes.
-*Action.* Push the corrections and confirm that the next run on `main` is
-green before the release workflow is trusted with a real tag.
+*Resolution.* The corrections were merged into `main` and pushed. GitHub
+Actions executed the corrected workflow files themselves on commit `9928aec`,
+and **every job completed successfully**: the infrastructure and Docker build
+validation, the backend unit and integration tests, the backend lint and
+typecheck, the backend test matrix on Python 3.13 and 3.14, the system
+engineering and physics validation, the frontend lint/test/build, the final CI
+summary, the Trivy container scan, the Python and npm dependency audit, the
+secret and credential scan, and CodeQL.
+
+*Residual.* A green run means that no gate failed; it does not mean that the
+gates cover every possible defect. The coverage gaps that remain are recorded
+separately as F-01, F-02, F-03, F-04, F-05 and F-11, and none of them is
+closed by this run.
 
 ### F-08 — LOW — A module-level simulation entry point remains
 
@@ -579,8 +586,7 @@ documented.
 The audit does **not** find a defect that would make the platform unsafe to
 operate in simulation. It finds an engineering-maturity gap in the delivery
 chain: a thin frontend suite, unpinned Python **runtime** dependencies, a
-missing ORM-versus-migration comparison, and a delivery chain that has not yet
-completed a green run on the CI provider.
+missing ORM-versus-migration comparison, and an unprotected `main` branch.
 
 The verification pass did, however, surface four delivery defects that were
 invisible from the source alone — an inert pytest configuration, an inert
@@ -594,27 +600,24 @@ The first run on the CI provider then surfaced two further delivery defects
 that no amount of local review could have found — a compose validation step
 that could not satisfy the mandatory secret the compose file demands, and a
 container image whose runtime layer carried a compiler toolchain. Both are
-recorded in §8.5 and F-07, and both are fixed.
+recorded in §8.5 and F-07, and both are fixed. The next run, on the corrected
+files, was green across every job.
 
 ### 11.2 Recommended actions, in order
 
-1. **Confirm the green run on GitHub** (F-07). The workflows have now run and
-   two defects were found and corrected; the corrections have been verified
-   locally but not yet by the runner. Push them and confirm the next run on
-   `main` is green before the release workflow is trusted with a real tag.
-2. **Pin the Python runtime dependencies with hashes** (F-02). The CI toolchain
+1. **Pin the Python runtime dependencies with hashes** (F-02). The CI toolchain
    is pinned; the runtime dependencies are not. This is the single remaining
    change that most improves the reproducibility of a release.
-3. **Close the migration-metadata gap** (F-03). Add `target_metadata` and an
+2. **Close the migration-metadata gap** (F-03). Add `target_metadata` and an
    ephemeral PostgreSQL service to the release job, then restore
    `alembic check`.
-4. **Build the frontend test suite** (F-01) and the Playwright end-to-end
+3. **Build the frontend test suite** (F-01) and the Playwright end-to-end
    path (F-05), then raise the enforced floor as the suite grows.
-5. **Apply the branch protection** (F-04). An administrator action, using the
+4. **Apply the branch protection** (F-04). An administrator action, using the
    documented check names.
-6. **Schedule the roadmap items** (F-06) explicitly, and keep them marked
-   `NOT IMPLEMENTED` until they exist.
-7. **Close the low-severity items** (F-08, F-09, F-10, F-11) as part of the
+5. **Schedule the roadmap items** (F-06) explicitly, and keep them marked
+   `NOT_IMPLEMENTED` until they exist.
+6. **Close the low-severity items** (F-08, F-09, F-10, F-11) as part of the
    next maintenance pass.
 
 ---

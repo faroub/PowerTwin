@@ -88,10 +88,9 @@ the pipeline** and is backed by a test, not only by a document.
 
 | # | Item | Severity |
 | :--- | :--- | :--- |
-| 1 | Confirm the **green** run on GitHub. The workflows have now run and the two defects they reported — the compose validation and the container scan — are fixed and verified locally; the corrected files still have to be executed by the runner itself | Medium |
-| 2 | Pin the Python **runtime** dependencies with hashes and install with `--require-hashes`. The CI toolchain is already pinned in `backend/requirements-ci.txt` | High |
-| 3 | Add `target_metadata` to the migrations and restore the ORM-versus-migration comparison | Medium |
-| 4 | Build the frontend component suite and the Playwright end-to-end path, then raise the enforced floor | High |
-| 5 | Apply the documented branch protection to `main` (administrator action) | Medium |
+| 1 | Pin the Python **runtime** dependencies with hashes and install with `--require-hashes`. The CI toolchain is already pinned in `backend/requirements-ci.txt` | High |
+| 2 | Add `target_metadata` to the migrations and restore the ORM-versus-migration comparison | Medium |
+| 3 | Build the frontend component suite and the Playwright end-to-end path, then raise the enforced floor | High |
+| 4 | Apply the documented branch protection to `main` (administrator action) | Medium |
 | 6 | Implement the energy-market, calibration and warranty roadmap items | Medium |
 | 7 | Close the low-severity items: the module-level simulation entry point, the dedicated operator-action journal, the `illustrative` schema marker, and the line-length unification | Low |

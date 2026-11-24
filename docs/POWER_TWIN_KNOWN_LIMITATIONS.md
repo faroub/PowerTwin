@@ -153,11 +153,11 @@ administrator**.
 ### 4.6 The Workflow Definitions Have Now Run on GitHub, and Two Defects Were Found
 
 The six workflow files **have now been executed by GitHub Actions**. The
-repository has 86 recorded runs, and the run on the merged `main` branch is
-the first one that exercised the whole pipeline against a commit that carries
-all of the remediation work. Every backend, frontend, system-engineering,
-secret-scanning, dependency-audit and CodeQL job passed. Two jobs failed, and
-both failures were real defects rather than flakes:
+first run on the merged `main` branch was the first one that exercised the
+whole pipeline against a commit that carries all of the remediation work.
+Every backend, frontend, system-engineering, secret-scanning, dependency-audit
+and CodeQL job passed. Two jobs failed, and both failures were real defects
+rather than flakes:
 
 1. **The compose validation failed.** `docker-compose.yml` declares
    `POSTGRES_PASSWORD` as mandatory, using the `${POSTGRES_PASSWORD:?...}`
@@ -176,11 +176,33 @@ placeholder and still refuses to render without one, and the rebuilt image
 passes both scan policies with zero fixable findings and starts, reports
 healthy and upholds the safety invariants.
 
-**The gap that remains is narrower than it was**: the corrected workflow
-files have been executed locally, step by step and with the same tools the
-pipeline uses, but the corrected files have **not yet been executed by GitHub
-Actions themselves**. The YAML syntax and the expression evaluation of the
-corrections are only confirmed once the next run completes.
+**The gap has since been closed.** The corrected workflow files were merged
+into `main` and executed by GitHub Actions themselves. The run on commit
+`9928aec` completed with **every job green**:
+
+| Workflow | Job | Result |
+| :--- | :--- | :--- |
+| Main CI Workflow | Infrastructure & Docker Build Validation | `success` |
+| Main CI Workflow | Backend Unit & Integration Tests | `success` |
+| Main CI Workflow | Backend Lint & Typecheck | `success` |
+| Main CI Workflow | Backend Tests (Python 3.13) | `success` |
+| Main CI Workflow | Backend Tests (Python 3.14) | `success` |
+| Main CI Workflow | System Engineering & Physics Validation | `success` |
+| Main CI Workflow | Frontend Lint, Test & Build | `success` |
+| Main CI Workflow | Final CI Summary | `success` |
+| Security & Vulnerability Scanning | Docker Image Security Scan (Trivy) | `success` |
+| Security & Vulnerability Scanning | Python & npm Dependency Security Audit | `success` |
+| Security & Vulnerability Scanning | Secret & Credential Scanning | `success` |
+| Security & Vulnerability Scanning | CodeQL Static Security Analysis | `success` |
+
+**What this does and does not prove.** It proves that the workflow
+definitions are syntactically valid, that the corrected expressions evaluate
+as intended on the runner, that the compose file renders, that the image
+builds and passes both scan policies, and that the container starts,
+reports healthy and upholds the safety invariants. It does **not** turn the
+pipeline into a proof of correctness: a green run means that no gate
+failed, not that the gates cover every possible defect. The gaps that remain
+are listed in §4.1, §4.2, §4.3 and §4.4, and they are unaffected by this run.
 
 The rest of the local evidence still stands. The backend gates were run on the
 canonical interpreter **Python 3.12**, in a clean virtual environment built
