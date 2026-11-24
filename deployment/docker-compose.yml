@@ -37,7 +37,9 @@ services:
       timescaledb:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health/liveness"]
+      # The probe uses the Python standard library, so the backend image ships
+      # no HTTP client of its own and the runtime layer stays minimal.
+      test: ["CMD", "python", "/app/deployment/healthcheck.py", "/health/liveness"]
       interval: 10s
       timeout: 5s
       retries: 3

@@ -150,31 +150,52 @@ The branch-protection configuration itself is a property of the repository on
 GitHub, not of the source code, and **must be applied by a repository
 administrator**.
 
-### 4.6 The Workflow Definitions Have Not Been Executed on GitHub
+### 4.6 The Workflow Definitions Have Now Run on GitHub, and Two Defects Were Found
 
-The six workflow files have been corrected and reviewed, and **their steps
-have been run locally**, but no GitHub Actions run has been observed. A YAML
-or expression error in a workflow is invisible until the pipeline runs.
+The six workflow files **have now been executed by GitHub Actions**. The
+repository has 86 recorded runs, and the run on the merged `main` branch is
+the first one that exercised the whole pipeline against a commit that carries
+all of the remediation work. Every backend, frontend, system-engineering,
+secret-scanning, dependency-audit and CodeQL job passed. Two jobs failed, and
+both failures were real defects rather than flakes:
 
-The local execution is strong evidence but not the same evidence. The backend
-gates were run on the canonical interpreter **Python 3.12**, in a clean
-virtual environment built from the two requirements files exactly as the
-pipeline builds it, and again on **Python 3.13** and **Python 3.14**:
-formatting, linting, strict type checking, 315 tests with coverage, the
-coverage policy, the migration validation, the release-version validation and
-the endurance campaign all passed on all three. The frontend gates were run as
-well and all passed. `pip-audit` was executed against the declared ranges and
-against the fully resolved build, and reported no known vulnerabilities in
-either; `npm audit --audit-level=high` reported 0 vulnerabilities.
+1. **The compose validation failed.** `docker-compose.yml` declares
+   `POSTGRES_PASSWORD` as mandatory, using the `${POSTGRES_PASSWORD:?...}`
+   form, but the pipeline step that renders the compose file did not supply
+   one. The step aborted with exit code 15 and the message *required variable
+   POSTGRES_PASSWORD is missing a value*. The requirement itself was correct
+   and was not weakened; the step was corrected to supply a validation-only
+   placeholder.
+2. **The container scan failed.** The backend image was built as a single
+   stage that retained the compiler toolchain, and the scan reported 158
+   high-severity operating-system findings. See §4.11.
+
+Both defects were reproduced locally before anything was changed, and both
+were fixed and re-verified locally: the compose file now renders with the
+placeholder and still refuses to render without one, and the rebuilt image
+passes both scan policies with zero fixable findings and starts, reports
+healthy and upholds the safety invariants.
+
+**The gap that remains is narrower than it was**: the corrected workflow
+files have been executed locally, step by step and with the same tools the
+pipeline uses, but the corrected files have **not yet been executed by GitHub
+Actions themselves**. The YAML syntax and the expression evaluation of the
+corrections are only confirmed once the next run completes.
+
+The rest of the local evidence still stands. The backend gates were run on the
+canonical interpreter **Python 3.12**, in a clean virtual environment built
+from the two requirements files exactly as the pipeline builds it, and again
+on **Python 3.13** and **Python 3.14**: formatting, linting, strict type
+checking, the test suite with coverage, the coverage policy, the migration
+validation, the release-version validation and the endurance campaign all
+passed on all three. The frontend gates were run as well and all passed.
+`pip-audit` was executed against the declared ranges and against the fully
+resolved build, and reported no known vulnerabilities in either;
+`npm audit --audit-level=high` reported 0 vulnerabilities.
 
 The determinism fingerprint was identical on all three interpreters
 (`58d28d0aab4cd788`), so the determinism is a property of the model rather
 than of one CPython build.
-
-**One gap remains**: the workflow *files* themselves have never been executed
-by GitHub Actions. Every step they contain has been run locally, but the YAML
-syntax, the expression evaluation, the action pinning and the runner's own
-environment can only be confirmed by an actual run.
 
 ### 4.7 The Endurance Campaign Covers the Reference Plant Only
 
@@ -201,6 +222,72 @@ action journal. A warranty or dispute-resolution use case would require one.
 `AGENTS.md` §2.14 requires illustrative parameters to be clearly labelled.
 The reference topology and the plugin datasheets are labelled in the
 documentation, but no schema field and no test enforce the labelling.
+
+### 4.11 The Base Image Carries Upstream Advisories That Debian Has Not Fixed
+
+The backend image is built on the official `python:3.12-slim` image, pinned by
+digest, which is Debian trixie. Debian has **not yet published a fix** for
+13 advisories that affect packages the base image necessarily contains. Trivy
+reports each of them as HIGH severity:
+
+| Advisory | Affected package | Subject |
+| :--- | :--- | :--- |
+| CVE-2025-69720 | `ncurses-base`, `ncurses-bin`, `libncursesw6`, `libtinfo6` | Buffer overflow in the terminal handling library |
+| CVE-2026-9538 | `perl-base` | Denial of service in the archive reader |
+| CVE-2026-107494 | `openssl`, `libssl3t64`, `openssl-provider-legacy` | Denial of service via an unbounded QUIC frame |
+| CVE-2026-124709 | `openssl`, `libssl3t64`, `openssl-provider-legacy` | Memory leak in the QUIC handling |
+| CVE-2026-16742 | `libsystemd0`, `libudev1` | Local privilege escalation in `systemd-homed` |
+| CVE-2026-54369 | `libacl1` | Symlink traversal privilege escalation |
+| CVE-2026-76642 | `util-linux`, `mount`, `login`, `bsdutils` and their libraries | Failed external mount helper retains privileges |
+| CVE-2026-78408 | `util-linux`, `mount`, `login`, `bsdutils` and their libraries | `nsenter` leaks the root cgroup |
+| CVE-2026-78409 | `util-linux`, `mount`, `login`, `bsdutils` and their libraries | Detached-tree resolution in `X-mount.subdir` |
+| CVE-2026-78410 | `util-linux`, `mount`, `login`, `bsdutils` and their libraries | Restricted bind mounts do not pin the source tree |
+| CVE-2026-119373 | `libsqlite3-0` | Denial of service via a heap-based buffer overflow |
+| CVE-2026-119374 | `libsqlite3-0` | Code execution via a corrupted FTS5 index |
+| CVE-2026-119379 | `libsqlite3-0` | Code execution via a crafted session extension |
+
+**These are inherited, not introduced.** A scan of the *unmodified* base image
+reports the identical set of advisory identifiers, so no package that this
+project chose to install contributes to them. The practical consequence is
+that **no change to this repository can remove them**: only the distribution
+can, by publishing a fixed package.
+
+**What has been done about it.** The backend image was rebuilt as a
+multi-stage image so that the runtime layer carries no compiler toolchain at
+all. The single-stage image previously retained `build-essential` and
+`libpq-dev`, which dragged in `linux-libc-dev`, the Kerberos chain, the
+ncurses and Perl trees and the whole GCC and binutils toolchain. That change
+removed **105** of the 158 high-severity findings and shrank the image from
+609 MB to 281 MB. The runtime layer additionally runs `apt-get upgrade`, so
+the newest patches the distribution has published are always applied.
+
+**How the residual risk is judged.** The affected code paths are not
+reachable from the service. The container runs as a fixed non-root user
+(uid 10001) with no added capabilities, no host namespaces, no privileged
+mounts and no `systemd` instance; the mount helpers, `nsenter`, `login` and
+`systemd-homed` are not invoked by the application, by the health probe or by
+the compose file. The service opens no QUIC connection, and the SQLite
+advisories concern the FTS5 and session extensions, which this application
+does not use — the platform stores its history in PostgreSQL/TimescaleDB. The
+risk of exploitation through the platform itself is therefore assessed as
+negligible, but the residual risk is **not zero** and it is **not under this
+project's control**.
+
+**How the gate deals with it.** The container scan is split into two policies,
+as described in `docs/CI_CD_GUIDE.md` §7.1. The operating-system scan fails
+on every critical or high advisory **that has a published fix**, so the
+residual set cannot be ignored into permanence: the moment Debian publishes a
+fix, the advisory stops being unfixed, the scan starts reporting it and the
+build fails until the image picks the patch up. The application-package scan
+applies the strictest policy and is unaffected by the inherited set. No
+ignore file is used anywhere.
+
+**What this limitation is.** It is an accurate statement that the deployed
+backend image is not free of known-high upstream advisories. The image is
+**not** claimed to be free of them, and the platform is **not** claimed to be
+suitable for a production deployment that treats the container as a hardened
+artefact. The frontend image, which is based on `nginx:alpine`, reports **zero**
+findings at every severity.
 
 ---
 

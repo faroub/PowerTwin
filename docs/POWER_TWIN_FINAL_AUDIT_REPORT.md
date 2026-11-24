@@ -72,10 +72,17 @@ attributed to one of them:
 These boundaries are stated so that no reader mistakes an audit finding for a
 verified fact:
 
-1. **No GitHub Actions run.** The six workflow files were written and reviewed
-   in this repository, but they have not been executed on a GitHub runner in
-   this environment. Their correctness is established by review and by running
-   their steps locally, **not** by an observed green run.
+1. **No green GitHub Actions run has yet been observed.** The six workflow
+   files **have** been executed on a GitHub runner: the repository has 86
+   recorded runs, and the run on the merged `main` branch is the first that
+   exercised the whole pipeline against a commit carrying all of the
+   remediation work. Every backend, frontend, system-engineering,
+   secret-scanning, dependency-audit and CodeQL job **passed**; two jobs
+   failed and both failures were real defects, which have since been
+   reproduced locally, corrected and re-verified locally. What is still
+   unverified is that the **corrected** files pass on the runner itself: the
+   corrections have been executed locally, step by step and with the same
+   tools, but not yet by GitHub Actions.
 2. **The steps were run locally, in the pipeline's own order.** The backend
    gates were executed on the canonical interpreter **Python 3.12** — the
    interpreter the pipeline uses — in a clean virtual environment built from
@@ -294,6 +301,48 @@ vulnerabilities**.
 `pip-audit` was executed against the declared ranges **and** against the fully
 resolved environment: **no known vulnerabilities** in either.
 
+### 8.5 The container images, as built and as measured
+
+The two container images that the pipeline builds were built locally with the
+exact command the pipeline uses and were scanned with the exact Trivy version
+the action installs (v0.70.0).
+
+| Measurement | Before | After |
+| :--- | :--- | :--- |
+| Backend image size | 609 MB | **281 MB** |
+| Backend image, CRITICAL findings | 0 | 0 |
+| Backend image, HIGH findings with a published fix | 76 | **0** |
+| Backend image, HIGH findings without a published fix | 82 | 53 (all inherited from the base image) |
+| Frontend image, CRITICAL and HIGH findings | not scanned | **0** |
+
+The backend image was rebuilt as a multi-stage image. The single-stage image
+retained `build-essential` and `libpq-dev` in its runtime layer, which pulled
+in `linux-libc-dev`, the Kerberos chain, the ncurses and Perl trees and the
+whole GCC and binutils toolchain. The runtime layer now carries none of them,
+runs `apt-get upgrade` so that the newest published distribution patches are
+applied, and ships no package installer: the `pip` and `wheel` distributions
+are removed from the virtual environment once the dependencies are in place.
+
+The residual 53 high-severity findings are 13 advisory identifiers across 21
+packages that the Debian trixie base image necessarily contains, and a scan of
+the **unmodified** base image reports the identical identifiers. Debian has
+published no fix for them, so no change to this repository can remove them.
+They are enumerated, justified and bounded in
+`docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.11.
+
+The gate was therefore split by the party that owns each package family: the
+operating-system scan fails on every advisory **that has a published fix**, so
+the residual set cannot be ignored into permanence — the moment Debian
+publishes a fix, the scan starts reporting it and the build fails until the
+image picks the patch up; and the application-package scan accepts **no**
+critical or high advisory at all, whether or not a fix exists, and is
+unaffected by the inherited set. No ignore file is used anywhere.
+
+The rebuilt image was additionally started and checked: it reports **healthy**
+through its own health probe, answers `/health/readiness` with the
+`SIMULATION_ONLY` safety invariant intact, and runs as the non-root user
+uid 10001.
+
 Three results are worth calling out. First, the endurance fingerprint is
 **identical on Python 3.12, 3.13 and 3.14**, so the determinism property is
 not an artefact of one interpreter. Second, the coverage figures differ by a
@@ -395,15 +444,43 @@ market simulator.
 *Action.* Treat these as roadmap items. They must **not** be represented as
 implemented in any status document.
 
-### F-07 — MEDIUM — The workflow definitions have not been executed on GitHub
+### F-07 — MEDIUM — RESOLVED IN PART — The workflow definitions have now run on GitHub, and two defects were found
 
-The six workflow files were corrected and reviewed, and their steps were run
-locally, but no GitHub Actions run was observed.
+The six workflow files **have now been executed by GitHub Actions**. The
+repository has 86 recorded runs, and the run on the merged `main` branch is
+the first one that exercised the whole pipeline against a commit carrying all
+of the remediation work. Every backend, frontend, system-engineering,
+secret-scanning, dependency-audit and CodeQL job **passed**. Two jobs failed,
+and both failures were real defects rather than flakes:
 
-*Impact.* A YAML or expression error in a workflow is invisible until the
-pipeline runs.
-*Action.* Open a pull request and let the pipeline run before the release
-workflow is trusted with a real tag.
+1. **The compose validation failed.** `docker-compose.yml` declares
+   `POSTGRES_PASSWORD` as mandatory with the `${POSTGRES_PASSWORD:?...}` form,
+   but the pipeline step that renders the compose file did not supply one. The
+   step aborted with exit code 15 and *required variable POSTGRES_PASSWORD is
+   missing a value*. The requirement itself was correct; the step was
+   corrected to supply a validation-only placeholder, and the requirement was
+   left untouched.
+2. **The container scan failed.** The backend image was built as a single
+   stage that retained the compiler toolchain, and the scan reported 158
+   high-severity operating-system findings. The image was rebuilt as a
+   multi-stage image with no build toolchain in the runtime layer, which
+   removed 105 of them, and the scan policy was split into two families so
+   that the residual inherited advisories — which Debian has not yet fixed
+   and which no change to this repository can address — do not make the gate
+   unsatisfiable.
+
+Both defects were reproduced locally before anything was changed, and both
+were fixed and re-verified locally: the compose file renders with the
+placeholder and still refuses to render without one; the rebuilt image passes
+both scan policies with **zero** fixable findings, starts, reports healthy
+through its own health probe and upholds the safety invariants.
+
+*Residual.* The corrected workflow files have been executed locally, step by
+step and with the same tools the pipeline uses, but they have **not yet been
+executed by GitHub Actions themselves**. The YAML syntax and the expression
+evaluation of the corrections are confirmed only when the next run completes.
+*Action.* Push the corrections and confirm that the next run on `main` is
+green before the release workflow is trusted with a real tag.
 
 ### F-08 — LOW — A module-level simulation entry point remains
 
@@ -502,8 +579,8 @@ documented.
 The audit does **not** find a defect that would make the platform unsafe to
 operate in simulation. It finds an engineering-maturity gap in the delivery
 chain: a thin frontend suite, unpinned Python **runtime** dependencies, a
-missing ORM-versus-migration comparison, and workflows that have not yet been
-executed on the CI provider.
+missing ORM-versus-migration comparison, and a delivery chain that has not yet
+completed a green run on the CI provider.
 
 The verification pass did, however, surface four delivery defects that were
 invisible from the source alone — an inert pytest configuration, an inert
@@ -513,11 +590,18 @@ did not type-check. All four are fixed. They are recorded in §8.1 because the
 fact that they were possible is itself a finding: a configuration file that
 looks authoritative while changing nothing is a trap for the next engineer.
 
+The first run on the CI provider then surfaced two further delivery defects
+that no amount of local review could have found — a compose validation step
+that could not satisfy the mandatory secret the compose file demands, and a
+container image whose runtime layer carried a compiler toolchain. Both are
+recorded in §8.5 and F-07, and both are fixed.
+
 ### 11.2 Recommended actions, in order
 
-1. **Run the pipelines on GitHub** (F-07). Open a pull request, let all six
-   workflows run, and fix whatever the runner reports. Until this happens the
-   delivery chain is verified by review and by local execution only.
+1. **Confirm the green run on GitHub** (F-07). The workflows have now run and
+   two defects were found and corrected; the corrections have been verified
+   locally but not yet by the runner. Push them and confirm the next run on
+   `main` is green before the release workflow is trusted with a real tag.
 2. **Pin the Python runtime dependencies with hashes** (F-02). The CI toolchain
    is pinned; the runtime dependencies are not. This is the single remaining
    change that most improves the reproducibility of a release.

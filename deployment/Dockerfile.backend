@@ -1,36 +1,102 @@
-FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+# PowerTwin backend image.
+#
+# The image is built in two stages. The builder stage carries the compiler
+# toolchain; the runtime stage does not. A container image is a deployed
+# artefact, not a build environment, so nothing that exists only to compile
+# source code belongs in it. Leaving `build-essential` and `libpq-dev` in the
+# final layer added `linux-libc-dev`, the Kerberos chain and the whole GCC
+# binutils tree to the shipped attack surface, and the container security gate
+# reported them as HIGH severity operating-system findings.
+#
+# The base image is pinned by digest, so a rebuild of the same commit resolves
+# to the same operating-system snapshot. `apt-get upgrade` below moves the
+# runtime layer to the newest packages the distribution currently publishes, so
+# that a patch released after the base image was built is still applied.
+#
+# The runtime container runs as a non-root user and its health probe uses the
+# Python standard library only, so the image ships no extra HTTP client.
+#
+# SECURITY: no credentials, no private keys and no connection details of real
+# equipment belong in this file.
+
+# =============================================================================
+# Stage 1 — builder
+# =============================================================================
+FROM python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+# The toolchain lives here and only here. Every runtime dependency in
+# backend/requirements.txt ships a manylinux wheel, so the compiler is a
+# fallback for a platform without one rather than the normal path.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt /tmp/requirements.txt
+
+# A self-contained virtual environment is copied into the runtime stage as a
+# whole, so the runtime never needs a package manager, a compiler or a
+# network connection to install anything.
+#
+# The package installer and the wheel builder are removed again once the
+# dependencies are in place. A deployed artefact is not a build environment,
+# and the two of them are not runtime dependencies of this service. Their
+# absence is also what keeps the container security scan honest: the wheel
+# builder is the only thing that still carries a vulnerable copy of the
+# setuptools package index, and it has no business being on a runtime layer.
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt \
+    && /opt/venv/bin/pip uninstall -y wheel \
+    && /opt/venv/bin/pip uninstall -y pip \
+    && rm -f /opt/venv/bin/pip /opt/venv/bin/pip3 /opt/venv/bin/pip3.12 \
+    && /opt/venv/bin/python -c "import bcrypt, fastapi, httpx, jwt, passlib, psycopg2, pydantic, pymodbus, sqlalchemy, uvicorn, yaml"
+
+# =============================================================================
+# Stage 2 — runtime
+# =============================================================================
+FROM python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH="/opt/venv/bin:${PATH}"
+
+# Apply every operating-system patch the distribution currently publishes.
+# The base image is a point-in-time snapshot; without this step a fix released
+# after that snapshot was taken would not reach the deployed container.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
 
-# Prevent Python from writing .pyc files & enable unbuffered stdout
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
-
-# Install system build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy backend requirements and install
-COPY backend/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy backend codebase, plugins, configs, and tests
 COPY backend/ /app/backend/
 COPY plugins/ /app/plugins/
 COPY configs/ /app/configs/
 COPY tests/ /app/tests/
+COPY deployment/healthcheck.py /app/deployment/healthcheck.py
 
-# Security: Create non-root user
-RUN useradd -m powertwin && chown -R powertwin:powertwin /app
+# The service account is a fixed non-root uid so that a bind-mounted volume
+# can be given matching ownership from the host.
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin powertwin \
+    && chown -R powertwin:powertwin /app
+
 USER powertwin
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost:8000/health/readiness || exit 1
+# The probe uses the Python standard library, so the image needs no curl and
+# no other HTTP client in its runtime layer.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["/opt/venv/bin/python", "/app/deployment/healthcheck.py", "/health/readiness"]
 
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/opt/venv/bin/uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

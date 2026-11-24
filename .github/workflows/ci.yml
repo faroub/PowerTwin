@@ -87,12 +87,66 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Validate Docker Compose Configuration
+        env:
+          # docker-compose.yml declares POSTGRES_PASSWORD as mandatory
+          # (${POSTGRES_PASSWORD:?...}), so the compose file cannot even be
+          # parsed without it. This step validates the *syntax and the
+          # interpolation* of the compose file; it does not start a container
+          # and it does not connect to a database.
+          #
+          # The value below is a validation-only placeholder. It is not a
+          # credential, it grants access to nothing, it is never written to a
+          # file, it is never pushed anywhere and it exists only for the
+          # duration of this step. The mandatory-variable requirement in
+          # docker-compose.yml is deliberately left untouched, so a real
+          # deployment still has to supply its own secret.
+          POSTGRES_PASSWORD: "ci-compose-validation-placeholder-not-a-credential"
         run: |
           docker compose config --quiet
 
       - name: Build Backend Docker Image
         run: |
           docker build -t powertwin-backend:ci-test -f deployment/Dockerfile.backend .
+
+      # Building the image is not evidence that the image works. This step
+      # starts the container, waits for the image's own health probe to report
+      # healthy and then checks the safety invariants of the running service.
+      # It binds to the loopback interface only, exactly like the compose file.
+      - name: Verify Backend Container Starts and Reports Healthy
+        run: |
+          set -euo pipefail
+          container=powertwin-backend-ci-smoke
+          docker rm -f "$container" >/dev/null 2>&1 || true
+          docker run -d --name "$container" -p 127.0.0.1:8000:8000 powertwin-backend:ci-test >/dev/null
+          status=""
+          for _ in $(seq 1 30); do
+            status="$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo missing)"
+            case "$status" in
+              healthy|unhealthy) break ;;
+            esac
+            sleep 2
+          done
+          if [ "$status" != "healthy" ]; then
+            echo "The backend container did not become healthy. Reported status: ${status:-unknown}"
+            docker logs "$container" || true
+            docker rm -f "$container" >/dev/null 2>&1 || true
+            exit 1
+          fi
+          echo "The backend container reported healthy."
+          python3 - <<'PY'
+          import json
+          import urllib.request
+
+          with urllib.request.urlopen("http://127.0.0.1:8000/health/readiness", timeout=5) as response:
+              body = json.load(response)
+          safety = body["safety"]
+          if safety.get("simulation_only") is not True:
+              raise SystemExit(f"the running container does not report SIMULATION_ONLY: {safety}")
+          if safety.get("hardware_integration_enabled") is not False:
+              raise SystemExit(f"the running container reports hardware integration enabled: {safety}")
+          print("The running container upholds the safety invariants:", safety.get("safety_status"))
+          PY
+          docker rm -f "$container" >/dev/null
 
       - name: Build Frontend Docker Image
         run: |
