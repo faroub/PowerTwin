@@ -1,0 +1,39 @@
+# Continuous-integration tooling, pinned for reproducible builds.
+#
+# These tools are used by the CI pipeline only. They are deliberately kept
+# out of backend/requirements.txt so that a deployment never installs an
+# auditing tool, a linter or a test runner it does not need, and so that a
+# change of the auditing tool can never silently change the behaviour of a
+# release build. The container image of the backend installs
+# backend/requirements.txt alone and therefore carries none of them.
+#
+# Every version below is pinned to an exact release. The pipeline installs
+# backend/requirements.txt first and this file second, so the pins in this
+# file are the ones that end up installed, whatever the ranges of the runtime
+# requirements resolve to. A tool upgrade is therefore an explicit, visible
+# change to this file rather than a silent consequence of a new release of
+# the package index.
+#
+# The pinned versions are the ones the pipeline was verified against: ruff
+# 0.17.6, mypy 2.4.1 and pytest 9.2.0, on Python 3.12, 3.13 and 3.14.
+#
+# SECURITY: no credentials, no private keys and no connection details of real
+# equipment belong in this file.
+
+# Formatting and linting.
+ruff==0.17.6
+
+# Static type checking.
+mypy==2.4.1
+types-PyYAML==6.0.12.20261122
+
+# Test execution and coverage measurement.
+pytest==9.2.0
+pytest-asyncio==1.5.0
+pytest-cov==7.1.0
+
+# Property-based physics testing.
+hypothesis==6.170.17
+
+# Dependency vulnerability auditing.
+pip-audit==2.10.1

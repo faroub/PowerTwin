@@ -10,6 +10,7 @@ jobs:
   frontend-ci:
     name: Frontend Lint, Test & Build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -36,10 +37,23 @@ jobs:
           cd frontend
           npm test
 
+      - name: Enforce the Frontend Coverage Policy
+        run: |
+          cd frontend
+          npm run test:coverage
+
       - name: Build Production Web HMI
         run: |
           cd frontend
           npm run build
+
+      - name: Upload Frontend Coverage Report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: frontend-coverage-report
+          path: frontend/coverage/
+          retention-days: 7
 
       - name: Upload Frontend Dist Artifact
         if: always()

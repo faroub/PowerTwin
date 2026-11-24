@@ -42,6 +42,7 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
+coverage.json
 *.cover
 *.py.qual
 .hypothesis/
@@ -94,6 +95,7 @@ node_modules/
 frontend/dist/
 frontend/node_modules/
 frontend/.vite/
+frontend/coverage/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

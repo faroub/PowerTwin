@@ -150,9 +150,9 @@ def test_server_shutdown_releases_the_port() -> None:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
                 probe.bind(("127.0.0.1", port))
             break
-        except OSError:
+        except OSError as err:
             if time.monotonic() > deadline:
-                raise AssertionError("The Modbus TCP port was not released.")
+                raise AssertionError("The Modbus TCP port was not released.") from err
             time.sleep(0.05)
 
 

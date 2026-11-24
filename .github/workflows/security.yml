@@ -1,8 +1,8 @@
 name: Security & Vulnerability Scanning
 
 on:
+  # Every pull request is scanned, whatever branch it targets.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
   schedule:
@@ -21,6 +21,7 @@ jobs:
   codeql-analysis:
     name: CodeQL Static Security Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -36,6 +37,7 @@ jobs:
   dependency-audit:
     name: Python & npm Dependency Security Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -47,11 +49,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: "backend/requirements.txt"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-ci.txt
 
       - name: Python Dependency Audit (pip-audit)
         run: |
-          pip install pip-audit
+          # pip-audit is pinned in backend/requirements-ci.txt so that the audit
+          # is reproducible and cannot silently change behaviour.
+          pip install -r backend/requirements-ci.txt
           pip-audit -r backend/requirements.txt
 
       - name: Set up Node.js 20
@@ -64,11 +70,13 @@ jobs:
       - name: npm Security Audit
         run: |
           cd frontend
+          npm ci
           npm audit --audit-level=high
 
   secret-scanning:
     name: Secret & Credential Scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -85,6 +93,7 @@ jobs:
   container-security-scan:
     name: Docker Image Security Scan (Trivy)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       security-events: write

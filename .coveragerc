@@ -1,0 +1,22 @@
+# Coverage configuration for the PowerTwin repository.
+#
+# The test suite is executed from the repository root, so the coverage
+# configuration has to be at the repository root as well. The
+# ``[tool.coverage.*]`` sections of ``backend/pyproject.toml`` were never read
+# for the same reason that the pytest section was never read: the tools are
+# invoked from the root, not from ``backend/``.
+#
+# The pipeline additionally passes ``--cov=backend/app --cov=plugins
+# --cov-branch`` explicitly, which states the same intent on the command
+# line. This file makes the intent authoritative for every invocation,
+# including a bare ``pytest --cov``.
+
+[run]
+branch = True
+source =
+    backend/app
+    plugins
+
+[report]
+show_missing = True
+precision = 2

@@ -50,16 +50,9 @@ python_version = "3.12"
 strict = true
 ignore_missing_imports = true
 
-[tool.pytest.ini_options]
-minversion = "8.0"
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-asyncio_mode = "auto"
-
-[tool.coverage.run]
-branch = true
-source = ["backend/app", "plugins"]
-
-[tool.coverage.report]
-show_missing = true
-precision = 2
+# The pytest and the coverage configuration deliberately live at the
+# repository root, in ``pytest.ini`` and ``.coveragerc``. Both tools are
+# invoked from the repository root - by the pipeline and by every documented
+# local command - and a configuration section of this file is never read from
+# there, because both tools discover their configuration by walking up from
+# the working directory.

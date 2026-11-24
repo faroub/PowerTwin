@@ -1,8 +1,10 @@
 name: Main CI Workflow
 
 on:
+  # Every pull request is tested, whatever branch it targets. Restricting the
+  # trigger to `main` would leave the feature branches of a pull request
+  # untested until the moment they are merged.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
@@ -24,6 +26,7 @@ jobs:
   system-engineering-ci:
     name: System Engineering & Physics Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -33,12 +36,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: "backend/requirements.txt"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-ci.txt
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
+          pip install -r backend/requirements-ci.txt
 
       - name: Reference Plant Configuration & Topology Validation
         run: |
@@ -68,9 +74,14 @@ jobs:
         run: |
           PYTHONPATH=. pytest tests/test_e2e_integration_demo.py
 
+      - name: CI Helper Script Validation
+        run: |
+          PYTHONPATH=. pytest tests/test_ci_scripts.py
+
   infrastructure-ci:
     name: Infrastructure & Docker Build Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -92,6 +103,7 @@ jobs:
     needs: [backend-ci, frontend-ci, system-engineering-ci, infrastructure-ci]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Print CI Status Summary
         run: |
