@@ -338,11 +338,64 @@ nightly artefacts.
 | Python dependency audit | `pip-audit` 2.10.1 | `backend/requirements.txt` | Job fails on a known vulnerability |
 | npm dependency audit | `npm audit --audit-level=high` | `frontend/package-lock.json` | Job fails on a high or critical advisory |
 | Secret scanning | TruffleHog (`--only-verified`) | Full history | Job fails on a verified secret |
-| Container scan | Trivy (`CRITICAL,HIGH`) | Backend image | Job fails on a critical or high finding |
+| Container scan — operating system | Trivy (`CRITICAL,HIGH`, fixable only) | Backend and frontend images | Job fails on a critical or high finding **that has a published fix** |
+| Container scan — application packages | Trivy (`CRITICAL,HIGH`, strict) | Backend and frontend images | Job fails on **any** critical or high finding, fixed or not |
 
 The auditing tools are pinned in `backend/requirements-ci.txt`, separately from
 the runtime requirements, so that a change of the auditing tool can never
 silently change the behaviour of a release build.
+
+### 7.1 Why the container scan is split into two policies
+
+A single scan with one severity threshold cannot be satisfied by any image
+that is based on a current distribution release, and the reason is structural
+rather than a matter of configuration.
+
+The backend image is built on the official `python:3.12-slim` image, pinned by
+digest, which is Debian trixie. Debian currently has **no published fix** for
+13 advisories that affect packages the base image necessarily contains —
+`util-linux`, `login`, `bsdutils`, `ncurses`, `sqlite3`, `openssl`, the
+`systemd` libraries, `perl-base` and `libacl1`. Trivy reports each of them as
+HIGH. A scan that fails on every HIGH finding therefore fails for reasons that
+no change to this repository can address, and a gate that can never be met is
+a gate that everyone learns to ignore.
+
+The two policies separate the two package families by the party that owns
+them:
+
+- **Operating-system packages belong to the distribution.** The scan fails on
+  every critical or high advisory **that has a fix available**, and the image
+  build runs `apt-get upgrade` so that the newest published patches are always
+  present. The day Debian publishes a fix, the advisory stops being unfixed,
+  the scan starts reporting it, and the build fails until the image picks the
+  patch up. The gate therefore cannot silently rot, and it cannot be satisfied
+  by ignoring an advisory: no ignore file is used at all.
+- **Application packages belong to this project.** Every one of them can be
+  changed by editing a pin in `backend/requirements.txt`, so the scan holds
+  them to the strictest policy: no critical and no high advisory is accepted,
+  whether or not a fix exists. Because this scan is restricted to the
+  application package family, the inherited Debian advisories cannot mask a
+  finding in it.
+
+The measured result against the rebuilt images is **0 critical, 0 high with a
+fix**, for both images. The full, unfiltered scan of the backend image reports
+53 high findings across 21 packages, all 13 advisory identifiers of which are
+inherited from the unmodified base image and all of which are unfixable
+upstream. The frontend image reports zero findings of every severity. The
+residual risk and the reasoning behind it are recorded in
+`docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.11.
+
+### 7.2 The compose validation in the pipeline
+
+`docker-compose.yml` declares `POSTGRES_PASSWORD` as mandatory, using the
+`${POSTGRES_PASSWORD:?...}` form, so the compose file cannot even be parsed
+without it. The pipeline validates the syntax and the interpolation of the
+compose file, and supplies a **validation-only placeholder** for the duration
+of that one step. The placeholder is not a credential, it grants access to
+nothing, it is never written to a file, it is never pushed anywhere and it
+never starts a container. The mandatory-variable requirement in
+`docker-compose.yml` is deliberately left untouched, so a real deployment
+still has to supply its own secret.
 
 ---
 

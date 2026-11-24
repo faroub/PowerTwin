@@ -105,10 +105,66 @@ jobs:
         run: |
           docker build -t powertwin-backend:scan -f deployment/Dockerfile.backend .
 
-      - name: Scan Backend Image with Trivy
+      - name: Build Frontend Image
+        run: |
+          docker build -t powertwin-frontend:scan -f deployment/Dockerfile.frontend .
+
+      # The two scans below enforce two different policies, because the two
+      # package families have two different owners.
+      #
+      # Operating-system packages belong to the Debian base image. The
+      # upstream distribution is the only party that can publish a fix for
+      # them, and it has not yet published one for the advisories that the
+      # base image still carries. This scan therefore fails on every
+      # CRITICAL or HIGH advisory that HAS a fix available, and the image
+      # build applies `apt-get upgrade` so that the newest published patches
+      # are always present. The day the distribution publishes a fix, the
+      # advisory stops being "unfixed", the scan starts reporting it, and the
+      # build fails until the image picks the patch up. The gate therefore
+      # cannot silently rot.
+      - name: Scan Backend Image — Operating-System Packages (fixable only)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: "powertwin-backend:scan"
           format: "table"
           exit-code: "1"
           severity: "CRITICAL,HIGH"
+          vuln-type: "os"
+          ignore-unfixed: "true"
+
+      # Python packages belong to this project. Every one of them can be
+      # upgraded by changing a pin in backend/requirements.txt, so this scan
+      # holds them to the strictest policy: no CRITICAL and no HIGH advisory
+      # is accepted, whether or not a fix exists yet. The inherited
+      # unfixable Debian advisories cannot mask a finding here, because the
+      # scan is restricted to the Python package family.
+      - name: Scan Backend Image — Python Packages (strict)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: "powertwin-backend:scan"
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL,HIGH"
+          vuln-type: "library"
+
+      # The frontend image is deployed exactly like the backend image, so it
+      # is scanned exactly like the backend image and under the same two
+      # policies. It was previously not scanned at all.
+      - name: Scan Frontend Image — Operating-System Packages (fixable only)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: "powertwin-frontend:scan"
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL,HIGH"
+          vuln-type: "os"
+          ignore-unfixed: "true"
+
+      - name: Scan Frontend Image — Application Packages (strict)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: "powertwin-frontend:scan"
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL,HIGH"
+          vuln-type: "library"
