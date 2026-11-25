@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+
 import { ConfirmationModal } from '../components/ConfirmationModal';
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
 
 export const EquipmentControllerView: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
@@ -16,6 +18,8 @@ export const EquipmentControllerView: React.FC = () => {
         <h1 className="view-title">Equipment Controller (Layer A)</h1>
         <p className="view-subtitle">Device Startup/Shutdown Sequencing and Interlocks</p>
       </div>
+
+      <SimulatedDataNotice detail="Illustrative controller states and permissives of the simulated equipment controllers." />
 
       <div className="grid-cards">
         <div className="card">

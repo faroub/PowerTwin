@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
+
 export const ScenarioManagerView: React.FC = () => {
   return (
     <div>
@@ -7,6 +9,8 @@ export const ScenarioManagerView: React.FC = () => {
         <h1 className="view-title">Scenario Manager</h1>
         <p className="view-subtitle">Grid Fault & Market Dispatch Scenario Profile Runner</p>
       </div>
+
+      <SimulatedDataNotice detail="Illustrative scenario profile of the simulation framework." />
 
       <div className="card">
         <h3 style={{ color: '#38bdf8', marginBottom: '12px' }}>Active Scenario Profile</h3>

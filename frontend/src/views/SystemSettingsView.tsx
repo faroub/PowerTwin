@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
+
 export const SystemSettingsView: React.FC = () => {
   return (
     <div>
@@ -7,6 +9,8 @@ export const SystemSettingsView: React.FC = () => {
         <h1 className="view-title">System Settings</h1>
         <p className="view-subtitle">Application Configuration and Safety Invariants</p>
       </div>
+
+      <SimulatedDataNotice detail="Application configuration and safety invariants of the running platform." />
 
       <div className="card">
         <h3 style={{ color: '#ef4444', marginBottom: '12px' }}>Non-Negotiable Safety Invariants</h3>

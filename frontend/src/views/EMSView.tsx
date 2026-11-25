@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
+
 export const EMSView: React.FC = () => {
   return (
     <div>
@@ -8,9 +10,7 @@ export const EMSView: React.FC = () => {
         <p className="view-subtitle">Economic Dispatch & Feasibility Validation</p>
       </div>
 
-      <div className="notice-box">
-        <strong>EMS FEASIBILITY CHECK:</strong> EMS runs physical feasibility verification on all setpoints before dispatching to PPC.
-      </div>
+      <SimulatedDataNotice detail="EMS runs physical feasibility verification on all setpoints before dispatching to PPC." />
 
       <div className="grid-cards">
         <div className="card">

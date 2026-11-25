@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
+
 export const BMSView: React.FC = () => {
   return (
     <div>
@@ -8,9 +10,7 @@ export const BMSView: React.FC = () => {
         <p className="view-subtitle">Protection Thresholds, Permissives, and Current Limits</p>
       </div>
 
-      <div className="notice-box">
-        <strong>MASTER BMS CONTROLLER STATUS:</strong> Enforces voltage, current, and thermal limiters.
-      </div>
+      <SimulatedDataNotice detail="Illustrative protection thresholds, permissives and current limits of the reference battery system." />
 
       <div className="grid-cards">
         <div className="card">

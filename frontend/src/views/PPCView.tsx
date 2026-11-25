@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
+
 export const PPCView: React.FC = () => {
   return (
     <div>
@@ -7,6 +9,8 @@ export const PPCView: React.FC = () => {
         <h1 className="view-title">Power Plant Controller (PPC - Layer B)</h1>
         <p className="view-subtitle">POI Power Regulation & Unit Power Allocation</p>
       </div>
+
+      <SimulatedDataNotice detail="Illustrative plant controller setpoints of the simulated control hierarchy." />
 
       <div className="grid-cards">
         <div className="card">

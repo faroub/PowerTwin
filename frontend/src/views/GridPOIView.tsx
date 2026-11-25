@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
 import { usePlantTelemetry } from '../services/hooks';
 
 export const GridPOIView: React.FC = () => {
@@ -12,6 +13,8 @@ export const GridPOIView: React.FC = () => {
         <h1 className="view-title">Grid & POI</h1>
         <p className="view-subtitle">Synthetic Grid Model & POI Meter Monitoring</p>
       </div>
+
+      <SimulatedDataNotice detail="Point-of-interconnection metering from the synthetic grid model." />
 
       <div className="grid-cards">
         <div className="card">

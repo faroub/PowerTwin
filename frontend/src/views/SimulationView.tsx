@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+
 import { ConfirmationModal } from '../components/ConfirmationModal';
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
 import { fetchSystemHealth, dispatchSimulationControl, ControlResponse } from '../services/api';
 
 export const SimulationView: React.FC = () => {
@@ -44,6 +46,8 @@ export const SimulationView: React.FC = () => {
         <h1 className="view-title">Simulation Control</h1>
         <p className="view-subtitle">Clock Control, Speed Multipliers, and Deterministic Reset</p>
       </div>
+
+      <SimulatedDataNotice detail="Engine control actions. They act on the in-memory simulation only." />
 
       {feedback && (
         <div
