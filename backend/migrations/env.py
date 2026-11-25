@@ -12,7 +12,12 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 config = context.config
 if config.config_file_name:
-    fileConfig(config.config_file_name)
+    # `fileConfig` disables every logger that already exists unless it is
+    # told otherwise. The Alembic environment is imported by the migration
+    # tooling *inside* the process that owns the audit trail, so the default
+    # would switch off the application's loggers — and with them the audit
+    # trail that `AGENTS.md` §2.10 requires — without a word.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
