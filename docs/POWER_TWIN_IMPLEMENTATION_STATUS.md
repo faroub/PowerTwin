@@ -95,7 +95,15 @@ the pipeline** and is backed by a test, not only by a document.
 | :--- | :--- | :--- |
 | 1 | Apply the documented branch protection to `main` (administrator action) | Medium |
 | 2 | Implement the energy-market, calibration and warranty roadmap items | Medium |
-| 3 | Close the low-severity items: the module-level simulation entry point, the dedicated operator-action journal, and the line-length unification | Low |
+| 3 | Close the low-severity items: the dedicated operator-action journal and the line-length unification | Low |
+
+**Item 3 of an earlier revision — "the module-level simulation entry point" —
+is closed.** The runtime is the single write path to the plant and the
+engine: a plant is attached with `SimulationRuntime.attach_plant` and
+detached with `SimulationRuntime.drop`, and both module-level
+`set_active_simulation_engine` helpers are gone. The unit tests construct
+their plant through the runtime the API itself resolves, and
+`tests/test_simulation_runtime.py` asserts that the helpers cannot return.
 
 **Item 1 of an earlier revision — "Add `target_metadata` to the migrations and
 restore the ORM-versus-migration comparison" — is closed.** The Alembic

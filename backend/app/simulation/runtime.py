@@ -286,39 +286,6 @@ def get_simulation_runtime(
     return default_runtime
 
 
-def set_active_simulation_engine(
-    engine: Any = None,
-    plant: Any = None,
-    app: Any = None,
-) -> SimulationRuntime:
-    """Write the active engine (and plant) into the app-scoped runtime.
-
-    ``engine`` is the registered ``SimulationRunManager`` of a built plant;
-    ``plant`` is the ``BuiltPlantInstance`` so the overview and telemetry
-    readers can follow the engine. Callers that build their own plant (tests,
-    scenario runs) override the app-scoped engine locally.
-
-    Pass ``app`` (``client.app`` in tests, ``app`` in ``init_simulation``) so
-    the engine lands on the runtime the API resolves for its requests. When no
-    app handle is given, the module-level fall-back runtime is used.
-
-    ``engine=None`` detaches the plant from the runtime, so a previously
-    attached engine or plant can never leak into the next request or test.
-    """
-    runtime = get_simulation_runtime(app=app)
-    with runtime._lock:
-        runtime._stop_runner()
-        runtime.engine = engine
-        if engine is None:
-            # A runtime without an engine has no plant to read from.
-            runtime.active_plant = None
-        elif plant is not None:
-            runtime.active_plant = plant
-        if engine is not None and runtime.runner is None:
-            runtime.runner = SimulationRunner(engine, plant, runtime=runtime)
-    return runtime
-
-
 def get_active_simulation_engine(app: Any = None) -> SimulationRunManager | None:
     """Return the active simulation engine (app-scoped)."""
     return get_simulation_runtime(app=app).engine

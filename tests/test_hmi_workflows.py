@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from backend.app.api.v1.simulation_ctrl import set_active_simulation_engine
+from backend.app.simulation.runtime import get_simulation_runtime
 from backend.app.topology.factory import PlantTopologyFactory
 
 
@@ -25,8 +25,7 @@ def test_observer_role_can_read_telemetry_but_cannot_modify_simulation(
     plant = factory.build_plant(
         factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
     )
-    plant.simulation_engine.shared_state["plant_instance"] = plant
-    set_active_simulation_engine(plant.simulation_engine, app=client.app)
+    get_simulation_runtime(app=client.app).attach_plant(plant)
 
     login_res = client.post(
         "/api/v1/auth/login",
@@ -47,7 +46,7 @@ def test_observer_role_can_read_telemetry_but_cannot_modify_simulation(
     assert control_res.status_code == 403
     assert "Access denied" in control_res.json()["detail"]
 
-    set_active_simulation_engine(None, app=client.app)
+    get_simulation_runtime(app=client.app).drop()
 
 
 def test_simulation_control_returns_503_when_no_engine_connected(
@@ -55,7 +54,7 @@ def test_simulation_control_returns_503_when_no_engine_connected(
     dev_test_password: str,
 ) -> None:
     """Test simulation control API returns 503 NOT_CONNECTED when no active engine is attached."""
-    set_active_simulation_engine(None, app=client.app)
+    get_simulation_runtime(app=client.app).drop()
 
     login_res = client.post(
         "/api/v1/auth/login",
@@ -82,8 +81,7 @@ def test_simulation_control_executes_action_on_active_engine(
     plant = factory.build_plant(
         factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
     )
-    plant.simulation_engine.shared_state["plant_instance"] = plant
-    set_active_simulation_engine(plant.simulation_engine, app=client.app)
+    get_simulation_runtime(app=client.app).attach_plant(plant)
 
     login_res = client.post(
         "/api/v1/auth/login",
@@ -110,7 +108,7 @@ def test_simulation_control_executes_action_on_active_engine(
     assert data_pause["status"] == "SUCCESS"
     assert data_pause["engine_state"] == "PAUSED"
 
-    set_active_simulation_engine(None, app=client.app)
+    get_simulation_runtime(app=client.app).drop()
 
 
 def test_simulation_control_rejects_unknown_action(

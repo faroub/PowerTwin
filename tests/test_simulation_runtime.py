@@ -25,9 +25,9 @@ from backend.app.core.config import settings
 from backend.app.core.rbac import Permission, UserRole, create_user_session
 from backend.app.simulation.application import close_simulation, init_simulation
 from backend.app.simulation.runtime import (
+    SimulationRuntime,
     default_runtime,
     get_simulation_runtime,
-    set_active_simulation_engine,
 )
 from backend.app.topology.factory import PlantTopologyFactory
 
@@ -277,6 +277,49 @@ def test_default_runtime_is_bound_to_app_on_first_use() -> None:
         close_simulation(app)
 
 
+def test_the_runtime_has_a_single_write_path() -> None:
+    """No module-level helper reaches the runtime's plant and engine.
+
+    The runtime is the only place that holds the plant and the engine, and
+    ``attach_plant`` and ``drop`` are the only way in. A module-level
+    ``set_active_simulation_engine`` helper was kept for the unit tests and
+    removed with audit finding F-08: a second entry point is a second way for
+    the API and the start-up to disagree about which engine is live.
+    """
+    import backend.app.api.v1.simulation_ctrl as simulation_ctrl
+    import backend.app.simulation.runtime as runtime_module
+
+    assert not hasattr(runtime_module, "set_active_simulation_engine"), (
+        "the runtime module exposes a second write path to the plant and engine"
+    )
+    assert not hasattr(simulation_ctrl, "set_active_simulation_engine"), (
+        "the API module exposes a second write path to the plant and engine"
+    )
+    assert hasattr(runtime_module.SimulationRuntime, "attach_plant")
+    assert hasattr(runtime_module.SimulationRuntime, "drop")
+
+
+def test_attaching_and_detaching_a_plant_leaves_the_runtime_consistent() -> None:
+    """The runtime never holds an engine without its plant, or the other way round."""
+    factory = PlantTopologyFactory()
+    plant = factory.build_plant(factory.load_config_from_yaml(TOPOLOGY_PATH))
+    runtime = SimulationRuntime()
+
+    assert runtime.is_attached is False
+    assert runtime.engine is None
+    assert runtime.active_plant is None
+
+    runtime.attach_plant(plant)
+    assert runtime.is_attached is True
+    assert runtime.engine is plant.simulation_engine
+    assert runtime.active_plant is plant
+
+    runtime.drop()
+    assert runtime.is_attached is False
+    assert runtime.engine is None
+    assert runtime.active_plant is None
+
+
 def test_continuous_run_advances_seconds_of_wall_clock(
     client: TestClient, password: str
 ) -> None:
@@ -307,11 +350,13 @@ def test_engine_is_reachable_by_tests_that_build_their_own_plant(password: str) 
         assert engine.clock.total_steps == 3
         assert engine.state.value in ("RUNNING", "PAUSED")
 
-        set_active_simulation_engine(engine)
-        engine.shared_state["plant_instance"] = plant  # legacy authorisation key
+        # The runtime is the single write path: a plant is attached through
+        # ``attach_plant`` and detached through ``drop``. There is no
+        # module-level helper that reaches the same state by another route.
         runtime = get_simulation_runtime()
+        runtime.attach_plant(plant)
         assert runtime.engine is engine
-        assert engine.shared_state.get("plant_instance") is plant
+        assert runtime.active_plant is plant
 
         assert math.isfinite(engine.clock.time_ns)
         assert engine.clock.total_steps == 3
@@ -321,7 +366,7 @@ def test_engine_is_reachable_by_tests_that_build_their_own_plant(password: str) 
         assert engine.clock.total_steps == 3
     finally:
         engine.reset()
-        set_active_simulation_engine(None)
+        get_simulation_runtime().drop()
 
 
 def test_unauthenticated_guardrail_is_reported(client: TestClient) -> None:
