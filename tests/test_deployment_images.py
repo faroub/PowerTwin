@@ -57,9 +57,7 @@ def _load_module(module_name: str, path: Path) -> ModuleType:
     return module
 
 
-healthcheck = _load_module(
-    "powertwin_healthcheck", REPO_ROOT / "deployment" / "healthcheck.py"
-)
+healthcheck = _load_module("powertwin_healthcheck", REPO_ROOT / "deployment" / "healthcheck.py")
 
 
 def _stages(dockerfile: Path) -> list[str]:
@@ -194,9 +192,7 @@ class TestComposeFiles:
                 )
 
     @pytest.mark.parametrize("path", COMPOSE_FILES, ids=lambda p: p.name)
-    def test_the_health_probe_uses_the_python_standard_library(
-        self, path: Path
-    ) -> None:
+    def test_the_health_probe_uses_the_python_standard_library(self, path: Path) -> None:
         text = path.read_text()
         assert "deployment/healthcheck.py" in text
         assert "curl" not in text
@@ -205,18 +201,14 @@ class TestComposeFiles:
     def test_the_ports_are_bound_to_the_loopback_interface(self, path: Path) -> None:
         for line in path.read_text().splitlines():
             if '- "' in line and "ports" not in line:
-                assert "127.0.0.1:" in line, (
-                    f"a published port is not loopback bound: {line}"
-                )
+                assert "127.0.0.1:" in line, f"a published port is not loopback bound: {line}"
 
 
 class TestCiWorkflow:
     """The pipeline must validate the compose file without weakening it."""
 
     def test_the_compose_validation_supplies_a_validation_only_password(self) -> None:
-        assert (
-            f'POSTGRES_PASSWORD: "{VALIDATION_PLACEHOLDER}"' in CI_WORKFLOW.read_text()
-        )
+        assert f'POSTGRES_PASSWORD: "{VALIDATION_PLACEHOLDER}"' in CI_WORKFLOW.read_text()
 
     def test_the_validation_placeholder_is_never_persisted(self) -> None:
         text = CI_WORKFLOW.read_text()
@@ -253,7 +245,8 @@ class TestDependencyLock:
                 )
                 if "backend/requirements.lock" in stripped:
                     assert "--require-hashes" in stripped, (
-                        f"{workflow.name} installs the lock without verifying its hashes: {stripped}"
+                        f"{workflow.name} installs the lock without verifying "
+                        f"its hashes: {stripped}"
                     )
 
     def test_the_workflows_cache_the_lock(self) -> None:
@@ -363,13 +356,9 @@ class TestHealthProbe:
 
     def test_the_url_is_built_from_the_path(self) -> None:
         assert (
-            healthcheck.build_url("/health/readiness")
-            == "http://127.0.0.1:8000/health/readiness"
+            healthcheck.build_url("/health/readiness") == "http://127.0.0.1:8000/health/readiness"
         )
-        assert (
-            healthcheck.build_url("health/readiness")
-            == "http://127.0.0.1:8000/health/readiness"
-        )
+        assert healthcheck.build_url("health/readiness") == "http://127.0.0.1:8000/health/readiness"
 
     def test_a_successful_answer_is_healthy(self, http_server: HTTPServer) -> None:
         assert healthcheck.probe(_url(http_server, "/ok")) is True
@@ -384,9 +373,7 @@ class TestHealthProbe:
         healthcheck.probe(_url(http_server, "/ok"))
         assert REQUESTS == ["GET"]
 
-    def test_the_exit_status_follows_the_probe(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_the_exit_status_follows_the_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(healthcheck, "probe", lambda url: True)
         assert healthcheck.main(["healthcheck.py"]) == 0
         monkeypatch.setattr(healthcheck, "probe", lambda url: False)
@@ -416,9 +403,7 @@ class TestFrontendEndToEndSuite:
 
     def test_the_pipeline_runs_the_end_to_end_suite(self) -> None:
         text = self.WORKFLOW.read_text()
-        assert "npm run test:e2e" in text, (
-            "the end-to-end suite is not run by the pipeline"
-        )
+        assert "npm run test:e2e" in text, "the end-to-end suite is not run by the pipeline"
         assert "npx playwright install --with-deps chromium" in text, (
             "the pipeline runs the end-to-end suite without installing its browser"
         )
@@ -432,9 +417,7 @@ class TestFrontendEndToEndSuite:
     ) -> None:
         text = self.CONFIG.read_text()
         assert "PREVIEW_HOST = '127.0.0.1'" in text
-        assert "vite preview" in text, (
-            "the suite does not run against the built artefact"
-        )
+        assert "vite preview" in text, "the suite does not run against the built artefact"
         # The preview server must not be bound to every interface: an
         # end-to-end run must not be reachable from an untrusted network.
         assert "0.0.0.0" not in text
@@ -444,9 +427,7 @@ class TestFrontendEndToEndSuite:
     ) -> None:
         text = self.MOCK.read_text()
         assert "'**/api/v1/**'" in text, "the mock does not intercept the platform API"
-        assert "route.abort('failed')" in text, (
-            "an API path the mock does not model is not aborted"
-        )
+        assert "route.abort('failed')" in text, "an API path the mock does not model is not aborted"
         assert "route.abort('blockedbyclient')" in text, (
             "a request to a host other than the preview server is not blocked"
         )
@@ -465,9 +446,7 @@ class TestFrontendEndToEndSuite:
 
     def test_the_unit_suite_does_not_collect_the_end_to_end_specs(self) -> None:
         text = (self.FRONTEND / "vite.config.ts").read_text()
-        assert "e2e/**" in text, (
-            "Vitest would collect the Playwright specs, which run in a browser"
-        )
+        assert "e2e/**" in text, "Vitest would collect the Playwright specs, which run in a browser"
 
     def test_the_end_to_end_code_is_type_checked(self) -> None:
         config = json.loads((self.FRONTEND / "tsconfig.json").read_text())
@@ -522,14 +501,10 @@ class TestMigrationDriftGate:
     def test_the_orm_declares_the_index_set_the_migrations_create(self) -> None:
         created: set[str] = set()
         for migration in sorted(MIGRATION_VERSIONS.glob("*.py")):
-            created.update(
-                re.findall(r'op\.create_index\(\s*"([^"]+)"', migration.read_text())
-            )
+            created.update(re.findall(r'op\.create_index\(\s*"([^"]+)"', migration.read_text()))
         assert created, "no index was found in the migrations"
         declared = {
-            index.name
-            for table in Base.metadata.tables.values()
-            for index in table.indexes
+            index.name for table in Base.metadata.tables.values() for index in table.indexes
         }
         assert declared == created, (
             "the ORM and the migrations declare different index sets, so "
@@ -549,9 +524,7 @@ class TestMigrationDriftGate:
         steps = job["steps"]
         assert isinstance(steps, list)
         gates = [
-            step
-            for step in steps
-            if re.search(r"alembic[^\n]*\bcheck\b", step.get("run", ""))
+            step for step in steps if re.search(r"alembic[^\n]*\bcheck\b", step.get("run", ""))
         ]
         assert len(gates) == 1, (
             f"the drift gate must be a single, identifiable step, found {len(gates)}"

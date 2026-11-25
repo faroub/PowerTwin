@@ -39,16 +39,10 @@ check_coverage = _load_script("powertwin_check_coverage", "check_coverage.py")
 validate_release_version_module = _load_script(
     "powertwin_validate_release_version", "validate_release_version.py"
 )
-validate_migrations_module = _load_script(
-    "powertwin_validate_migrations", "validate_migrations.py"
-)
-endurance_campaign = _load_script(
-    "powertwin_endurance_campaign", "endurance_campaign.py"
-)
+validate_migrations_module = _load_script("powertwin_validate_migrations", "validate_migrations.py")
+endurance_campaign = _load_script("powertwin_endurance_campaign", "endurance_campaign.py")
 generate_sbom = _load_script("powertwin_generate_sbom", "generate_sbom.py")
-check_dependency_lock = _load_script(
-    "powertwin_check_dependency_lock", "check_dependency_lock.py"
-)
+check_dependency_lock = _load_script("powertwin_check_dependency_lock", "check_dependency_lock.py")
 
 
 # =============================================================================
@@ -71,10 +65,7 @@ check_dependency_lock = _load_script(
 )
 def test_valid_release_versions_are_accepted(version: str) -> None:
     """Test that a well formed release version is accepted and trimmed."""
-    assert (
-        validate_release_version_module.validate_release_version(version)
-        == version.strip()
-    )
+    assert validate_release_version_module.validate_release_version(version) == version.strip()
 
 
 @pytest.mark.parametrize(
@@ -97,9 +88,7 @@ def test_valid_release_versions_are_accepted(version: str) -> None:
 )
 def test_invalid_release_versions_are_rejected(version: str) -> None:
     """Test that a malformed release version is rejected with a clear reason."""
-    with pytest.raises(
-        validate_release_version_module.InvalidReleaseVersion
-    ) as excinfo:
+    with pytest.raises(validate_release_version_module.InvalidReleaseVersion) as excinfo:
         validate_release_version_module.validate_release_version(version)
     assert excinfo.value.raw == version
     assert excinfo.value.reason
@@ -218,9 +207,7 @@ def test_a_global_coverage_regression_is_reported() -> None:
         }
     }
     violations = check_coverage.evaluate_coverage(_report(files))
-    global_lines = [
-        v for v in violations if v.scope == "global" and v.metric == "lines"
-    ]
+    global_lines = [v for v in violations if v.scope == "global" and v.metric == "lines"]
     assert len(global_lines) == 1
     assert global_lines[0].actual == pytest.approx(10.0)
 
@@ -296,17 +283,13 @@ def test_a_single_head_is_accepted() -> None:
 
 def test_two_heads_are_rejected() -> None:
     """Test that a branched migration graph is rejected."""
-    with pytest.raises(
-        validate_migrations_module.MigrationValidationError, match="2 head"
-    ):
+    with pytest.raises(validate_migrations_module.MigrationValidationError, match="2 head"):
         validate_migrations_module.check_single_head(["001", "002"])
 
 
 def test_no_head_is_rejected() -> None:
     """Test that an empty migration graph is rejected."""
-    with pytest.raises(
-        validate_migrations_module.MigrationValidationError, match="no head"
-    ):
+    with pytest.raises(validate_migrations_module.MigrationValidationError, match="no head"):
         validate_migrations_module.check_single_head([])
 
 
@@ -357,18 +340,18 @@ def test_the_fingerprint_ignores_the_non_deterministic_fields() -> None:
     second = _FakeSnapshot(100, 10, {"a": 1}, {"b": 2})
     second.snapshot_id = "a-different-identifier"
     second.created_at_wall = "a-different-time"
-    assert endurance_campaign.build_fingerprint(
-        first
-    ) == endurance_campaign.build_fingerprint(second)
+    assert endurance_campaign.build_fingerprint(first) == endurance_campaign.build_fingerprint(
+        second
+    )
 
 
 def test_the_fingerprint_changes_with_the_state() -> None:
     """Test that a different engine state produces a different fingerprint."""
     first = _FakeSnapshot(100, 10, {"a": 1}, {"b": 2})
     second = _FakeSnapshot(200, 10, {"a": 1}, {"b": 2})
-    assert endurance_campaign.build_fingerprint(
-        first
-    ) != endurance_campaign.build_fingerprint(second)
+    assert endurance_campaign.build_fingerprint(first) != endurance_campaign.build_fingerprint(
+        second
+    )
 
 
 # =============================================================================
@@ -594,9 +577,7 @@ def test_a_requirement_that_is_not_locked_is_reported() -> None:
 
     problems = check_dependency_lock.check_lock(declared, locked)
 
-    assert any(
-        "fastapi" in problem and "not in the lock" in problem for problem in problems
-    )
+    assert any("fastapi" in problem and "not in the lock" in problem for problem in problems)
 
 
 def test_a_locked_version_outside_the_declared_range_is_reported() -> None:
@@ -630,18 +611,14 @@ def test_a_locked_package_that_nothing_declares_is_reported() -> None:
 
     problems = check_dependency_lock.check_lock(declared, locked)
 
-    assert any(
-        "httpx" in problem and "does not declare it" in problem for problem in problems
-    )
+    assert any("httpx" in problem and "does not declare it" in problem for problem in problems)
 
 
 def test_an_unreachable_locked_package_is_reported() -> None:
     """Test that a lock entry no declared requirement reaches is reported."""
     declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
     locked = check_dependency_lock.parse_lock(
-        _lock_entry("fastapi", "0.165.0")
-        + "\n"
-        + _lock_entry("httpx", "0.28.1", required_by=())
+        _lock_entry("fastapi", "0.165.0") + "\n" + _lock_entry("httpx", "0.28.1", required_by=())
     )
 
     problems = check_dependency_lock.check_lock(declared, locked)
@@ -757,10 +734,7 @@ def test_the_locked_versions_are_read_from_the_lock() -> None:
 def test_the_names_are_normalised_the_way_pep_503_defines() -> None:
     """Test that the name normalisation folds the separators together."""
     assert verify_locked_environment.canonicalize("PyYAML") == "pyyaml"
-    assert (
-        verify_locked_environment.canonicalize("typing_extensions")
-        == "typing-extensions"
-    )
+    assert verify_locked_environment.canonicalize("typing_extensions") == "typing-extensions"
     assert verify_locked_environment.canonicalize("pydantic_core") == "pydantic-core"
     assert verify_locked_environment.canonicalize("SQLAlchemy") == "sqlalchemy"
 
@@ -781,9 +755,7 @@ def test_an_environment_that_matches_the_lock_has_no_problem() -> None:
         "pyyaml": _installed("PyYAML", "6.0.4"),
     }
 
-    problems, extra = verify_locked_environment.verify_environment(
-        locked, installed, strict=True
-    )
+    problems, extra = verify_locked_environment.verify_environment(locked, installed, strict=True)
 
     assert problems == []
     assert extra == []
@@ -794,9 +766,7 @@ def test_a_locked_package_that_is_not_installed_is_reported() -> None:
     locked = {"fastapi": "0.165.0", "pyyaml": "6.0.4"}
     installed = {"fastapi": _installed("fastapi", "0.165.0")}
 
-    problems, _ = verify_locked_environment.verify_environment(
-        locked, installed, strict=True
-    )
+    problems, _ = verify_locked_environment.verify_environment(locked, installed, strict=True)
 
     assert len(problems) == 1
     assert "pyyaml" in problems[0]
@@ -808,9 +778,7 @@ def test_a_package_installed_at_another_version_is_reported() -> None:
     locked = {"fastapi": "0.165.0"}
     installed = {"fastapi": _installed("fastapi", "0.166.0")}
 
-    problems, _ = verify_locked_environment.verify_environment(
-        locked, installed, strict=True
-    )
+    problems, _ = verify_locked_environment.verify_environment(locked, installed, strict=True)
 
     assert len(problems) == 1
     assert "0.165.0" in problems[0]
@@ -830,15 +798,11 @@ def test_a_package_beyond_the_lock_is_a_problem_only_in_the_strict_mode() -> Non
         "packaging": _installed("packaging", "26.4"),
     }
 
-    problems, extra = verify_locked_environment.verify_environment(
-        locked, installed, strict=False
-    )
+    problems, extra = verify_locked_environment.verify_environment(locked, installed, strict=False)
     assert problems == []
     assert extra == ["packaging"]
 
-    problems, extra = verify_locked_environment.verify_environment(
-        locked, installed, strict=True
-    )
+    problems, extra = verify_locked_environment.verify_environment(locked, installed, strict=True)
     assert len(problems) == 1
     assert "packaging" in problems[0]
     assert extra == ["packaging"]
@@ -898,9 +862,7 @@ def test_the_environment_cli_reports_an_unreadable_lock(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Test that the command line check fails when the lock cannot be read."""
-    exit_code = verify_locked_environment.main(
-        ["--lock", str(tmp_path / "does-not-exist.lock")]
-    )
+    exit_code = verify_locked_environment.main(["--lock", str(tmp_path / "does-not-exist.lock")])
 
     assert exit_code == 1
     assert "could not be read" in capsys.readouterr().err

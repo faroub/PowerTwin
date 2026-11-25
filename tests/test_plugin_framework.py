@@ -126,9 +126,7 @@ def test_invalid_configuration_rejection() -> None:
 
     # Invalid config (negative voltage)
     with pytest.raises(InitializationError):
-        registry.create_and_initialize(
-            "generic_battery_v1", {"nominal_voltage_v": -500}
-        )
+        registry.create_and_initialize("generic_battery_v1", {"nominal_voltage_v": -500})
 
 
 def test_missing_dependency_validation() -> None:
@@ -149,12 +147,8 @@ def test_plugin_lifecycle_and_execution() -> None:
     registry.register_plugin_class(GenericBatteryPlugin)
     registry.register_plugin_class(GenericPCSPlugin)
 
-    battery = registry.create_and_initialize(
-        "generic_battery_v1", {"initial_soc_pct": 75.0}
-    )
-    pcs = registry.create_and_initialize(
-        "generic_pcs_v1", {"rated_power_w": 2_000_000.0}
-    )
+    battery = registry.create_and_initialize("generic_battery_v1", {"initial_soc_pct": 75.0})
+    pcs = registry.create_and_initialize("generic_pcs_v1", {"rated_power_w": 2_000_000.0})
 
     registry.enable_plugin("generic_battery_v1")
     registry.enable_plugin("generic_pcs_v1")

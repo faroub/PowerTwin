@@ -86,9 +86,7 @@ def _mark_every_item(payload: dict[str, Any], illustrative: bool) -> dict[str, A
     """Return a copy of the payload with every equipment item marked."""
     marked = dict(payload)
     for section in LIST_SECTIONS:
-        marked[section] = [
-            {**item, "illustrative": illustrative} for item in payload[section]
-        ]
+        marked[section] = [{**item, "illustrative": illustrative} for item in payload[section]]
     for section in SINGLE_SECTIONS:
         marked[section] = {**payload[section], "illustrative": illustrative}
     return marked
@@ -104,9 +102,7 @@ class TestShippedConfigurationsAreMarked:
         """The label is stated in the file, not merely defaulted by the schema."""
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
-        assert "illustrative" in raw, (
-            f"{config_path.name} does not state the plant-level marker."
-        )
+        assert "illustrative" in raw, f"{config_path.name} does not state the plant-level marker."
         assert raw["illustrative"] is True, (
             f"{config_path.name} declares illustrative={raw['illustrative']}; the shipped "
             "examples are demonstration topologies and must be labelled illustrative."
@@ -129,9 +125,7 @@ class TestShippedConfigurationsAreMarked:
             assert item["illustrative"] is True
 
     @pytest.mark.parametrize("config_path", SHIPPED_PLANT_CONFIGS, ids=lambda p: p.stem)
-    def test_the_example_configuration_loads_as_illustrative(
-        self, config_path: Path
-    ) -> None:
+    def test_the_example_configuration_loads_as_illustrative(self, config_path: Path) -> None:
         """The parsed configuration agrees with the file."""
         config = PlantTopologyFactory.load_config_from_yaml(str(config_path))
 
@@ -211,14 +205,10 @@ class TestTheFactoryCarriesTheMarker:
             factory.load_config_from_yaml(str(CONFIG_DIR / "reference_10mw_20mwh.yaml"))
         )
 
-        assert all(
-            battery.metadata.is_illustrative for battery in plant.battery_systems
-        )
+        assert all(battery.metadata.is_illustrative for battery in plant.battery_systems)
         assert all(pcs.metadata.is_illustrative for pcs in plant.pcs_units)
         assert all(bms.get_state().metadata.is_illustrative for bms in plant.bms_units)
-        assert all(
-            xfrm.get_state().metadata.is_illustrative for xfrm in plant.transformers
-        )
+        assert all(xfrm.get_state().metadata.is_illustrative for xfrm in plant.transformers)
         assert all(swg.get_state().metadata.is_illustrative for swg in plant.switchgear)
         assert all(mtr.get_state().metadata.is_illustrative for mtr in plant.meters)
         assert plant.poi.get_state().metadata.is_illustrative is True

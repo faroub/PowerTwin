@@ -59,9 +59,7 @@ def test_production_config_requires_password_via_environment() -> None:
 def test_environment_example_does_not_ship_a_password() -> None:
     """Test the environment example does not ship a fixed database password."""
     content = _load_text("configs/.env.example")
-    assert "powertwin_secret" not in content, (
-        "Template files must not ship a fixed password."
-    )
+    assert "powertwin_secret" not in content, "Template files must not ship a fixed password."
     assert "powertwin_prod_secure_password" not in content
 
 
@@ -78,8 +76,7 @@ def test_deployment_docker_compose_gets_password_from_environment() -> None:
         if "POSTGRES_PASSWORD" in service_definition.get("environment", {}):
             reference = service_definition["environment"]["POSTGRES_PASSWORD"]
             assert "${POSTGRES_PASSWORD" in reference, (
-                f"Service '{service_name}' must read the database password "
-                "from the environment."
+                f"Service '{service_name}' must read the database password from the environment."
             )
             assert "${POSTGRES_PASSWORD:?}" in reference or ":?" in reference, (
                 f"Service '{service_name}' must fail fast when POSTGRES_PASSWORD "
@@ -100,8 +97,7 @@ def test_root_docker_compose_gets_password_from_environment() -> None:
         if "POSTGRES_PASSWORD" in service_definition.get("environment", {}):
             reference = service_definition["environment"]["POSTGRES_PASSWORD"]
             assert "${POSTGRES_PASSWORD" in reference, (
-                f"Service '{service_name}' must read the database password "
-                "from the environment."
+                f"Service '{service_name}' must read the database password from the environment."
             )
             assert "${POSTGRES_PASSWORD:?}" in reference or ":?" in reference, (
                 f"Service '{service_name}' must fail fast when POSTGRES_PASSWORD "
@@ -124,9 +120,7 @@ def test_pycache_artifacts_are_untracked() -> None:
 def test_overflow_files_are_untracked() -> None:
     """Test the repository does not track historian overflow files."""
     tracked = _git_ls_files("overflow")
-    assert tracked == "", (
-        "Historian overflow artifacts must not be tracked in version control."
-    )
+    assert tracked == "", "Historian overflow artifacts must not be tracked in version control."
 
 
 def test_port_binding_constraint_in_config_safety_invariants() -> None:

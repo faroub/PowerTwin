@@ -106,9 +106,7 @@ class SMASunnyCentralPCSPlugin(BasePlugin, PCSInterface):
             self.physical_model.config.rated_active_power_w = self.rated_power_w
         if "rated_apparent_power_va" in config:
             self.rated_apparent_power_va = float(config["rated_apparent_power_va"])
-            self.physical_model.config.rated_apparent_power_va = (
-                self.rated_apparent_power_va
-            )
+            self.physical_model.config.rated_apparent_power_va = self.rated_apparent_power_va
         if "ambient_temp_c" in config:
             self.ambient_temp_c = float(config["ambient_temp_c"])
         self.enabled = True
@@ -119,9 +117,7 @@ class SMASunnyCentralPCSPlugin(BasePlugin, PCSInterface):
         # Apply thermal derating
         if self.ambient_temp_c > 45.0:
             derate_pct = max(0.80, 1.0 - (self.ambient_temp_c - 45.0) * 0.0133)
-            self.physical_model.config.rated_active_power_w = (
-                self.rated_power_w * derate_pct
-            )
+            self.physical_model.config.rated_active_power_w = self.rated_power_w * derate_pct
         else:
             self.physical_model.config.rated_active_power_w = self.rated_power_w
 
@@ -167,12 +163,12 @@ class SMASunnyCentralPCSPlugin(BasePlugin, PCSInterface):
         # Publish actual power to shared state for Battery Distribution Task
         ctx.shared_state["pcs_active_power_w"] = self.physical_model.actual_p_w
         ctx.shared_state["pcs_reactive_power_var"] = self.physical_model.actual_q_var
-        ctx.shared_state[
-            f"{KEY_PCS_CMD_ACTIVE_W_PREFIX}{self.physical_model.equipment_id}"
-        ] = self.physical_model.actual_p_w
-        ctx.shared_state[
-            f"{KEY_PCS_CMD_REACTIVE_W_PREFIX}{self.physical_model.equipment_id}"
-        ] = self.physical_model.actual_q_var
+        ctx.shared_state[f"{KEY_PCS_CMD_ACTIVE_W_PREFIX}{self.physical_model.equipment_id}"] = (
+            self.physical_model.actual_p_w
+        )
+        ctx.shared_state[f"{KEY_PCS_CMD_REACTIVE_W_PREFIX}{self.physical_model.equipment_id}"] = (
+            self.physical_model.actual_q_var
+        )
 
     def shutdown(self) -> None:
         """Clean up plugin state."""

@@ -54,8 +54,8 @@ the pipeline** and is backed by a test, not only by a document.
 
 | Gate | Where it is enforced | Where it is tested | Failure mode |
 | :--- | :--- | :--- | :--- |
-| Formatting | `ruff format --check backend plugins tests scripts` | — | Job fails |
-| Linting | `ruff check backend plugins tests scripts`, rule set pinned in `ruff.toml` and `backend/pyproject.toml` | — | Job fails |
+| Formatting | `ruff format --check backend plugins tests scripts deployment` | — | Job fails |
+| Linting | `ruff check backend plugins tests scripts deployment`, rule set pinned in `ruff.toml` and `backend/pyproject.toml`, one declared style for the whole repository | `tests/test_tool_configuration.py` | Job fails |
 | Type checking | `mypy --config-file backend/pyproject.toml backend plugins scripts` (`strict = true`) | — | Job fails |
 | Unit and integration tests | `pytest` with unraisable exceptions promoted to errors | The suite itself (400 tests) | Job fails |
 | Backend coverage policy | `scripts/check_coverage.py coverage.json` | `tests/test_ci_scripts.py` | Job fails |
@@ -95,7 +95,7 @@ the pipeline** and is backed by a test, not only by a document.
 | :--- | :--- | :--- |
 | 1 | Apply the documented branch protection to `main` (administrator action) | Medium |
 | 2 | Implement the energy-market, calibration and warranty roadmap items | Medium |
-| 3 | Close the low-severity items: the dedicated operator-action journal and the line-length unification | Low |
+| 3 | Close the low-severity items: the dedicated operator-action journal | Low |
 
 **Item 3 of an earlier revision — "the module-level simulation entry point" —
 is closed.** The runtime is the single write path to the plant and the
@@ -104,6 +104,14 @@ detached with `SimulationRuntime.drop`, and both module-level
 `set_active_simulation_engine` helpers are gone. The unit tests construct
 their plant through the runtime the API itself resolves, and
 `tests/test_simulation_runtime.py` asserts that the helpers cannot return.
+
+**The line-length unification of that list is closed.** The whole repository
+is now linted with one declared style: the same line length (100), the same
+target version, the same rule selection and `E501` active in every tree. The
+`deployment/` tree, which carried no pinned configuration at all, is covered
+like the others. `tests/test_tool_configuration.py` fails when the two Ruff
+declarations diverge or when the pipeline stops linting one of the
+repository's Python trees.
 
 **Item 1 of an earlier revision — "Add `target_metadata` to the migrations and
 restore the ORM-versus-migration comparison" — is closed.** The Alembic

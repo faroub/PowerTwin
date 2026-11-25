@@ -87,9 +87,7 @@ class BasePlugin(SimulationTask, ABC):
         """Return task state including plugin health and underlying physical model state."""
         state = super().get_task_state()
         state["health_status"] = self.health_status.value
-        if hasattr(self, "physical_model") and hasattr(
-            self.physical_model, "get_model_state"
-        ):
+        if hasattr(self, "physical_model") and hasattr(self.physical_model, "get_model_state"):
             state["physical_model"] = self.physical_model.get_model_state()
         return state
 
@@ -107,9 +105,7 @@ class BasePlugin(SimulationTask, ABC):
 
     def get_equipment_state(self) -> UniversalEquipmentState | None:
         """Return underlying equipment state if interface attached."""
-        if hasattr(self, "physical_model") and hasattr(
-            self.physical_model, "get_state"
-        ):
+        if hasattr(self, "physical_model") and hasattr(self.physical_model, "get_state"):
             st = self.physical_model.get_state()
             if isinstance(st, UniversalEquipmentState):
                 return st
@@ -122,9 +118,7 @@ class BasePlugin(SimulationTask, ABC):
     def get_alarms(self) -> list[AlarmRecord]:
         """Return active alarms from underlying physical model or equipment
         interface without recursion."""
-        if hasattr(self, "physical_model") and hasattr(
-            self.physical_model, "active_alarms"
-        ):
+        if hasattr(self, "physical_model") and hasattr(self.physical_model, "active_alarms"):
             return [a for a in self.physical_model.active_alarms if not a.cleared]
         if self._equipment_interface is not None:
             return self._equipment_interface.get_alarms()

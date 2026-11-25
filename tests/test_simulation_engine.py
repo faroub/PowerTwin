@@ -50,9 +50,7 @@ class CountingTask(SimulationTask):
 class FailingTask(SimulationTask):
     """Test task raising an unhandled exception."""
 
-    def __init__(
-        self, name: str = "FailingTask", fail_at_tick: int = 20_000_000
-    ) -> None:
+    def __init__(self, name: str = "FailingTask", fail_at_tick: int = 20_000_000) -> None:
         super().__init__(name=name, phase=2, priority=0, interval_ticks=1)
         self.fail_at_tick = fail_at_tick
 

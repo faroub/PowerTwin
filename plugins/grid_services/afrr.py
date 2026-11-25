@@ -53,7 +53,5 @@ class AFRRPlugin(GridServiceInterface):
             return (0.0, 0.0)
 
         self.service_status = GridServiceStatus.ACTIVE
-        p_clamped = max(
-            -self.rated_capacity_w, min(self.rated_capacity_w, self.agc_target_p_w)
-        )
+        p_clamped = max(-self.rated_capacity_w, min(self.rated_capacity_w, self.agc_target_p_w))
         return (p_clamped, 0.0)

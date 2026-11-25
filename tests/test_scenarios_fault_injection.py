@@ -10,8 +10,7 @@ def test_scenario_loss_of_one_battery_container() -> None:
     runner = ScenarioRunner()
     scenario = ScenarioDefinition(
         scenario_id="SCENARIO_LOSS_CONTAINER_01",
-        description="Container 01 faults at t=500ms; PPC reallocates to remaining "
-        "containers.",
+        description="Container 01 faults at t=500ms; PPC reallocates to remaining containers.",
         plant_config_path="configs/reference_10mw_20mwh.yaml",
         simulation_duration_ns=1_000_000_000,  # 1 second
         requested_p_w=4_000_000.0,

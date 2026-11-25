@@ -57,9 +57,7 @@ def _dev_password() -> str:
 @pytest.mark.asyncio
 async def test_login_rate_limiting_blocks_repeated_attempts() -> None:
     """Test that repeated login attempts are blocked by the sliding window limiter."""
-    service = AuthenticationService(
-        AuthenticationRateLimiter(max_attempts=3, lockout_seconds=30)
-    )
+    service = AuthenticationService(AuthenticationRateLimiter(max_attempts=3, lockout_seconds=30))
 
     for _ in range(3):
         result = await _login(service, "observer", "wrong_password")
@@ -80,9 +78,7 @@ async def test_login_rate_limiting_blocks_repeated_attempts() -> None:
 @pytest.mark.asyncio
 async def test_login_rate_limit_resets_after_success() -> None:
     """Test the rate limiter clears after a successful login."""
-    service = AuthenticationService(
-        AuthenticationRateLimiter(max_attempts=3, lockout_seconds=60)
-    )
+    service = AuthenticationService(AuthenticationRateLimiter(max_attempts=3, lockout_seconds=60))
 
     for _ in range(3):
         result = await _login(service, "observer", "wrong_password")
@@ -119,17 +115,13 @@ async def test_hash_uniqueness_and_cost() -> None:
 
 
 @pytest.mark.asyncio
-async def test_audit_log_records_every_attempt(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_audit_log_records_every_attempt(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test that accepted and rejected logins generate audit records."""
     monkeypatch.setattr(audit_log, "flush_threshold", 1)
     log_file = tmp_path / "audit_events.json"
     monkeypatch.setattr(audit_log, "_log_file", str(log_file))
 
-    service = AuthenticationService(
-        AuthenticationRateLimiter(max_attempts=10, lockout_seconds=60)
-    )
+    service = AuthenticationService(AuthenticationRateLimiter(max_attempts=10, lockout_seconds=60))
     _dev_password()
     await _login(service, "observer", "wrong_password")
     result = await _login(service, "observer", _dev_password())
@@ -145,13 +137,8 @@ async def test_roles_are_consistent_with_frontend_table() -> None:
     """Test the backend role table matches the frontend mirroring table."""
     assert set(ROLE_PERMISSIONS.keys()) == {role.value for role in UserRole}
     for role in UserRole:
-        assert (
-            create_user_session("t", role).has_permission(Permission.READ_TELEMETRY)
-            is True
-        )
-        assert set(ROLE_PERMISSIONS[role]) == set(
-            create_user_session("t", role).permissions
-        )
+        assert create_user_session("t", role).has_permission(Permission.READ_TELEMETRY) is True
+        assert set(ROLE_PERMISSIONS[role]) == set(create_user_session("t", role).permissions)
 
 
 @pytest.mark.asyncio
@@ -166,25 +153,16 @@ async def test_password_mismatch_is_non_revealing() -> None:
 @pytest.mark.asyncio
 async def test_locked_accounts_are_rejected_with_audit_record() -> None:
     """Test a locked or inactive account rejects login and records the event."""
-    AuthenticationService(
-        AuthenticationRateLimiter(max_attempts=10, lockout_seconds=60)
-    )
-    account = UserAccount(
-        username="waiting", role=UserRole.OBSERVER, hashed_password="locked"
-    )
-    account.locked_until = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
-        seconds=60
-    )
+    AuthenticationService(AuthenticationRateLimiter(max_attempts=10, lockout_seconds=60))
+    account = UserAccount(username="waiting", role=UserRole.OBSERVER, hashed_password="locked")
+    account.locked_until = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=60)
     assert account.is_locked() is True
 
 
 @pytest.mark.asyncio
 async def test_token_secret_is_not_embedded() -> None:
     """Test the secret key is never the old development default string."""
-    assert (
-        settings.JWT_SECRET_KEY
-        != "default_powertwin_dev_secret_key_change_in_production"
-    )
+    assert settings.JWT_SECRET_KEY != "default_powertwin_dev_secret_key_change_in_production"
     assert settings.POSTGRES_PASSWORD != "powertwin_secret"
 
 
@@ -195,9 +173,7 @@ async def test_production_fails_without_strong_secret(
     """Test production refuses an empty or weak JWT secret at startup."""
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", "")
-    monkeypatch.setattr(
-        settings, "POSTGRES_PASSWORD", "a" * POSTGRES_PASSWORD_MIN_BYTES
-    )
+    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "a" * POSTGRES_PASSWORD_MIN_BYTES)
 
     with pytest.raises(RuntimeError):
         validate_safety_invariants()
@@ -223,9 +199,7 @@ async def test_production_fails_when_login_limits_invalid(
     """Test production refuses unusable authentication rate limits at startup."""
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", "a" * JWT_SECRET_MIN_BYTES)
-    monkeypatch.setattr(
-        settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES
-    )
+    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES)
     monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT", -1)
 
     with pytest.raises(RuntimeError):
@@ -239,9 +213,7 @@ async def test_production_passes_with_strong_configuration(
     """Test production starts with a strong JWT key and database password."""
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", "a" * JWT_SECRET_MIN_BYTES)
-    monkeypatch.setattr(
-        settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES
-    )
+    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES)
     monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT", 5)
     monkeypatch.setattr(settings, "LOGIN_LOCKOUT_SECONDS", 60)
 
@@ -256,9 +228,7 @@ async def test_expiration_is_enforced() -> None:
         "role": "OBSERVER",
         "exp": datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=1),
     }
-    token = jwt.encode(
-        payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
-    )
+    token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
     with pytest.raises(Exception) as exc_info:
         decode_access_token(token)

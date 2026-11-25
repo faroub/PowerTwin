@@ -83,9 +83,7 @@ def check_single_head(heads: Sequence[str]) -> None:
     if len(heads) == 1:
         return
     if not heads:
-        msg = (
-            "The migration graph has no head revision; there is nothing to upgrade to."
-        )
+        msg = "The migration graph has no head revision; there is nothing to upgrade to."
         raise MigrationValidationError(msg)
     listed = ", ".join(sorted(heads))
     msg = (

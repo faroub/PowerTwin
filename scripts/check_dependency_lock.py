@@ -131,9 +131,7 @@ def parse_requirements(text: str) -> dict[str, DeclaredRequirement]:
         try:
             requirement = Requirement(line)
         except InvalidRequirement as exc:
-            raise ValueError(
-                f"the declaration '{line}' is not a valid requirement: {exc}"
-            ) from exc
+            raise ValueError(f"the declaration '{line}' is not a valid requirement: {exc}") from exc
         try:
             specifier = SpecifierSet(str(requirement.specifier))
         except InvalidSpecifier as exc:
@@ -142,9 +140,7 @@ def parse_requirements(text: str) -> dict[str, DeclaredRequirement]:
             ) from exc
         canonical = canonicalize_name(requirement.name)
         if canonical in declared:
-            raise ValueError(
-                f"the requirement '{requirement.name}' is declared more than once"
-            )
+            raise ValueError(f"the requirement '{requirement.name}' is declared more than once")
         declared[canonical] = DeclaredRequirement(
             name=requirement.name,
             specifier=specifier,
@@ -250,9 +246,7 @@ def check_lock(
                 f"which does not satisfy the declared range {requirement.specifier}"
             )
         if not any(_is_a_direct_declaration(parent) for parent in package.required_by):
-            problems.append(
-                f"the lock does not record '{package.name}' as a declared requirement"
-            )
+            problems.append(f"the lock does not record '{package.name}' as a declared requirement")
 
     for package in locked.values():
         if not package.hashes:
@@ -281,9 +275,7 @@ def check_lock(
         for package in locked.values():
             if package.canonical_name in reachable:
                 continue
-            if any(
-                canonicalize_name(parent) == current for parent in package.required_by
-            ):
+            if any(canonicalize_name(parent) == current for parent in package.required_by):
                 reachable.add(package.canonical_name)
                 pending.append(package.canonical_name)
 

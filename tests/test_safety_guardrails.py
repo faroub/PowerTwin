@@ -46,9 +46,7 @@ def test_validate_safety_invariants_rejection_of_missing_token_secret(
     """Verify safety validation raises RuntimeError when the production secret is empty."""
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", "")
-    monkeypatch.setattr(
-        settings, "POSTGRES_PASSWORD", "a" * POSTGRES_PASSWORD_MIN_BYTES
-    )
+    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "a" * POSTGRES_PASSWORD_MIN_BYTES)
 
     with pytest.raises(RuntimeError) as exc_info:
         validate_safety_invariants()
@@ -66,9 +64,7 @@ def test_validate_safety_invariants_rejection_of_weak_token_secret(
 
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", weak_secret)
-    monkeypatch.setattr(
-        settings, "POSTGRES_PASSWORD", "a" * POSTGRES_PASSWORD_MIN_BYTES
-    )
+    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "a" * POSTGRES_PASSWORD_MIN_BYTES)
 
     with pytest.raises(RuntimeError) as exc_info:
         validate_safety_invariants()
@@ -98,9 +94,7 @@ def test_validate_safety_invariants_rejection_of_invalid_login_limits(
     """Verify safety validation raises RuntimeError when login limits are unusable."""
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", "a" * JWT_SECRET_MIN_BYTES)
-    monkeypatch.setattr(
-        settings, "POSTGRES_PASSWORD", "a" * POSTGRES_PASSWORD_MIN_BYTES
-    )
+    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "a" * POSTGRES_PASSWORD_MIN_BYTES)
     monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT", -1)
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -115,9 +109,7 @@ def test_validate_safety_invariants_production_with_strong_config_ok(
     """Verify safety validation passes with a strong production configuration."""
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", "a" * JWT_SECRET_MIN_BYTES)
-    monkeypatch.setattr(
-        settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES
-    )
+    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES)
 
     validate_safety_invariants()
 
@@ -128,9 +120,7 @@ def test_validate_safety_invariants_rejects_nonloopback_modbus_host(
     """Verify Modbus writes refuse a non-loopback host binding in production mode."""
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", "a" * JWT_SECRET_MIN_BYTES)
-    monkeypatch.setattr(
-        settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES
-    )
+    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES)
     monkeypatch.setattr(settings, "ALLOW_EXTERNAL_MODBUS_WRITES", True)
     monkeypatch.setattr(settings, "PROTOCOL_GATEWAY_HOST", "192.168.1.1")
 
@@ -148,9 +138,7 @@ async def test_production_server_host_must_be_loopback(
     """Verify production refuses a server binding on every available interface."""
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "JWT_SECRET_KEY", "a" * JWT_SECRET_MIN_BYTES)
-    monkeypatch.setattr(
-        settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES
-    )
+    monkeypatch.setattr(settings, "POSTGRES_PASSWORD", "b" * POSTGRES_PASSWORD_MIN_BYTES)
     monkeypatch.setattr(settings, "HOST", "0.0.0.0")
 
     with pytest.raises(RuntimeError) as exc_info:

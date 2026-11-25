@@ -112,9 +112,7 @@ class TeslaMegapackBatteryPlugin(BasePlugin, BatterySystemInterface):
                 self.max_continuous_power_w = float(config["max_discharge_power_w"])
             else:
                 self.max_continuous_power_w = self.capacity_wh * 0.5
-            self.physical_model.config.max_discharge_power_w = (
-                self.max_continuous_power_w
-            )
+            self.physical_model.config.max_discharge_power_w = self.max_continuous_power_w
             self.physical_model.config.max_charge_power_w = self.max_continuous_power_w
         if "nominal_voltage_v" in config:
             self.nominal_voltage_v = float(config["nominal_voltage_v"])
@@ -147,9 +145,9 @@ class TeslaMegapackBatteryPlugin(BasePlugin, BatterySystemInterface):
         ctx.shared_state["battery_soc_pct"] = self.physical_model.soc_pct
         ctx.shared_state["battery_voltage_v"] = self.physical_model.voltage_v
         ctx.shared_state["battery_current_a"] = self.physical_model.current_a
-        ctx.shared_state[
-            f"{KEY_BATTERY_CMD_P_W_PREFIX}{self.physical_model.equipment_id}"
-        ] = self.physical_model.voltage_v
+        ctx.shared_state[f"{KEY_BATTERY_CMD_P_W_PREFIX}{self.physical_model.equipment_id}"] = (
+            self.physical_model.voltage_v
+        )
 
     def shutdown(self) -> None:
         """Clean up plugin state."""

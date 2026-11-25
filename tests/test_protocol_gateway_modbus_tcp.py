@@ -128,9 +128,7 @@ def test_server_is_disabled_by_default() -> None:
 
 def test_non_loopback_binding_is_rejected() -> None:
     """Test the server refuses to bind a non-loopback interface."""
-    server = ModbusTCPGatewayServer(
-        host="192.168.1.100", port=_free_port(), enabled=True
-    )
+    server = ModbusTCPGatewayServer(host="192.168.1.100", port=_free_port(), enabled=True)
     assert server.start() is False
     assert server.is_running is False
 
@@ -298,9 +296,7 @@ def test_writable_registers_reject_writes_when_writes_are_disabled(
     """Test a command write is refused while external writes are disabled."""
     gateway.modbus_server.allow_writes = False
 
-    response = client.write_registers(
-        REG_COMMAND_ACTIVE_POWER_W, _encode_float32(1_000_000.0)
-    )
+    response = client.write_registers(REG_COMMAND_ACTIVE_POWER_W, _encode_float32(1_000_000.0))
     assert response.isError()
     assert response.exception_code == ExceptionResponse.SLAVE_FAILURE
 
@@ -346,9 +342,7 @@ def test_write_of_an_out_of_range_value_is_rejected(
     gateway: ProtocolGatewayService, client: ModbusTcpClient
 ) -> None:
     """Test a setpoint beyond the documented range is rejected."""
-    response = client.write_registers(
-        REG_COMMAND_ACTIVE_POWER_W, _encode_float32(100_000_000.0)
-    )
+    response = client.write_registers(REG_COMMAND_ACTIVE_POWER_W, _encode_float32(100_000_000.0))
     assert response.isError()
     assert response.exception_code == ExceptionResponse.ILLEGAL_VALUE
 
@@ -358,9 +352,7 @@ def test_active_power_command_reaches_the_simulation_ems(
 ) -> None:
     """Test an accepted P setpoint is dispatched through the plant EMS."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
     plant.equipment_controller.execute_startup_sequence(
         bms_list=plant.bms_units,
         pcs_list=plant.pcs_units,
@@ -370,9 +362,7 @@ def test_active_power_command_reaches_the_simulation_ems(
     )
     gateway.bind_to_plant_instance(plant)
 
-    response = client.write_registers(
-        REG_COMMAND_ACTIVE_POWER_W, _encode_float32(2_000_000.0)
-    )
+    response = client.write_registers(REG_COMMAND_ACTIVE_POWER_W, _encode_float32(2_000_000.0))
     assert not response.isError()
     assert plant.ems.requested_p_w == 2_000_000.0
     assert plant.ppc.accepted_p_w == 2_000_000.0
@@ -383,9 +373,7 @@ def test_reactive_power_command_reaches_the_simulation_ems(
 ) -> None:
     """Test an accepted Q setpoint is dispatched through the plant EMS."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
     plant.equipment_controller.execute_startup_sequence(
         bms_list=plant.bms_units,
         pcs_list=plant.pcs_units,
@@ -395,9 +383,7 @@ def test_reactive_power_command_reaches_the_simulation_ems(
     )
     gateway.bind_to_plant_instance(plant)
 
-    response = client.write_registers(
-        REG_COMMAND_REACTIVE_POWER_VAR, _encode_float32(1_000_000.0)
-    )
+    response = client.write_registers(REG_COMMAND_REACTIVE_POWER_VAR, _encode_float32(1_000_000.0))
     assert not response.isError()
     assert plant.ems.requested_q_var == 1_000_000.0
 
@@ -407,9 +393,7 @@ def test_ems_mode_register_selects_the_operational_mode(
 ) -> None:
     """Test register 106 selects the EMS operational mode."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
     gateway.bind_to_plant_instance(plant)
 
     response = client.write_registers(REG_COMMAND_EMS_MODE, [2])
@@ -422,16 +406,12 @@ def test_reset_faults_register_requests_a_bms_fault_reset(
 ) -> None:
     """Test register 108 issues a fault reset to the BMS units."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
     gateway.bind_to_plant_instance(plant)
 
     response = client.write_registers(REG_COMMAND_RESET_FAULTS, [1])
     assert not response.isError()
-    assert any(
-        entry.action_name == "RESET_FAULTS" for entry in gateway.audit_log.entries
-    )
+    assert any(entry.action_name == "RESET_FAULTS" for entry in gateway.audit_log.entries)
 
 
 # =============================================================================
@@ -464,9 +444,7 @@ def test_watchdog_timeout_places_the_plant_in_a_safe_state(
 ) -> None:
     """Test a stale heartbeat drives the plant into the defined safe state."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
     plant.equipment_controller.execute_startup_sequence(
         bms_list=plant.bms_units,
         pcs_list=plant.pcs_units,
@@ -483,10 +461,7 @@ def test_watchdog_timeout_places_the_plant_in_a_safe_state(
     assert ok is False
     assert "WATCHDOG_TIMEOUT" in reason
     assert plant.equipment_controller.operating_state.value == "STANDBY"
-    assert any(
-        entry.action_name == "WATCHDOG_SAFE_STATE"
-        for entry in gateway.audit_log.entries
-    )
+    assert any(entry.action_name == "WATCHDOG_SAFE_STATE" for entry in gateway.audit_log.entries)
 
 
 # =============================================================================
@@ -494,9 +469,7 @@ def test_watchdog_timeout_places_the_plant_in_a_safe_state(
 # =============================================================================
 
 
-def test_every_command_is_audited(
-    gateway: ProtocolGatewayService, client: ModbusTcpClient
-) -> None:
+def test_every_command_is_audited(gateway: ProtocolGatewayService, client: ModbusTcpClient) -> None:
     """Test accepted and rejected commands both produce audit records."""
     client.write_registers(REG_COMMAND_ACTIVE_POWER_W, _encode_float32(1_000_000.0))
     client.write_registers(REG_COMMAND_ACTIVE_POWER_W, _encode_float32(999_000_000.0))
@@ -515,9 +488,7 @@ def test_rejected_command_never_reaches_the_plant(
 ) -> None:
     """Test an out-of-range command leaves the plant untouched."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
     plant.equipment_controller.execute_startup_sequence(
         bms_list=plant.bms_units,
         pcs_list=plant.pcs_units,
@@ -527,9 +498,7 @@ def test_rejected_command_never_reaches_the_plant(
     )
     gateway.bind_to_plant_instance(plant)
 
-    response = client.write_registers(
-        REG_COMMAND_ACTIVE_POWER_W, _encode_float32(999_000_000.0)
-    )
+    response = client.write_registers(REG_COMMAND_ACTIVE_POWER_W, _encode_float32(999_000_000.0))
     assert response.isError()
     assert plant.ems.requested_p_w == 0.0
     assert plant.ppc.accepted_p_w == 0.0
@@ -546,9 +515,7 @@ def test_communication_loss_rejects_commands_and_is_audited(
     """Test a simulated line drop refuses commands and records the rejection."""
     gateway.simulate_comms_drop(True)
 
-    response = client.write_registers(
-        REG_COMMAND_ACTIVE_POWER_W, _encode_float32(1_000_000.0)
-    )
+    response = client.write_registers(REG_COMMAND_ACTIVE_POWER_W, _encode_float32(1_000_000.0))
     assert response.isError()
     assert gateway.audit_log.entries[-1].status == CommandStatus.REJECTED_INTERLOCK
     assert "REJECTED_COMMUNICATION_LOSS" in gateway.audit_log.entries[-1].reason

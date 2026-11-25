@@ -95,9 +95,7 @@ def load_json(path: Path) -> Any:
     try:
         decoded: Any = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
-        raise RuntimeError(
-            f"Invalid JSON in dependency inventory: {path}: {error}"
-        ) from error
+        raise RuntimeError(f"Invalid JSON in dependency inventory: {path}: {error}") from error
     return decoded
 
 
@@ -119,15 +117,11 @@ def load_python_inventory(path: Path) -> list[JsonObject]:
     """
     decoded = load_json(path)
     if not isinstance(decoded, list):
-        raise RuntimeError(
-            f"The Python dependency inventory must be a JSON array: {path}"
-        )
+        raise RuntimeError(f"The Python dependency inventory must be a JSON array: {path}")
     packages: list[JsonObject] = []
     for entry in decoded:
         if not isinstance(entry, dict):
-            raise RuntimeError(
-                f"The Python dependency inventory must contain objects: {path}"
-            )
+            raise RuntimeError(f"The Python dependency inventory must contain objects: {path}")
         packages.append(entry)
     return packages
 
@@ -146,9 +140,7 @@ def load_node_inventory(path: Path) -> JsonObject:
     """
     decoded = load_json(path)
     if not isinstance(decoded, dict):
-        raise RuntimeError(
-            f"The Node.js dependency inventory must be a JSON object: {path}"
-        )
+        raise RuntimeError(f"The Node.js dependency inventory must be a JSON object: {path}")
     return decoded
 
 
@@ -164,9 +156,7 @@ def _creation_timestamp() -> str:
         try:
             moment = datetime.datetime.fromtimestamp(int(epoch), tz=datetime.UTC)
         except (TypeError, ValueError, OSError, OverflowError) as error:
-            raise ValueError(
-                f"Invalid SOURCE_DATE_EPOCH value '{epoch}': {error}"
-            ) from error
+            raise ValueError(f"Invalid SOURCE_DATE_EPOCH value '{epoch}': {error}") from error
     else:
         moment = datetime.datetime.now(tz=datetime.UTC)
     return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -293,9 +283,7 @@ def build_sbom(
             )
         )
 
-    for package_name, package_version in flatten_node_dependencies(
-        node_packages
-    ).items():
+    for package_name, package_version in flatten_node_dependencies(node_packages).items():
         documents["packages"].append(
             make_package_entry(
                 package_name,

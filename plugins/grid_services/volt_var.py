@@ -21,9 +21,7 @@ class VoltVarSupportPlugin(GridServiceInterface):
             service_id="VOLT_VAR_01",
             service_name="Voltage & Volt-VAR Reactive Power Support",
             version="1.0.0",
-            activation_conditions={
-                "voltage_deviation_pct_exceeds": voltage_deadband_pct
-            },
+            activation_conditions={"voltage_deviation_pct_exceeds": voltage_deadband_pct},
             required_equipment_capabilities=["VAR_SUPPORT", "VOLT_VAR_REGULATION"],
             power_and_energy_requirements={"max_q_var": max_q_var},
             response_time_assumptions_ms=50.0,
@@ -49,9 +47,7 @@ class VoltVarSupportPlugin(GridServiceInterface):
             self.service_status = GridServiceStatus.UNAVAILABLE
             return (0.0, 0.0)
 
-        v_dev_pct = (
-            (poi_voltage_v - self.nominal_voltage_v) / self.nominal_voltage_v
-        ) * 100.0
+        v_dev_pct = ((poi_voltage_v - self.nominal_voltage_v) / self.nominal_voltage_v) * 100.0
         if abs(v_dev_pct) <= self.voltage_deadband_pct:
             self.service_status = GridServiceStatus.IDLE
             return (0.0, 0.0)

@@ -73,9 +73,7 @@ def test_pcs_zero_output_when_faulted() -> None:
     """Test faulted PCS forces accepted and actual P & Q output to 0.0."""
     pcs = GenericPCSModel()
     pcs.requested_p_w = 5_000_000.0
-    pcs.step(
-        dc_voltage_v=1300.0, ac_grid_voltage_v=690.0, delta_t_s=0.1
-    )  # Over-voltage trip
+    pcs.step(dc_voltage_v=1300.0, ac_grid_voltage_v=690.0, delta_t_s=0.1)  # Over-voltage trip
 
     assert pcs.operating_state == OperatingState.FAULTED
     assert pcs.accepted_p_w == 0.0

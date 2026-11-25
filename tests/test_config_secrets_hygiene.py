@@ -216,8 +216,7 @@ def test_env_templates_ship_no_credential(template: pathlib.Path) -> None:
         name, _, value = stripped.partition("=")
         name = name.strip().upper()
         if not any(
-            fragment in name
-            for fragment in ("PASSWORD", "SECRET", "TOKEN", "KEY", "CREDENTIAL")
+            fragment in name for fragment in ("PASSWORD", "SECRET", "TOKEN", "KEY", "CREDENTIAL")
         ):
             continue
         assert value.strip() == "", (
