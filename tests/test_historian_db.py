@@ -239,10 +239,7 @@ async def test_overflow_replay_covers_all_three_streams(
     assert historian.record_telemetry("TAG1", "EQ1", 10.0, "V", 100) is True
     assert historian.record_telemetry("TAG2", "EQ1", 12.0, "V", 200) is False
 
-    assert (
-        historian.record_command("CMD1", "EMS_01", "PCS_01", {}, "ACCEPTED", "OK", 300)
-        is True
-    )
+    assert historian.record_command("CMD1", "EMS_01", "PCS_01", {}, "ACCEPTED", "OK", 300) is True
     assert (
         historian.record_command(
             "CMD2",
@@ -257,10 +254,7 @@ async def test_overflow_replay_covers_all_three_streams(
         is False
     )
 
-    assert (
-        historian.record_alarm("EVT1", "BMS_01", "FAULT", "OVER_TEMP", "hot", 500)
-        is True
-    )
+    assert historian.record_alarm("EVT1", "BMS_01", "FAULT", "OVER_TEMP", "hot", 500) is True
     assert (
         historian.record_alarm(
             "EVT2",
@@ -380,12 +374,8 @@ async def test_historian_query_api_rejects_out_of_range_limit(
     )
     headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
 
-    res = client.get(
-        "/api/v1/historian/telemetry", params={"limit": 0}, headers=headers
-    )
+    res = client.get("/api/v1/historian/telemetry", params={"limit": 0}, headers=headers)
     assert res.status_code == 422
 
-    res = client.get(
-        "/api/v1/historian/telemetry", params={"limit": 10_000_000}, headers=headers
-    )
+    res = client.get("/api/v1/historian/telemetry", params={"limit": 10_000_000}, headers=headers)
     assert res.status_code == 422

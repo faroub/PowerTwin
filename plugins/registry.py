@@ -41,15 +41,11 @@ class PluginRegistry:
             )
 
         if manifest.plugin_id in self._registered_classes:
-            logger.info(
-                "Updating existing plugin class registration: '%s'", manifest.plugin_id
-            )
+            logger.info("Updating existing plugin class registration: '%s'", manifest.plugin_id)
 
         self._registered_classes[manifest.plugin_id] = plugin_cls
         self._registered_manifests[manifest.plugin_id] = manifest
-        logger.info(
-            "Registered plugin class '%s' (v%s)", manifest.plugin_id, manifest.version
-        )
+        logger.info("Registered plugin class '%s' (v%s)", manifest.plugin_id, manifest.version)
 
     def validate_api_compatibility(self, manifest: PluginManifest) -> bool:
         """Validate if plugin API version matches registry API version."""
@@ -69,10 +65,7 @@ class PluginRegistry:
 
         plugin = self._active_plugins[instance_key]
         for dep_id in plugin.manifest.dependencies:
-            if (
-                dep_id not in self._active_plugins
-                or not self._active_plugins[dep_id].enabled
-            ):
+            if dep_id not in self._active_plugins or not self._active_plugins[dep_id].enabled:
                 logger.error(
                     "Plugin instance '%s' missing enabled dependency '%s'",
                     instance_key,
@@ -123,9 +116,7 @@ class PluginRegistry:
     def enable_plugin(self, instance_key: str) -> None:
         """Enable an initialized plugin instance after verifying dependencies."""
         if instance_key not in self._active_plugins:
-            raise InitializationError(
-                f"Plugin instance '{instance_key}' is not instantiated."
-            )
+            raise InitializationError(f"Plugin instance '{instance_key}' is not instantiated.")
 
         if not self.validate_dependencies(instance_key):
             raise InitializationError(
@@ -134,9 +125,7 @@ class PluginRegistry:
 
         plugin = self._active_plugins[instance_key]
         if plugin.health_status == PluginHealthStatus.FAULTED:
-            raise InitializationError(
-                f"Cannot enable faulted plugin instance '{instance_key}'."
-            )
+            raise InitializationError(f"Cannot enable faulted plugin instance '{instance_key}'.")
 
         plugin.enabled = True
         plugin.health_status = PluginHealthStatus.HEALTHY

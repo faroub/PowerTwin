@@ -109,12 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         ``0`` when the version is valid, ``1`` otherwise.
     """
-    parser = argparse.ArgumentParser(
-        description="Validate a PowerTwin release version."
-    )
-    parser.add_argument(
-        "version", help=f"The release version, for example {_EXAMPLES}."
-    )
+    parser = argparse.ArgumentParser(description="Validate a PowerTwin release version.")
+    parser.add_argument("version", help=f"The release version, for example {_EXAMPLES}.")
     args = parser.parse_args(argv)
 
     try:

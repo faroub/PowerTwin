@@ -84,9 +84,12 @@ verified fact:
    the installed environment against the lock. What a green run does *not*
    establish is that the gates cover
    every possible defect — the coverage gaps recorded as F-03, F-04 and
-   F-11 are entirely unaffected by it. F-01 and F-05 have since been closed
-   by the frontend component suite and the Playwright end-to-end path, both
-   of which now run as enforced pipeline gates.
+   F-11 are entirely unaffected by it. F-01, F-03, F-05 and F-11 have since
+   been closed: the frontend component suite and the Playwright end-to-end
+   path are enforced pipeline gates, the ORM-versus-migration drift gate runs
+   in the release job, and the whole repository is linted with one declared
+   style. F-04 remains, because branch protection is an administrator action
+   on the repository configuration rather than a change to the code.
 2. **The steps were run locally, in the pipeline's own order.** The backend
    gates were executed on the canonical interpreter **Python 3.12** — the
    interpreter the pipeline uses — in a clean virtual environment built from
@@ -243,8 +246,8 @@ gate that cannot be met is not a gate.
 
 | Gate | Mechanism | Failure mode |
 | :--- | :--- | :--- |
-| Formatting | `ruff format --check backend plugins tests scripts` | Job fails |
-| Linting | `ruff check backend plugins tests scripts` with the rule set pinned in the repository | Job fails |
+| Formatting | `ruff format --check backend plugins tests scripts deployment` | Job fails |
+| Linting | `ruff check backend plugins tests scripts deployment` with the rule set pinned in the repository | Job fails |
 | Type checking | `mypy --config-file backend/pyproject.toml backend plugins scripts` (`strict = true`) | Job fails |
 | Unit and integration tests | `pytest` with `-W "error::pytest.PytestUnraisableExceptionWarning"` | Job fails |
 | Coverage policy | `python scripts/check_coverage.py coverage.json` | Job fails |
@@ -295,6 +298,14 @@ results.
 | `python scripts/validate_migrations.py` | Single head, 101 SQL statements, valid | Same result | Same result |
 | `python scripts/validate_release_version.py v1.0.0` | Accepted | Accepted | Accepted |
 | `python scripts/endurance_campaign.py --ticks 600 --repeats 2` | Deterministic, fingerprint `58d28d0aab4cd788` | Deterministic, **the same** fingerprint | Deterministic, **the same** fingerprint |
+
+The two Ruff rows above record the scope and the line length that were in
+force when the matrix was run. Both have since changed: the lint scope was
+widened to include the `deployment/` tree, and the line length was unified at
+100 characters across the whole repository (finding **F-11**). The unified
+gate was re-executed locally afterwards — **172 files already formatted**,
+**all checks passed** — and the current test count is **420 passed** against
+the 315 recorded above.
 
 The frontend gates were executed as well. At the time of the audit they were
 `npm run lint` (TypeScript) clean, `npm test` 4 passed in 2 files,
@@ -611,8 +622,11 @@ gates and still completed with all twelve jobs green.
 *Residual.* A green run means that no gate failed; it does not mean that the
 gates cover every possible defect. The coverage gaps that remain are recorded
 separately as F-03, F-04 and F-11, and none of them is closed by this run.
-F-01 and F-05 have since been closed by the frontend component suite and the
-Playwright end-to-end path, both of which now run as enforced pipeline gates.
+F-01, F-03, F-05 and F-11 have since been closed by the frontend component
+suite, the ORM-versus-migration drift gate, the Playwright end-to-end path and
+the unification of the lint style, all of which now run as enforced pipeline
+gates. F-04 remains open: branch protection is applied in the repository
+configuration by an administrator, not by a change to the code.
 
 ### F-08 — LOW — RESOLVED — The runtime is the single write path to the plant and the engine
 
@@ -697,11 +711,11 @@ configuration file, the runtime equipment metadata, the historian and the
 build log; presenting it in the HMI is recorded in
 `docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.10.
 
-### F-11 — LOW — The line length differs between two areas of the repository
+### F-11 — LOW — RESOLVED — The repository is linted with one declared style
 
-`backend/` is formatted at 100 characters (`backend/pyproject.toml`) and
+`backend/` was formatted at 100 characters (`backend/pyproject.toml`) and
 `scripts/`, `tests/` and `plugins/` at 88 (root `ruff.toml`). For the same
-reason, `E501` is ignored for the 88-wide trees and stays active in
+reason, `E501` was ignored for the 88-wide trees and stayed active in
 `backend/`: Ruff's formatter never reflows a docstring or a comment, so
 enabling `E501` there would demand prose-only edits that the formatter itself
 declines to make.
@@ -710,6 +724,30 @@ declines to make.
 reformat 41 files that the change has nothing to do with, which
 `AGENTS.md` §7 forbids.
 *Action.* Unify in a dedicated, separate change.
+
+**Resolution.** The two declarations now describe **one** style, and the
+unification was made in its own change, as the action required.
+
+- The line length is **100 characters in every tree**. Unifying upwards was
+  the cheaper direction: the backend tree already satisfied it, while the
+  other trees held exactly **one** line above 100 against 469 lines above 88.
+- `E501` is now **active in both trees**. The one prose line that exceeded
+  the limit was shortened by hand, because the formatter would not shorten it.
+- The `deployment/` tree — the container health check — was **not linted at
+  all**. It now has a pinned configuration like every other tree, and the
+  pipeline lints it.
+- The two files cannot be merged into one, because Ruff discovers its
+  configuration by walking **up** the directory tree and
+  `backend/pyproject.toml` is not an ancestor of `scripts/` or `tests/`. They
+  are therefore kept in step by a test instead.
+
+`tests/test_tool_configuration.py` (13 tests) makes the divergence
+unrepeatable. It fails when the two declarations disagree on the line length,
+the target version, the rule selection or the ignored rules; when `E501` is
+disabled in either; when a Python tree appears that the declared set does not
+cover; and when the pipeline stops linting one of the repository's trees. The
+test reads the pipeline invocation out of the workflow rather than assuming
+it, so it follows the pipeline when the pipeline changes.
 
 ### F-12 — INFO — OPC UA and MQTT are interface specifications only
 
@@ -804,7 +842,10 @@ files, was green across every job.
    into the runtime equipment, and a test asserts that every shipped example
    configuration states it.~~ ~~F-08 is closed: the runtime is the single
    write path to the plant and the engine, and the module-level helpers that
-   offered a second route to the same state are removed.~~
+   offered a second route to the same state are removed.~~ ~~F-11 is closed:
+   the whole repository is linted with one declared style — the same line
+   length, the same rule selection and `E501` active in every tree — and a
+   test fails if the two Ruff declarations ever diverge again.~~
 
 ---
 

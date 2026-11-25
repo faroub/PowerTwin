@@ -73,9 +73,7 @@ def test_modbus_write_out_of_range_rejection() -> None:
 def test_watchdog_heartbeat_timeout_handling() -> None:
     """Test external controller watchdog heartbeat timeout (> 5 seconds)."""
     audit_log = ControlCommandLog()
-    gateway = ProtocolGatewayService(
-        audit_log=audit_log, watchdog_timeout_ns=5_000_000_000
-    )
+    gateway = ProtocolGatewayService(audit_log=audit_log, watchdog_timeout_ns=5_000_000_000)
     gateway.modbus_server.allow_writes = True
 
     acc, _ = gateway.process_external_command(
@@ -98,9 +96,7 @@ def test_watchdog_heartbeat_timeout_handling() -> None:
 def test_modbus_command_forwarding_to_plant_simulation() -> None:
     """Test end-to-end command forwarding from Modbus write to plant simulation response."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
 
     plant.equipment_controller.execute_startup_sequence(
         bms_list=plant.bms_units,
@@ -182,9 +178,7 @@ def test_modbus_write_out_of_range_setpoint() -> None:
 def test_gateway_dispatches_p_and_q_setpoints_to_plant() -> None:
     """Test writing P & Q registers (100/102) dispatches both through the plant EMS."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
 
     plant.equipment_controller.execute_startup_sequence(
         bms_list=plant.bms_units,
@@ -241,6 +235,4 @@ def test_gateway_without_plant_instance_logs_gracefully() -> None:
     assert acc is True
     assert audit_log.entries[-1].status == CommandStatus.ACCEPTED
     assert audit_log.entries[-1].source_layer == "EXTERNAL_CIL:CIL_PPC"
-    assert (
-        audit_log.entries[-1].action_name == "WRITE_REGISTER:WATCHDOG_HEARTBEAT_COUNTER"
-    )
+    assert audit_log.entries[-1].action_name == "WRITE_REGISTER:WATCHDOG_HEARTBEAT_COUNTER"

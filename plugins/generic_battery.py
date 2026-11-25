@@ -72,9 +72,7 @@ class GenericBatteryPlugin(BasePlugin, BatterySystemInterface):
             ctx.shared_state,
             f"{KEY_BATTERY_CMD_P_W_PREFIX}{self.physical_model.equipment_id}",
             KEY_BATTERY_CMD_P_W,
-            ctx.shared_state.get(
-                KEY_PCS_CMD_ACTIVE_W, self.physical_model.active_power_w
-            ),
+            ctx.shared_state.get(KEY_PCS_CMD_ACTIVE_W, self.physical_model.active_power_w),
         )
         if not math.isfinite(p_cmd):
             p_cmd = 0.0
@@ -87,9 +85,9 @@ class GenericBatteryPlugin(BasePlugin, BatterySystemInterface):
         ctx.shared_state["battery_soc_pct"] = self.physical_model.soc_pct
         ctx.shared_state["battery_voltage_v"] = self.physical_model.voltage_v
         ctx.shared_state["battery_current_a"] = self.physical_model.current_a
-        ctx.shared_state[
-            f"{KEY_BATTERY_DC_VOLTAGE_V}_{self.physical_model.equipment_id}"
-        ] = self.physical_model.voltage_v
+        ctx.shared_state[f"{KEY_BATTERY_DC_VOLTAGE_V}_{self.physical_model.equipment_id}"] = (
+            self.physical_model.voltage_v
+        )
 
     def process_command(self, cmd: dict[str, Any]) -> bool:
         if cmd.get("reset_faults"):

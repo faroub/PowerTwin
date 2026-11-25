@@ -23,9 +23,7 @@ from plugins.registry import PluginRegistry
 def test_reference_10mw_20mwh_plant_topology_loading() -> None:
     """Test loading and building the initial 10 MW / 20 MWh reference plant."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
 
     assert plant.topology_config.rated_power_w == 10_000_000.0
     assert plant.topology_config.rated_energy_wh == 20_000_000.0
@@ -38,9 +36,7 @@ def test_reference_10mw_20mwh_plant_topology_loading() -> None:
 def test_single_equipment_instance_ownership_verification() -> None:
     """Verify PT-004 invariant: Only ONE authoritative equipment model object exists per asset."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
 
     # 1. Verify Battery Container 01 single object reference
     bat_from_list = plant.battery_systems[0]
@@ -86,9 +82,7 @@ def test_single_equipment_instance_ownership_verification() -> None:
 def test_variant_50mw_200mwh_multi_vendor_plant_loading() -> None:
     """Test loading and building the secondary 50 MW / 200 MWh multi-vendor variant plant."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/variant_50mw_200mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/variant_50mw_200mwh.yaml"))
 
     assert plant.topology_config.rated_power_w == 50_000_000.0
     assert plant.topology_config.rated_energy_wh == 200_000_000.0
@@ -123,9 +117,7 @@ def test_duplicate_identifier_detection() -> None:
         switchgear=[SwitchgearTopologyConfig()],
         auxiliary_systems=[],
         meters=[],
-        poi=POITopologyConfig(
-            max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0
-        ),
+        poi=POITopologyConfig(max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0),
         grid=GridTopologyConfig(),
         ppc=PPCTopologyConfig(
             plant_rated_active_power_w=10_000_000.0,
@@ -153,9 +145,7 @@ def test_missing_required_components_detection() -> None:
         switchgear=[],
         auxiliary_systems=[],
         meters=[],
-        poi=POITopologyConfig(
-            max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0
-        ),
+        poi=POITopologyConfig(max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0),
         grid=GridTopologyConfig(),
         ppc=PPCTopologyConfig(
             plant_rated_active_power_w=10_000_000.0,
@@ -185,9 +175,7 @@ def test_incompatible_ratings_detection() -> None:
         switchgear=[SwitchgearTopologyConfig()],
         auxiliary_systems=[],
         meters=[],
-        poi=POITopologyConfig(
-            max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0
-        ),
+        poi=POITopologyConfig(max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0),
         grid=GridTopologyConfig(),
         ppc=PPCTopologyConfig(
             plant_rated_active_power_w=10_000_000.0,
@@ -225,9 +213,7 @@ def test_unsupported_plugin_version_detection() -> None:
         switchgear=[SwitchgearTopologyConfig()],
         auxiliary_systems=[],
         meters=[],
-        poi=POITopologyConfig(
-            max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0
-        ),
+        poi=POITopologyConfig(max_export_power_w=10_000_000.0, max_import_power_w=10_000_000.0),
         grid=GridTopologyConfig(),
         ppc=PPCTopologyConfig(
             plant_rated_active_power_w=10_000_000.0,
@@ -237,7 +223,6 @@ def test_unsupported_plugin_version_detection() -> None:
 
     errors = validator.validate_topology(config)
     assert any(
-        "Plugin 'unregistered_battery_v99' referenced by Container 'C1' not found"
-        in err
+        "Plugin 'unregistered_battery_v99' referenced by Container 'C1' not found" in err
         for err in errors
     )

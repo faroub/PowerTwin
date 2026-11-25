@@ -162,6 +162,4 @@ def test_ecm_stub_unimplemented_error() -> None:
     ecm = ECMStub()
     assert isinstance(ecm, EquivalentCircuitModelInterface)
     with pytest.raises(NotImplementedError):
-        ecm.calculate_ecm_voltage(
-            current_a=10.0, soc_pct=50.0, temp_c=25.0, delta_t_s=1.0
-        )
+        ecm.calculate_ecm_voltage(current_a=10.0, soc_pct=50.0, temp_c=25.0, delta_t_s=1.0)

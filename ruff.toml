@@ -1,15 +1,15 @@
 # Ruff configuration for the parts of the repository that are not covered by
-# ``backend/pyproject.toml``: the helper scripts, the test suite and the
-# equipment plugins.
+# ``backend/pyproject.toml``: the helper scripts, the test suite, the
+# equipment plugins and the container health check.
 #
 # Why this file exists
 # ---------------------
 # Ruff resolves its configuration **per file**, by walking up the directory
 # tree from the file that is being linted. ``backend/`` has its own
-# configuration in ``backend/pyproject.toml``, but ``scripts/``, ``tests/``
-# and ``plugins/`` did not have one.
+# configuration in ``backend/pyproject.toml``, but ``scripts/``, ``tests/``,
+# ``plugins/`` and ``deployment/`` did not have one.
 #
-# Without a configuration file of their own, those three directories inherited
+# Without a configuration file of their own, those directories inherited
 # whatever rule set happened to be configured outside the repository, or
 # Ruff's built-in defaults when nothing was found. The practical consequence is
 # that the lint result depended on the machine: a developer and the CI runner
@@ -17,26 +17,29 @@
 # green local run did not prove that CI would be green.
 #
 # This file pins the rule set **inside the repository**, so that the local
-# result and the CI result are the same. The selection mirrors
-# ``backend/pyproject.toml`` so that the whole repository is linted with one
-# documented style; keep the two in sync when the style changes.
+# result and the CI result are the same.
 #
-# The line length is deliberately 88 here and 100 in ``backend/``. The files of
-# these three directories are already formatted at 88 characters, so this
-# setting preserves the existing formatting instead of reformatting code that
-# the change has nothing to do with.
+# This configuration and ``backend/pyproject.toml`` declare **the same** line
+# length, the same target version and the same lint rule selection. The whole
+# repository is therefore linted with one documented style: a line that is
+# acceptable in one tree is acceptable in every tree, and a file that is
+# formatted in one tree is formatted in all of them.
 #
-# E501 is the one documented exception to the mirrored rule selection. Ruff's
-# formatter never reflows a docstring or a comment, so a tree that is formatted
-# at 88 characters can still contain long prose lines that no formatter run
-# will ever shorten. Enabling E501 here would therefore demand prose-only
-# edits that the formatter itself declines to make, and it would reject
-# perfectly well-formatted files. E501 stays active in ``backend/``, where the
-# line length is 100 and the formatter's output already satisfies it.
+# The two files cannot be merged into one, because Ruff discovers its
+# configuration by walking **up** the directory tree: ``backend/pyproject.toml``
+# is not an ancestor of ``scripts/`` or ``tests/``, so those trees would fall
+# back to Ruff's built-in defaults if the root file were removed. They are kept
+# in step by ``tests/test_tool_configuration.py``, which fails when the two
+# declarations diverge.
+#
+# E501 is active in both configurations. Ruff's formatter never reflows a
+# docstring or a comment, so a tree can contain long prose lines that no
+# formatter run will ever shorten; those lines are shortened by hand, and the
+# linter enforces it.
 
-line-length = 88
+line-length = 100
 target-version = "py312"
 
 [lint]
 select = ["E", "F", "I", "B", "UP"]
-ignore = ["B008", "E501"]
+ignore = ["B008"]

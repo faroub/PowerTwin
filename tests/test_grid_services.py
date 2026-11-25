@@ -92,17 +92,13 @@ def test_peak_shaving_and_renewable_smoothing() -> None:
     """Test Peak Shaving and Renewable Ramp Smoothing plugins."""
     ps = PeakShavingPlugin(demand_threshold_w=8_000_000.0)
     # Demand = 10 MW (> 8 MW threshold) -> Discharges 2 MW to shave peak
-    p_req, _ = ps.calculate_service_request(
-        50.0, 13800.0, 50.0, active_power_w=10_000_000.0
-    )
+    p_req, _ = ps.calculate_service_request(50.0, 13800.0, 50.0, active_power_w=10_000_000.0)
     assert p_req == 2_000_000.0
 
     rs = RenewableSmoothingPlugin()
     # High renewable ramp up -> Charges battery to smooth ramp
     rs.last_power_w = 0.0
-    p_req2, _ = rs.calculate_service_request(
-        50.0, 13800.0, 50.0, active_power_w=10_000_000.0
-    )
+    p_req2, _ = rs.calculate_service_request(50.0, 13800.0, 50.0, active_power_w=10_000_000.0)
     assert p_req2 < 0.0
 
 
@@ -110,7 +106,5 @@ def test_performance_score_calculation() -> None:
     """Test service performance/compliance score calculation."""
     fcr = FCRPlugin()
     # Request 10 MW, actual delivered 9.5 MW -> Score = 0.95
-    score = fcr.calculate_performance_score(
-        requested_p_w=10_000_000.0, actual_p_w=9_500_000.0
-    )
+    score = fcr.calculate_performance_score(requested_p_w=10_000_000.0, actual_p_w=9_500_000.0)
     assert score == 0.95

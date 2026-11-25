@@ -21,9 +21,7 @@ from plugins.grid_services.fcr import FCRPlugin
 def test_hypothesis_pcs_pq_capability_circle_bound(p_req: float, q_req: float) -> None:
     """Hypothesis Property Test: Accepted P & Q setpoints ALWAYS satisfy P^2 + Q^2 <= S_max^2."""
     pcs = GenericPCSModel(config=PCSConfigModel(rated_apparent_power_va=5_500_000.0))
-    p_acc, q_acc = pcs.evaluate_pq_capability_circle(
-        p_req, q_req, s_max_eff=5_500_000.0
-    )
+    p_acc, q_acc = pcs.evaluate_pq_capability_circle(p_req, q_req, s_max_eff=5_500_000.0)
 
     apparent_s = math.sqrt(p_acc**2 + q_acc**2)
     assert apparent_s <= 5_500_001.0
@@ -33,9 +31,7 @@ def test_hypothesis_pcs_pq_capability_circle_bound(p_req: float, q_req: float) -
     power_demand_w=st.floats(min_value=-10_000_000.0, max_value=10_000_000.0),
     delta_t_s=st.floats(min_value=0.001, max_value=1.0),
 )
-def test_hypothesis_battery_soc_conservation(
-    power_demand_w: float, delta_t_s: float
-) -> None:
+def test_hypothesis_battery_soc_conservation(power_demand_w: float, delta_t_s: float) -> None:
     """Hypothesis Property Test: Battery SoC remains within bounds (5% <= SoC <= 95%)."""
     battery = GenericBatterySystemModel(
         config=BatterySystemConfigModel(initial_soc_pct=50.0, capacity_wh=10_000_000.0)

@@ -49,10 +49,10 @@ jobs:
         run: python scripts/verify_locked_environment.py --lock backend/requirements.lock
 
       - name: Verify Formatting (Ruff)
-        run: ruff format --check backend plugins tests scripts
+        run: ruff format --check backend plugins tests scripts deployment
 
       - name: Run Linter (Ruff)
-        run: ruff check backend plugins tests scripts
+        run: ruff check backend plugins tests scripts deployment
 
       - name: Run Type Checker (Mypy)
         run: mypy --config-file backend/pyproject.toml backend plugins scripts

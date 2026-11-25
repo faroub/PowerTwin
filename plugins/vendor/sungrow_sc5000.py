@@ -101,9 +101,7 @@ class SungrowSC5000PCSPlugin(BasePlugin, PCSInterface):
             self.physical_model.config.rated_active_power_w = self.rated_power_w
         if "rated_apparent_power_va" in config:
             self.rated_apparent_power_va = float(config["rated_apparent_power_va"])
-            self.physical_model.config.rated_apparent_power_va = (
-                self.rated_apparent_power_va
-            )
+            self.physical_model.config.rated_apparent_power_va = self.rated_apparent_power_va
         self.enabled = True
         self.health_status = PluginHealthStatus.HEALTHY
 
@@ -151,12 +149,12 @@ class SungrowSC5000PCSPlugin(BasePlugin, PCSInterface):
         # Publish actual power to shared state for Battery Distribution Task
         ctx.shared_state["pcs_active_power_w"] = self.physical_model.actual_p_w
         ctx.shared_state["pcs_reactive_power_var"] = self.physical_model.actual_q_var
-        ctx.shared_state[
-            f"{KEY_PCS_CMD_ACTIVE_W_PREFIX}{self.physical_model.equipment_id}"
-        ] = self.physical_model.actual_p_w
-        ctx.shared_state[
-            f"{KEY_PCS_CMD_REACTIVE_W_PREFIX}{self.physical_model.equipment_id}"
-        ] = self.physical_model.actual_q_var
+        ctx.shared_state[f"{KEY_PCS_CMD_ACTIVE_W_PREFIX}{self.physical_model.equipment_id}"] = (
+            self.physical_model.actual_p_w
+        )
+        ctx.shared_state[f"{KEY_PCS_CMD_REACTIVE_W_PREFIX}{self.physical_model.equipment_id}"] = (
+            self.physical_model.actual_q_var
+        )
 
     def shutdown(self) -> None:
         """Clean up plugin state."""

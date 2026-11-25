@@ -22,9 +22,7 @@ def test_observer_role_can_read_telemetry_but_cannot_modify_simulation(
     """Test OBSERVER role can read overview SCADA metrics but is denied
     simulation control actions."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
     get_simulation_runtime(app=client.app).attach_plant(plant)
 
     login_res = client.post(
@@ -63,9 +61,7 @@ def test_simulation_control_returns_503_when_no_engine_connected(
     token = login_res.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    res = client.post(
-        "/api/v1/simulation/control", json={"action": "PAUSE"}, headers=headers
-    )
+    res = client.post("/api/v1/simulation/control", json={"action": "PAUSE"}, headers=headers)
     assert res.status_code == 503
     data = res.json()["detail"]
     assert data["status"] == "NOT_CONNECTED"
@@ -78,9 +74,7 @@ def test_simulation_control_executes_action_on_active_engine(
     """Test simulation control API executes action on active
     SimulationRunManager engine instance."""
     factory = PlantTopologyFactory()
-    plant = factory.build_plant(
-        factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
-    )
+    plant = factory.build_plant(factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml"))
     get_simulation_runtime(app=client.app).attach_plant(plant)
 
     login_res = client.post(
@@ -91,18 +85,14 @@ def test_simulation_control_executes_action_on_active_engine(
     headers = {"Authorization": f"Bearer {token}"}
 
     # Execute START action
-    res_start = client.post(
-        "/api/v1/simulation/control", json={"action": "START"}, headers=headers
-    )
+    res_start = client.post("/api/v1/simulation/control", json={"action": "START"}, headers=headers)
     assert res_start.status_code == 200
     data_start = res_start.json()
     assert data_start["status"] == "SUCCESS"
     assert data_start["engine_state"] == "RUNNING"
 
     # Execute PAUSE action
-    res_pause = client.post(
-        "/api/v1/simulation/control", json={"action": "PAUSE"}, headers=headers
-    )
+    res_pause = client.post("/api/v1/simulation/control", json={"action": "PAUSE"}, headers=headers)
     assert res_pause.status_code == 200
     data_pause = res_pause.json()
     assert data_pause["status"] == "SUCCESS"

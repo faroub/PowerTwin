@@ -309,8 +309,7 @@ def evaluate_coverage(
                     actual=None,
                     minimum=0.0,
                     detail=(
-                        "no source file matches this policy scope; the floor is "
-                        "not being enforced"
+                        "no source file matches this policy scope; the floor is not being enforced"
                     ),
                 )
             )
@@ -341,9 +340,7 @@ def evaluate_coverage(
     return violations
 
 
-def format_report(
-    report: dict[str, Any], policy: CoveragePolicy = DEFAULT_POLICY
-) -> str:
+def format_report(report: dict[str, Any], policy: CoveragePolicy = DEFAULT_POLICY) -> str:
     """Return a human readable coverage table."""
     totals = report["totals"]
     lines: list[str] = []

@@ -76,9 +76,7 @@ class DummyGridPlugin(BasePlugin, GridModelInterface):
         return UniversalEquipmentState(
             equipment_id=self.equipment_id,
             equipment_type=self.equipment_type,
-            metadata=EquipmentMetadata(
-                manufacturer="Generic", model_name="Synthetic Grid Node"
-            ),
+            metadata=EquipmentMetadata(manufacturer="Generic", model_name="Synthetic Grid Node"),
             operating_state=self._operating_state,
             is_available=self._is_available,
             timestamp_ns=t_ns,

@@ -20,9 +20,7 @@ class RenewableSmoothingPlugin(GridServiceInterface):
             service_id="RENEWABLE_SMOOTHING_01",
             service_name="Renewable Power Ramp-Rate Smoothing",
             version="1.0.0",
-            activation_conditions={
-                "renewable_ramp_rate_exceeds": max_ramp_rate_w_per_s
-            },
+            activation_conditions={"renewable_ramp_rate_exceeds": max_ramp_rate_w_per_s},
             required_equipment_capabilities=["RAMP_SMOOTHING", "FAST_RESPONSE"],
             power_and_energy_requirements={"max_power_w": rated_capacity_w},
             response_time_assumptions_ms=500.0,

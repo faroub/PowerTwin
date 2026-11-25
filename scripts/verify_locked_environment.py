@@ -143,8 +143,7 @@ def verify_environment(
             continue
         if package.version != version:
             problems.append(
-                f"the lock pins '{package.name}' at {version}, "
-                f"but {package.version} is installed"
+                f"the lock pins '{package.name}' at {version}, but {package.version} is installed"
             )
 
     extra = sorted(set(installed) - set(locked))
@@ -194,10 +193,7 @@ def main(argv: list[str]) -> int:
         return 1
 
     if extra:
-        print(
-            f"{len(extra)} package(s) are installed beyond the lock: "
-            + ", ".join(extra)
-        )
+        print(f"{len(extra)} package(s) are installed beyond the lock: " + ", ".join(extra))
     print(
         f"The environment matches the lock: {len(locked)} locked packages, "
         f"each installed at exactly the pinned version."

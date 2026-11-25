@@ -67,14 +67,14 @@ result and the CI result are the same:
 | Tool | Configuration | Scope |
 | :--- | :--- | :--- |
 | Ruff (format and lint) | `backend/pyproject.toml` | `backend/` — line length 100 |
-| Ruff (format and lint) | `ruff.toml` (repository root) | `scripts/`, `tests/`, `plugins/` — line length 88 |
+| Ruff (format and lint) | `ruff.toml` (repository root) | `scripts/`, `tests/`, `plugins/`, `deployment/` — line length 100 |
 | Mypy | `backend/pyproject.toml` (`strict = true`) | `backend/`, `plugins/`, `scripts/` |
 
 Ruff resolves its configuration **per file**, by walking up the directory tree
-from the file being checked. `scripts/`, `tests/` and `plugins/` had no
-configuration file of their own, so their effective rule set was inherited from
-whatever configuration happened to exist outside the repository, or from Ruff's
-defaults when nothing was found.
+from the file being checked. `scripts/`, `tests/`, `plugins/` and
+`deployment/` had no configuration file of their own, so their effective rule
+set was inherited from whatever configuration happened to exist outside the
+repository, or from Ruff's defaults when nothing was found.
 
 The practical consequence was that **the lint result depended on the machine**:
 a developer and the CI runner could legitimately disagree about whether the
@@ -83,20 +83,25 @@ green. The root `ruff.toml` pins the rule set inside the repository and closes
 that gap.
 
 The two rule selections are the same (`E`, `F`, `I`, `B`, `UP`, with `B008`
-ignored), so the whole repository is linted with one documented style. The line
-lengths differ because the files of `scripts/`, `tests/` and `plugins/` are
-already formatted at 88 characters; keeping that value preserves the existing
-formatting instead of reformatting code that the change has nothing to do
-with.
+ignored), so the whole repository is linted with one documented style. **The
+line length is the same too: 100 characters in both trees**, and `E501` is
+active in both. A line that is acceptable in one tree is acceptable in every
+tree, and a file that is formatted in one tree is formatted in all of them.
 
-There is exactly one documented exception: **`E501` is ignored for the 88-wide
-trees and stays active in `backend/`.** Ruff's formatter never reflows a
-docstring or a comment, so a tree that is correctly formatted at 88 characters
-can still contain long prose lines that no formatter run will ever shorten.
-Enabling `E501` there would demand prose-only edits that the formatter itself
-declines to make, and would reject well-formatted files. In `backend/` the line
-length is 100 and the formatter's output already satisfies `E501`, so the check
-is meaningful and is kept there.
+Two configuration files are still needed, because Ruff discovers its
+configuration by walking **up** the directory tree: `backend/pyproject.toml`
+is not an ancestor of `scripts/` or `tests/`, so those trees would fall back to
+Ruff's built-in defaults if the root file were removed. They are kept in step
+by `tests/test_tool_configuration.py`, which fails when the two declarations
+diverge on the line length, the target version, the rule selection or the
+ignored rules, when `E501` is disabled in either, or when the pipeline stops
+linting one of the repository's Python trees.
+
+`E501` is enabled in both trees because Ruff's formatter never reflows a
+docstring or a comment. A tree that ignores the rule can therefore carry prose
+lines that no formatter run will ever shorten, and the declared line length
+stops being true of the whole file. Those prose lines are shortened by hand and
+the linter enforces it.
 
 ### 2.3 Dependency resolution and hash verification
 
@@ -629,10 +634,10 @@ the defect that section 2.2 describes.
 
 ```bash
 # Formatting check
-PYTHONPATH=. ruff format --check backend plugins tests scripts
+PYTHONPATH=. ruff format --check backend plugins tests scripts deployment
 
 # Linting check
-PYTHONPATH=. ruff check backend plugins tests scripts
+PYTHONPATH=. ruff check backend plugins tests scripts deployment
 
 # Static type checking
 PYTHONPATH=. mypy --config-file backend/pyproject.toml backend plugins scripts

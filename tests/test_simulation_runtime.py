@@ -46,9 +46,7 @@ def _login(client: TestClient, password: str, username: str = "admin") -> str:
         msg = f"Unrecognised developer username '{username}'"
         raise ValueError(msg)
 
-    res = client.post(
-        "/api/v1/auth/login", json={"username": username, "password": password}
-    )
+    res = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     if res.status_code != 200:
         msg = (
             f"No developer account matched {username} (status {res.status_code}): "
@@ -149,9 +147,7 @@ def test_status_endpoint_report_true_state(client: TestClient, password: str) ->
     assert data["message"].startswith("Simulation engine is in state")
 
 
-def test_single_step_advances_exactly_one_tick(
-    client: TestClient, password: str
-) -> None:
+def test_single_step_advances_exactly_one_tick(client: TestClient, password: str) -> None:
     """STEP must advance exactly one tick and no more than one tick."""
     token = _login(client, password)
 
@@ -168,9 +164,7 @@ def test_single_step_advances_exactly_one_tick(
     assert data["current_tick"] == before + 6, (before, data["current_tick"])
 
 
-def test_start_stop_repeatedly_home_the_thread(
-    client: TestClient, password: str
-) -> None:
+def test_start_stop_repeatedly_home_the_thread(client: TestClient, password: str) -> None:
     """Starting and stopping repeatedly never leaves stale state."""
     token = _login(client, password)
 
@@ -187,9 +181,7 @@ def test_start_stop_repeatedly_home_the_thread(
     assert data["is_running"] is False
 
 
-def test_reset_restores_initial_physical_conditions(
-    client: TestClient, password: str
-) -> None:
+def test_reset_restores_initial_physical_conditions(client: TestClient, password: str) -> None:
     """START -> STOP -> RESET -> the engine clock returns to its initial state.
 
     The stop releases the run loop thread first, so the readback of the tick
@@ -214,9 +206,7 @@ def test_reset_restores_initial_physical_conditions(
     assert data["status"] == "STOPPED"
 
 
-def test_snapshot_restore_keeps_a_paused_engine(
-    client: TestClient, password: str
-) -> None:
+def test_snapshot_restore_keeps_a_paused_engine(client: TestClient, password: str) -> None:
     """The engine is paused after a restore so subsequent ticks are deterministic."""
     token = _login(client, password)
 
@@ -320,9 +310,7 @@ def test_attaching_and_detaching_a_plant_leaves_the_runtime_consistent() -> None
     assert runtime.active_plant is None
 
 
-def test_continuous_run_advances_seconds_of_wall_clock(
-    client: TestClient, password: str
-) -> None:
+def test_continuous_run_advances_seconds_of_wall_clock(client: TestClient, password: str) -> None:
     """A STARTed simulation advances ticks without an API invocation every tick."""
     token = _login(client, password)
 

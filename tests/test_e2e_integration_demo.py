@@ -137,9 +137,7 @@ def test_25_step_e2e_scheduler_driven_workflow(
     )
     token = login_res.json()["access_token"]
 
-    hmi_res = client.get(
-        "/api/v1/overview", headers={"Authorization": f"Bearer {token}"}
-    )
+    hmi_res = client.get("/api/v1/overview", headers={"Authorization": f"Bearer {token}"})
     assert hmi_res.status_code == 200
     assert hmi_res.json()["average_soc_pct"] > 50.0
 

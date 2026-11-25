@@ -55,9 +55,7 @@ class GenericPCSPlugin(BasePlugin, PCSInterface):
     def initialize(self, config: dict[str, Any]) -> None:
         self._config = PCSConfig(**config)
         self.physical_model.config.rated_active_power_w = self._config.rated_power_w
-        self.physical_model.config.rated_apparent_power_va = (
-            self._config.rated_apparent_power_va
-        )
+        self.physical_model.config.rated_apparent_power_va = self._config.rated_apparent_power_va
         self.enabled = True
 
     def step_plugin(self, ctx: SimulationContext, delta_t_s: float) -> None:
@@ -94,12 +92,12 @@ class GenericPCSPlugin(BasePlugin, PCSInterface):
 
         ctx.shared_state["pcs_active_power_w"] = self.physical_model.actual_p_w
         ctx.shared_state["pcs_reactive_power_var"] = self.physical_model.actual_q_var
-        ctx.shared_state[
-            f"{KEY_PCS_ACTUAL_P_W_PREFIX}{self.physical_model.equipment_id}"
-        ] = self.physical_model.actual_p_w
-        ctx.shared_state[
-            f"{KEY_PCS_ACTUAL_Q_PREFIX}{self.physical_model.equipment_id}"
-        ] = self.physical_model.actual_q_var
+        ctx.shared_state[f"{KEY_PCS_ACTUAL_P_W_PREFIX}{self.physical_model.equipment_id}"] = (
+            self.physical_model.actual_p_w
+        )
+        ctx.shared_state[f"{KEY_PCS_ACTUAL_Q_PREFIX}{self.physical_model.equipment_id}"] = (
+            self.physical_model.actual_q_var
+        )
 
     @staticmethod
     def _ac_grid_voltage(ctx: SimulationContext) -> float:

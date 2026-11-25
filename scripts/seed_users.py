@@ -45,9 +45,7 @@ def check_existing_admin() -> None:
             exists = await repo.exists()
             root = await get_root_administrator(session)
             logger.info("Account table exists: %s", exists)
-            logger.info(
-                "Administrator account: %s", root.username if root is not None else None
-            )
+            logger.info("Administrator account: %s", root.username if root is not None else None)
 
     asyncio.run(_run())
 
@@ -118,9 +116,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logger.info("Seeding user accounts in environment %s", settings.ENVIRONMENT)
 
     if args.check_only:

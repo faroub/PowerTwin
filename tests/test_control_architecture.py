@@ -174,9 +174,7 @@ def test_ems_dispatch_infeasibility_when_battery_empty() -> None:
     eq_ctrl = BESSEquipmentController()
     eq_ctrl.operating_state = OperatingState.RUNNING
 
-    battery = GenericBatterySystemModel(
-        config=BatterySystemConfigModel(initial_soc_pct=5.0)
-    )
+    battery = GenericBatterySystemModel(config=BatterySystemConfigModel(initial_soc_pct=5.0))
     bms = GenericBMSModel()
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=5.0, temp_c=25.0)
     pcs = GenericPCSModel()
@@ -223,13 +221,9 @@ def test_ems_watchdog_stale_heartbeat_rejects_dispatch() -> None:
     eq_ctrl.operating_state = OperatingState.RUNNING
     eq_ctrl.update_heartbeat(1_000_000_000)
 
-    battery = GenericBatterySystemModel(
-        config=BatterySystemConfigModel(initial_soc_pct=50.0)
-    )
+    battery = GenericBatterySystemModel(config=BatterySystemConfigModel(initial_soc_pct=50.0))
     bms = GenericBMSModel(
-        limits=BMSProtectionLimits(
-            max_discharge_current_a=6000.0, max_charge_current_a=6000.0
-        )
+        limits=BMSProtectionLimits(max_discharge_current_a=6000.0, max_charge_current_a=6000.0)
     )
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
     pcs = GenericPCSModel()
@@ -289,9 +283,7 @@ def test_ems_respects_configured_poi_import_export_limits() -> None:
         )
     )
     bms = GenericBMSModel(
-        limits=BMSProtectionLimits(
-            max_discharge_current_a=60_000.0, max_charge_current_a=60_000.0
-        )
+        limits=BMSProtectionLimits(max_discharge_current_a=60_000.0, max_charge_current_a=60_000.0)
     )
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
     pcs = GenericPCSModel(
@@ -359,9 +351,7 @@ def test_ems_frequency_response_mode() -> None:
     eq_ctrl = BESSEquipmentController()
     eq_ctrl.operating_state = OperatingState.RUNNING
 
-    battery = GenericBatterySystemModel(
-        config=BatterySystemConfigModel(initial_soc_pct=50.0)
-    )
+    battery = GenericBatterySystemModel(config=BatterySystemConfigModel(initial_soc_pct=50.0))
     bms = GenericBMSModel()
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
     pcs = GenericPCSModel()
@@ -432,30 +422,20 @@ def test_plant_control_task_serializes_dispatch_toPCS_command() -> None:
     from backend.app.simulation.tasks import PlantControlTask
 
     ems = EnergyManagementSystem()
-    ppc = PowerPlantController(
-        config=PPCConfigModel(plant_rated_active_power_w=50_000_000.0)
-    )
+    ppc = PowerPlantController(config=PPCConfigModel(plant_rated_active_power_w=50_000_000.0))
     eq_ctrl = BESSEquipmentController()
     eq_ctrl.operating_state = OperatingState.RUNNING
     eq_ctrl.update_heartbeat(0)
 
     battery = GenericBatterySystemModel(
-        config=BatterySystemConfigModel(
-            initial_soc_pct=50.0, max_discharge_power_w=100_000_000.0
-        )
+        config=BatterySystemConfigModel(initial_soc_pct=50.0, max_discharge_power_w=100_000_000.0)
     )
     bms = GenericBMSModel(
-        limits=BMSProtectionLimits(
-            max_charge_current_a=60_000.0, max_discharge_current_a=60_000.0
-        )
+        limits=BMSProtectionLimits(max_charge_current_a=60_000.0, max_discharge_current_a=60_000.0)
     )
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
-    pcs1 = GenericPCSModel(
-        "PCS_01", config=PCSConfigModel(rated_active_power_w=2_500_000.0)
-    )
-    pcs2 = GenericPCSModel(
-        "PCS_02", config=PCSConfigModel(rated_active_power_w=2_500_000.0)
-    )
+    pcs1 = GenericPCSModel("PCS_01", config=PCSConfigModel(rated_active_power_w=2_500_000.0))
+    pcs2 = GenericPCSModel("PCS_02", config=PCSConfigModel(rated_active_power_w=2_500_000.0))
     pcs1.operating_state = OperatingState.RUNNING
     pcs2.operating_state = OperatingState.RUNNING
 
@@ -526,9 +506,7 @@ def test_battery_distribution_respects_mixed_container_capacities() -> None:
 
     small = GenericBatterySystemModel(
         "B5MWH",
-        config=BatterySystemConfigModel(
-            capacity_wh=5_000_000.0, max_discharge_power_w=5_000_000.0
-        ),
+        config=BatterySystemConfigModel(capacity_wh=5_000_000.0, max_discharge_power_w=5_000_000.0),
     )
     large = GenericBatterySystemModel(
         "B20MWH",
@@ -538,9 +516,7 @@ def test_battery_distribution_respects_mixed_container_capacities() -> None:
     )
 
     # A single PCS unit representing the full 40 MW fleet.
-    fleet_pcs = GenericPCSModel(
-        config=PCSConfigModel(rated_active_power_w=40_000_000.0)
-    )
+    fleet_pcs = GenericPCSModel(config=PCSConfigModel(rated_active_power_w=40_000_000.0))
     fleet_pcs.actual_p_w = 40_000_000.0
 
     task = PlantBatteryDistributionTask(
@@ -568,8 +544,7 @@ def test_battery_distribution_respects_mixed_container_capacities() -> None:
 
     # Total command is fully distributed.
     total = sum(
-        ctx.shared_state[f"battery_cmd_power_w_{bat.equipment_id}"]
-        for bat in task.battery_systems
+        ctx.shared_state[f"battery_cmd_power_w_{bat.equipment_id}"] for bat in task.battery_systems
     )
     assert total == 40_000_000.0
 
@@ -587,9 +562,7 @@ def test_plant_control_task_rejects_non_finite_setpoints() -> None:
     eq_ctrl = BESSEquipmentController()
     eq_ctrl.operating_state = OperatingState.RUNNING
 
-    battery = GenericBatterySystemModel(
-        config=BatterySystemConfigModel(initial_soc_pct=50.0)
-    )
+    battery = GenericBatterySystemModel(config=BatterySystemConfigModel(initial_soc_pct=50.0))
     bms = GenericBMSModel()
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
     pcs = GenericPCSModel()
@@ -807,9 +780,7 @@ def test_ems_scheduled_profile_mode() -> None:
     eq_ctrl.operating_state = OperatingState.RUNNING
     eq_ctrl.update_heartbeat(0)
 
-    battery = GenericBatterySystemModel(
-        config=BatterySystemConfigModel(initial_soc_pct=50.0)
-    )
+    battery = GenericBatterySystemModel(config=BatterySystemConfigModel(initial_soc_pct=50.0))
     # Use higher BMS limits to allow 5 MW discharge
     bms = GenericBMSModel(
         limits=BMSProtectionLimits(
@@ -824,12 +795,8 @@ def test_ems_scheduled_profile_mode() -> None:
     # Add schedule: discharge 5 MW from t=1s to t=2s, charge 3 MW from t=2s to t=3s
     # Use nanosecond timestamps
     ems.schedule = [
-        DispatchScheduleItem(
-            start_time_ns=1_000_000_000, duration_s=1.0, p_demand_w=5_000_000.0
-        ),
-        DispatchScheduleItem(
-            start_time_ns=2_000_000_000, duration_s=1.0, p_demand_w=-3_000_000.0
-        ),
+        DispatchScheduleItem(start_time_ns=1_000_000_000, duration_s=1.0, p_demand_w=5_000_000.0),
+        DispatchScheduleItem(start_time_ns=2_000_000_000, duration_s=1.0, p_demand_w=-3_000_000.0),
     ]
 
     # Before schedule start -> 0 MW
@@ -894,9 +861,7 @@ def test_ems_peak_shaving_mode() -> None:
     eq_ctrl.operating_state = OperatingState.RUNNING
     eq_ctrl.update_heartbeat(0)
 
-    battery = GenericBatterySystemModel(
-        config=BatterySystemConfigModel(initial_soc_pct=50.0)
-    )
+    battery = GenericBatterySystemModel(config=BatterySystemConfigModel(initial_soc_pct=50.0))
     bms = GenericBMSModel()
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
     pcs = GenericPCSModel()
@@ -1081,9 +1046,7 @@ def test_ems_deterministic_dispatch_across_multiple_calls() -> None:
     eq_ctrl.operating_state = OperatingState.RUNNING
     eq_ctrl.update_heartbeat(0)
 
-    battery = GenericBatterySystemModel(
-        config=BatterySystemConfigModel(initial_soc_pct=50.0)
-    )
+    battery = GenericBatterySystemModel(config=BatterySystemConfigModel(initial_soc_pct=50.0))
     bms = GenericBMSModel()
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
     pcs = GenericPCSModel()
@@ -1113,12 +1076,8 @@ def test_ems_deterministic_dispatch_across_multiple_calls() -> None:
 def test_ppc_deterministic_allocation_across_multiple_calls() -> None:
     """Test PPC produces identical allocation for identical inputs."""
     ppc = PowerPlantController()
-    pcs1 = GenericPCSModel(
-        "PCS_01", config=PCSConfigModel(rated_active_power_w=5_000_000.0)
-    )
-    pcs2 = GenericPCSModel(
-        "PCS_02", config=PCSConfigModel(rated_active_power_w=5_000_000.0)
-    )
+    pcs1 = GenericPCSModel("PCS_01", config=PCSConfigModel(rated_active_power_w=5_000_000.0))
+    pcs2 = GenericPCSModel("PCS_02", config=PCSConfigModel(rated_active_power_w=5_000_000.0))
     pcs1.operating_state = OperatingState.RUNNING
     pcs2.operating_state = OperatingState.RUNNING
 
@@ -1190,16 +1149,12 @@ def test_ems_frequency_response_auto_detects_50hz_vs_60hz() -> None:
     """Test EMS auto-detects 50Hz vs 60Hz nominal frequency."""
     config = EMSConfigModel(mode=EMSMode.FREQUENCY_RESPONSE, droop_pct=5.0)
     ems = EnergyManagementSystem(config=config)
-    ppc = PowerPlantController(
-        config=PPCConfigModel(plant_rated_active_power_w=10_000_000.0)
-    )
+    ppc = PowerPlantController(config=PPCConfigModel(plant_rated_active_power_w=10_000_000.0))
     eq_ctrl = BESSEquipmentController()
     eq_ctrl.operating_state = OperatingState.RUNNING
     eq_ctrl.update_heartbeat(0)
 
-    battery = GenericBatterySystemModel(
-        config=BatterySystemConfigModel(initial_soc_pct=50.0)
-    )
+    battery = GenericBatterySystemModel(config=BatterySystemConfigModel(initial_soc_pct=50.0))
     bms = GenericBMSModel()
     bms.evaluate_protection(voltage_v=1000.0, current_a=0.0, soc_pct=50.0, temp_c=25.0)
     pcs = GenericPCSModel()
@@ -1288,7 +1243,5 @@ def test_equipment_controller_emergency_stop_idempotent() -> None:
     assert eq_ctrl.is_available is False
 
     # Audit log should have both entries
-    estop_entries = [
-        e for e in eq_ctrl.audit_log.entries if e.action_name == "EMERGENCY_STOP"
-    ]
+    estop_entries = [e for e in eq_ctrl.audit_log.entries if e.action_name == "EMERGENCY_STOP"]
     assert len(estop_entries) == 2

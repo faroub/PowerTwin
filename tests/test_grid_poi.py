@@ -65,9 +65,7 @@ def test_grid_disturbances_frequency_step_and_ramp() -> None:
     )
 
     # Step at t = 0 -> Nominal 60.0 Hz
-    _v1, f1 = grid.step(
-        plant_net_p_w=0.0, plant_net_q_var=0.0, delta_t_s=0.1, timestamp_ns=0
-    )
+    _v1, f1 = grid.step(plant_net_p_w=0.0, plant_net_q_var=0.0, delta_t_s=0.1, timestamp_ns=0)
     assert f1 == 60.0
 
     # Step at t = 1s -> 60.5 Hz
@@ -133,9 +131,7 @@ def test_plant_electrical_network_integration() -> None:
     network = PlantElectricalNetwork()
 
     # Step network with +2.0 MW discharge demand
-    network.step(
-        requested_p_w=2_000_000.0, requested_q_var=0.0, delta_t_s=1.0, timestamp_ns=1000
-    )
+    network.step(requested_p_w=2_000_000.0, requested_q_var=0.0, delta_t_s=1.0, timestamp_ns=1000)
 
     # Verify power flow propagated to POI
     assert network.poi.active_power_w > 0.0
