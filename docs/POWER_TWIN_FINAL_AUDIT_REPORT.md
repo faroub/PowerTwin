@@ -26,11 +26,10 @@ and the lint configuration was resolved from outside the repository. All four
 are now closed.
 
 The principal remaining risks are **not** in the simulation core. They are the
-thin frontend test suite, the unpinned Python dependency ranges, the missing
-ORM-versus-migration comparison, and the fact that the GitHub Actions
-workflows have been reviewed and corrected but **have not been executed on
-GitHub** — the audit below records that as an explicit unverified boundary
-rather than presenting the pipelines as green.
+thin frontend test suite, the missing ORM-versus-migration comparison, and the
+fact that the `main` branch is not protected against a direct push. The
+delivery pipeline itself is no longer among them: it has now been executed by
+GitHub Actions and the run on the corrected files was green across every job.
 
 ---
 
@@ -81,8 +80,8 @@ verified fact:
    re-verified locally. The corrected files were subsequently merged into
    `main`, and the run on commit `9928aec` completed with **every job
    green**. What a green run does *not* establish is that the gates cover
-   every possible defect — the coverage gaps recorded as F-01, F-02, F-03,
-   F-04, F-05 and F-11 are entirely unaffected by it.
+   every possible defect — the coverage gaps recorded as F-01, F-03, F-04,
+   F-05 and F-11 are entirely unaffected by it.
 2. **The steps were run locally, in the pipeline's own order.** The backend
    gates were executed on the canonical interpreter **Python 3.12** — the
    interpreter the pipeline uses — in a clean virtual environment built from
@@ -171,7 +170,7 @@ system because no physical system is reachable.
 | PostgreSQL/TimescaleDB for persistent data | **COMPLIANT** | Alembic migration `002_user_accounts`, `docker-compose.yml` service (D) |
 | Docker Compose for initial deployment | **COMPLIANT** | `docker-compose.yml` with a loopback-published API (D) |
 | pytest backend tests, Playwright frontend end-to-end tests | **PARTIAL** | pytest is used. **Playwright is not configured**: the frontend has Vitest unit tests only, so no end-to-end path is exercised. Recorded as finding **F-05** (D) |
-| Pinned dependencies, reproducible builds | **PARTIAL** | The frontend lock file is pinned and `npm ci` is used. The **Python** runtime ranges use `>=`, so two builds of the same commit can resolve differently. Recorded as finding **F-02** (D) |
+| Pinned dependencies, reproducible builds | **COMPLIANT** | The frontend lock file is pinned and `npm ci` is used. The **Python** runtime dependencies are pinned in `backend/requirements.lock` and installed with `--require-hashes`, so a build either reproduces the recorded artefact exactly or fails, and the container build asserts in strict mode that the image carries exactly the locked packages and nothing else. Finding **F-02** is resolved (D) |
 | Structured logging | **COMPLIANT** | `logging.getLogger(__name__)` throughout, including the safety invariants (C) |
 | Exceptions handled explicitly, never swallowed | **COMPLIANT** | The CI helper scripts convert every failure into an explicit error and a non-zero exit status (A) |
 | No placeholder implementations that appear operational | **COMPLIANT** | Incomplete items are labelled `NOT IMPLEMENTED` in the documentation; `PandaPowerOpenDSSInterfaceStub` is named as a stub (D) |
@@ -321,7 +320,9 @@ in `linux-libc-dev`, the Kerberos chain, the ncurses and Perl trees and the
 whole GCC and binutils toolchain. The runtime layer now carries none of them,
 runs `apt-get upgrade` so that the newest published distribution patches are
 applied, and ships no package installer: the `pip` and `wheel` distributions
-are removed from the virtual environment once the dependencies are in place.
+are removed from the virtual environment once the dependencies are in place,
+and the base image's own `pip` is removed as well, so neither interpreter in
+the image can install anything at run time.
 
 The residual 53 high-severity findings are 13 advisory identifiers across 21
 packages that the Debian trixie base image necessarily contains, and a scan of
@@ -354,7 +355,11 @@ every environment — ruff 0.17.6, mypy 2.4.1, pytest 9.2.0, pytest-asyncio
 1.5.0, pytest-cov 7.1.0, types-PyYAML 6.0.12.20261122, pip-audit 2.10.1 and
 hypothesis 6.170.17 — while the *runtime* ranges resolved differently (FastAPI
 0.165 and bcrypt 5.0 on the clean environments, 0.118 and 4.x on the
-development machine), which is the finding F-02 measures.
+development machine). That divergence was the finding F-02 measured, and it
+is now closed: the runtime dependencies are resolved once, into
+`backend/requirements.lock`, and every job installs that lock with
+`--require-hashes`, so all three interpreters now run against the same
+versions.
 
 ---
 
@@ -377,24 +382,67 @@ configured.
 *Action.* Add component tests for the views, then a Playwright suite for the
 login → overview → setpoint path. Raise the floor as the suite grows.
 
-### F-02 — HIGH — The Python runtime dependency ranges are not pinned
+### F-02 — HIGH — RESOLVED — The Python runtime dependencies are pinned and hash-verified
 
-`backend/requirements.txt` declares every runtime dependency with `>=`.
-Two builds of the same commit can resolve to different versions, and
-`pip-audit` audits the *ranges* rather than one exact build.
+`backend/requirements.txt` declares every runtime dependency with `>=`. That
+file is what a human maintains: it says which major version the project is
+written against. The **resolution** of those declarations is
+`backend/requirements.lock`, which was generated with `pip-compile
+--generate-hashes` and commits, for all 35 packages including the transitive
+ones, one exact version and the SHA-256 hash of every distribution of that
+version.
 
-The **CI toolchain** is now pinned to exact versions in
-`backend/requirements-ci.txt`, so the linters, the type checker and the test
-runner are the same in every run. The **runtime** dependencies are not.
+The container image and every workflow install the lock with
+`pip install --require-hashes`, so a build either reproduces the recorded
+artefact exactly or fails. The lock was verified to install cleanly and to
+pass the whole suite on **Python 3.12, 3.13 and 3.14**.
 
-*Impact.* A release is not byte-for-byte reproducible, and a newly published
-upstream version can change a release build without a commit. The effect was
-observed during this audit: the same source tree resolved to FastAPI 0.165 and
-bcrypt 5.0 on a clean Python 3.12 environment, against 0.118 and 4.x on the
-machine it had been developed on. The suite passed against both, which is
-reassuring but is not the same as being pinned.
-*Action.* Generate and commit a lock file with `pip-compile --generate-hashes`
-and install with `pip install --require-hashes` in the release job.
+**The deployed image carries only the packages of the lock.** Python 3.12 no
+longer installs `setuptools` into a fresh virtual environment and nothing in
+the service needs it. The build tool used to install the dependencies is
+removed again afterwards, together with the dependency it drags in — the wheel
+builder requires `packaging`, and removing the builder alone leaves that
+dependency in the environment. The base image's own `pip` is removed as well,
+so the shipped image carries no package installer at all.
+
+That is a claim, and it is checked rather than left to the reading of an
+uninstall chain. `scripts/verify_locked_environment.py` compares the
+distributions that are actually installed against the packages the lock pins.
+The container build runs it in **strict** mode, in which the installed set
+must be exactly the locked set, so an image carrying a package that no hash
+covers **fails to build** instead of being published. The pipeline runs it in
+the default mode, which asserts that the CI toolchain install did not quietly
+replace a runtime package with another version — precisely the substitution a
+range-based install would perform silently. The script uses the standard
+library only, because it has to run inside the image, whose virtual
+environment carries nothing but the packages of the lock.
+
+The rebuilt image was measured to hold **exactly 35 packages**, one per lock
+entry, and the container smoke test asserts that no interpreter in the running
+image can find a package installer.
+
+`pip-audit` now audits the lock rather than the declared ranges, so it reports
+on the versions that are actually installed and shipped rather than on the
+newest version each range would resolve to.
+
+**The lock cannot drift.** `scripts/check_dependency_lock.py` compares the
+lock against the declarations and reports a declared requirement that is
+missing from the lock, a locked version that no longer satisfies its declared
+range, a locked entry without a hash, a locked entry that no declared
+requirement reaches, and a dependency edge that names a package the lock does
+not contain. The pipeline runs it and the test suite exercises it.
+
+*Residual.* The lock is a snapshot: a newly published upstream release enters
+it only when somebody regenerates it, which is the intended behaviour but
+means the lock ages until it is regenerated. It was resolved on Python 3.12
+and is installed with `--require-hashes` on 3.12, 3.13 and 3.14; a package
+that publishes no wheel for a future interpreter would be built from its
+source distribution, which the hash check still enforces. The CI toolchain
+remains pinned by exact version in `backend/requirements-ci.txt` without
+hashes, which is acceptable because it is build tooling and never enters a
+deployed artefact. The strict environment check covers the *installed set*; it
+does not by itself prove that every artefact in the lock came from the
+upstream publisher, because a hash proves integrity rather than provenance.
 
 ### F-03 — MEDIUM — The ORM models are not compared against the migrations
 
@@ -486,7 +534,7 @@ secret and credential scan, and CodeQL.
 
 *Residual.* A green run means that no gate failed; it does not mean that the
 gates cover every possible defect. The coverage gaps that remain are recorded
-separately as F-01, F-02, F-03, F-04, F-05 and F-11, and none of them is
+separately as F-01, F-03, F-04, F-05 and F-11, and none of them is
 closed by this run.
 
 ### F-08 — LOW — A module-level simulation entry point remains
@@ -605,19 +653,16 @@ files, was green across every job.
 
 ### 11.2 Recommended actions, in order
 
-1. **Pin the Python runtime dependencies with hashes** (F-02). The CI toolchain
-   is pinned; the runtime dependencies are not. This is the single remaining
-   change that most improves the reproducibility of a release.
-2. **Close the migration-metadata gap** (F-03). Add `target_metadata` and an
+1. **Close the migration-metadata gap** (F-03). Add `target_metadata` and an
    ephemeral PostgreSQL service to the release job, then restore
    `alembic check`.
-3. **Build the frontend test suite** (F-01) and the Playwright end-to-end
+2. **Build the frontend test suite** (F-01) and the Playwright end-to-end
    path (F-05), then raise the enforced floor as the suite grows.
-4. **Apply the branch protection** (F-04). An administrator action, using the
+3. **Apply the branch protection** (F-04). An administrator action, using the
    documented check names.
-5. **Schedule the roadmap items** (F-06) explicitly, and keep them marked
+4. **Schedule the roadmap items** (F-06) explicitly, and keep them marked
    `NOT_IMPLEMENTED` until they exist.
-6. **Close the low-severity items** (F-08, F-09, F-10, F-11) as part of the
+5. **Close the low-severity items** (F-08, F-09, F-10, F-11) as part of the
    next maintenance pass.
 
 ---
