@@ -74,9 +74,11 @@ class GenericBMSModel:
         self,
         equipment_id: str = "BMS_MASTER_01",
         limits: BMSProtectionLimits | None = None,
+        is_illustrative: bool = True,
     ) -> None:
         self.equipment_id: str = equipment_id
         self.equipment_type: EquipmentType = EquipmentType.BMS
+        self.is_illustrative: bool = is_illustrative
         self.limits: BMSProtectionLimits = limits if limits is not None else BMSProtectionLimits()
 
         self.operating_state: OperatingState = OperatingState.STANDBY
@@ -273,7 +275,9 @@ class GenericBMSModel:
             equipment_id=self.equipment_id,
             equipment_type=self.equipment_type,
             metadata=EquipmentMetadata(
-                manufacturer="Generic BESS", model_name="Master BMS Controller V1"
+                manufacturer="Generic BESS",
+                model_name="Master BMS Controller V1",
+                is_illustrative=self.is_illustrative,
             ),
             operating_state=self.operating_state,
             is_available=self.is_available,

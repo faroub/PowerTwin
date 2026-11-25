@@ -90,9 +90,11 @@ class GenericGridModel:
         self,
         equipment_id: str = "GRID_MODEL_01",
         config: GridConfigModel | None = None,
+        is_illustrative: bool = True,
     ) -> None:
         self.equipment_id: str = equipment_id
         self.equipment_type: EquipmentType = EquipmentType.GRID_MODEL
+        self.is_illustrative: bool = is_illustrative
         self.config: GridConfigModel = config if config is not None else GridConfigModel()
 
         self.frequency_hz: float = self.config.nominal_frequency_hz
@@ -215,7 +217,9 @@ class GenericGridModel:
             equipment_id=self.equipment_id,
             equipment_type=self.equipment_type,
             metadata=EquipmentMetadata(
-                manufacturer="Generic BESS", model_name="Synthetic Grid Node"
+                manufacturer="Generic BESS",
+                model_name="Synthetic Grid Node",
+                is_illustrative=self.is_illustrative,
             ),
             operating_state=op_state,
             is_available=self.is_available,

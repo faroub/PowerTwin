@@ -69,9 +69,11 @@ class GenericTransformerModel:
         self,
         equipment_id: str = "XFRM_01",
         config: TransformerConfigModel | None = None,
+        is_illustrative: bool = True,
     ) -> None:
         self.equipment_id: str = equipment_id
         self.equipment_type: EquipmentType = EquipmentType.TRANSFORMER
+        self.is_illustrative: bool = is_illustrative
         self.config: TransformerConfigModel = (
             config if config is not None else TransformerConfigModel()
         )
@@ -168,7 +170,9 @@ class GenericTransformerModel:
             equipment_id=self.equipment_id,
             equipment_type=self.equipment_type,
             metadata=EquipmentMetadata(
-                manufacturer="Generic BESS", model_name="Step-Up Transformer 10MVA"
+                manufacturer="Generic BESS",
+                model_name="Step-Up Transformer 10MVA",
+                is_illustrative=self.is_illustrative,
             ),
             operating_state=self.operating_state,
             is_available=self.is_available,
