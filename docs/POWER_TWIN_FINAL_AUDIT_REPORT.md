@@ -133,13 +133,12 @@ verified fact:
 | 11 | Never silently fall back between a real and a simulated device | **COMPLIANT** | The gateway has a single, explicit mode; there is no fallback path in `backend/app/communication/` (C) |
 | 12 | Never expose writable control interfaces to an untrusted network | **COMPLIANT** | Production startup rejects a non-loopback `HOST`; Modbus writes are refused on a non-loopback gateway host; RBAC denies by default (C) |
 | 13 | No manufacturer-accuracy claim without validation | **COMPLIANT** | No such claim is made in code or documentation; plugin data is labelled as public-datasheet-derived and illustrative (D) |
-| 14 | Illustrative parameters clearly labelled | **PARTIAL** | The reference topology and plugin datasheets are labelled as illustrative in the documentation, but the labelling is **not** enforced by a test or a schema marker. Recorded as finding **F-10** (D) |
+| 14 | Illustrative parameters clearly labelled | **COMPLIANT** | `illustrative: bool` on every topology configuration model, defaulting to `True` and refusing an under-labelled plant (`backend/app/topology/schema.py`); carried into the runtime `EquipmentMetadata.is_illustrative` by the plant factory; stated explicitly by both shipped example configurations and asserted by `tests/test_illustrative_parameters.py` (C) |
 
-**Safety conclusion.** Twelve of the fourteen rules are fully met. The two
-partial ones are audit-trail depth and the mechanical enforcement of
-illustrative-parameter labelling — both are documentation and tooling gaps,
-neither is a hazard to real equipment, and neither can expose a physical
-system because no physical system is reachable.
+**Safety conclusion.** Thirteen of the fourteen rules are fully met. The one
+partial rule is the depth of the audit trail — a documentation and tooling
+gap, not a hazard to real equipment, and it cannot expose a physical system
+because no physical system is reachable.
 
 ---
 
@@ -608,15 +607,42 @@ separate, append-only operator-action journal.
 used for warranty or dispute resolution, which is the use case that motivates
 `AGENTS.md` §1's warranty analysis.
 
-### F-10 — LOW — Illustrative parameters are labelled in prose, not in the schema
+### F-10 — LOW — RESOLVED — The illustrative parameters carry a schema marker and a test
 
 `AGENTS.md` §2.14 requires illustrative parameters to be clearly labelled.
-The reference topology and the plugin datasheets are labelled in the
-documentation, but no schema field or test enforces it.
+The reference topology and the plugin datasheets were labelled in the
+documentation, but no schema field or test enforced it.
 
-*Action.* Add an `illustrative: bool` marker to the equipment configuration
-models, and a test that asserts every shipped example configuration is
-marked.
+The label is now part of the schema. `backend/app/topology/schema.py` defines
+`IllustrativeConfigModel`, which every equipment configuration model and the
+root `PlantTopologyConfig` inherit. Each carries an `illustrative: bool` field
+that **defaults to `True`**, so a parameter set that forgets to state its
+status is labelled rather than silently unlabelled: under-labelling is the
+dangerous direction.
+
+The plant-level marker follows the items. `PlantTopologyConfig` derives it
+from the equipment markers when the author did not state it, and it **refuses
+a configuration that claims to be validated while one of its items is
+illustrative** — the contradiction that would under-label a plant is rejected
+at parse time rather than accepted and forgotten.
+
+The marker travels into the runtime. The plant factory passes it to every
+equipment it builds, so the `EquipmentMetadata.is_illustrative` of the
+batteries, the BMS units, the PCS units, the transformers, the switchgear,
+the meters, the POI and the grid model reports the label the configuration
+gave it. The historian already persists that field.
+
+Both shipped example configurations now state the marker explicitly on the
+plant and on every one of their items, and `tests/test_illustrative_parameters.py`
+(12 tests) asserts that they do, that the default labels, that the plant-level
+marker is derived and reconciled, and that the factory carries the marker into
+the runtime equipment.
+
+*Residual limitation.* The HMI has no topology-configuration API yet, so the
+marker is not shown to the operator on screen. The label reaches the
+configuration file, the runtime equipment metadata, the historian and the
+build log; presenting it in the HMI is recorded in
+`docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.10.
 
 ### F-11 — LOW — The line length differs between two areas of the repository
 
@@ -717,7 +743,10 @@ files, was green across every job.
 4. **Schedule the roadmap items** (F-06) explicitly, and keep them marked
    `NOT_IMPLEMENTED` until they exist.
 5. **Close the low-severity items** (F-08, F-09, F-10, F-11) as part of the
-   next maintenance pass.
+   next maintenance pass. ~~F-10 is closed: the illustrative parameters carry
+   a schema marker that defaults to labelling, the plant factory carries it
+   into the runtime equipment, and a test asserts that every shipped example
+   configuration states it.~~
 
 ---
 

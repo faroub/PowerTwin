@@ -141,3 +141,15 @@ class Measurement(BaseModel):
 
 ### 3.3 Configuration-Driven Plant Topology
 Plant layouts, equipment counts, container groupings, and transformer specifications are defined entirely via declarative YAML/JSON configuration files validated against Pydantic schemas. Zero plant topologies are hardcoded into model source code.
+
+**The illustrative marker.** Every topology configuration model in `backend/app/topology/schema.py` inherits `IllustrativeConfigModel`, which carries an `illustrative: bool` field. The field **defaults to `True`**, so a parameter set that does not state its status is labelled rather than silently unlabelled — under-labelling is the dangerous direction, and `AGENTS.md` §2.14 requires illustrative parameters to be clearly labelled.
+
+The marker exists at three levels:
+
+| Level | Field | Meaning |
+| :--- | :--- | :--- |
+| Equipment item | `illustrative` on each container, PCS, transformer, switchgear, auxiliary, meter, POI, grid, controller and grid-service configuration | The parameters of that item are representative values, not validated data |
+| Plant | `illustrative` on `PlantTopologyConfig` | The plant contains illustrative parameters |
+| Runtime | `EquipmentMetadata.is_illustrative` on every equipment model | The label the configuration gave, carried into the reported equipment state and persisted by the historian |
+
+The plant-level marker is **derived** from the items when the author does not state it, and the schema **refuses** a configuration that declares the plant validated while one of its items is illustrative: that contradiction would under-label the plant, so it is rejected at parse time. The plant factory (`backend/app/topology/factory.py`) passes the marker to every equipment it builds, and both shipped example configurations state it explicitly. `tests/test_illustrative_parameters.py` asserts all of that.

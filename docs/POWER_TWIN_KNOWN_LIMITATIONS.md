@@ -301,11 +301,22 @@ historian and the structured logs, which satisfies `AGENTS.md` §2.10 for the
 simulated platform. There is no separate, append-only, tamper-evident operator
 action journal. A warranty or dispute-resolution use case would require one.
 
-### 4.10 Illustrative Parameters Are Labelled in Prose Only
+### 4.10 The Illustrative Label Does Not Yet Reach the Operator's Screen
 
-`AGENTS.md` §2.14 requires illustrative parameters to be clearly labelled.
-The reference topology and the plugin datasheets are labelled in the
-documentation, but no schema field and no test enforce the labelling.
+`AGENTS.md` §2.14 requires illustrative parameters to be clearly labelled. The
+label is now carried by the data rather than by prose alone: every topology
+configuration model has an `illustrative: bool` field that defaults to `True`,
+the plant-level marker is derived from the items and refuses an under-labelled
+plant, the plant factory carries the marker into the runtime
+`EquipmentMetadata.is_illustrative` of every equipment it builds, and both
+shipped example configurations state it explicitly.
+`tests/test_illustrative_parameters.py` asserts all of that.
+
+What is still missing is the last step: the HMI has no topology-configuration
+API, so the operator does not see the marker on screen. The label reaches the
+configuration file, the runtime equipment metadata, the historian and the
+build log, but a viewer of the HMI is told the data is *simulated* without
+being told that the *parameters* are illustrative.
 
 ### 4.11 The Base Image Carries Upstream Advisories That Debian Has Not Fixed
 
