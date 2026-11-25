@@ -5,9 +5,12 @@ plant_id: "VARIANT_PLANT_50MW_200MWH"
 name: "PowerTwin Utility 50 MW / 200 MWh Multi-Vendor BESS Plant"
 rated_power_w: 50000000.0        # 50 MW
 rated_energy_wh: 200000000.0     # 200 MWh
+illustrative: true                 # Illustrative parameters: not validated
+                                  # against authoritative documentation or test data.
 
 containers:
   - container_id: "CONTAINER_A01"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Vendor A Cell Systems"
     capacity_wh: 20000000.0      # 20 MWh
@@ -16,6 +19,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_A02"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Vendor A Cell Systems"
     capacity_wh: 20000000.0
@@ -24,6 +28,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_B01"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Vendor B Cell Systems"
     capacity_wh: 20000000.0
@@ -32,6 +37,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_B02"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Vendor B Cell Systems"
     capacity_wh: 20000000.0
@@ -40,6 +46,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_B03"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Vendor B Cell Systems"
     capacity_wh: 20000000.0
@@ -48,6 +55,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_B04"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Vendor B Cell Systems"
     capacity_wh: 20000000.0
@@ -56,6 +64,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_B05"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Vendor B Cell Systems"
     capacity_wh: 20000000.0
@@ -64,6 +73,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_B06"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Vendor B Cell Systems"
     capacity_wh: 20000000.0
@@ -72,6 +82,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_B07"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Vendor B Cell Systems"
     capacity_wh: 20000000.0
@@ -80,6 +91,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_B08"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Vendor B Cell Systems"
     capacity_wh: 20000000.0
@@ -89,6 +101,7 @@ containers:
 
 pcs_units:
   - pcs_id: "PCS_01"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Inverter Vendor Alpha"
     rated_active_power_w: 5000000.0    # 5.0 MW
@@ -96,6 +109,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_02"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Inverter Vendor Alpha"
     rated_active_power_w: 5000000.0
@@ -103,6 +117,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_03"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Inverter Vendor Alpha"
     rated_active_power_w: 5000000.0
@@ -110,6 +125,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_04"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Inverter Vendor Alpha"
     rated_active_power_w: 5000000.0
@@ -117,6 +133,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_05"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Inverter Vendor Alpha"
     rated_active_power_w: 5000000.0
@@ -124,6 +141,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_06"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Inverter Vendor Beta"
     rated_active_power_w: 5000000.0
@@ -131,6 +149,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_07"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Inverter Vendor Beta"
     rated_active_power_w: 5000000.0
@@ -138,6 +157,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_08"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Inverter Vendor Beta"
     rated_active_power_w: 5000000.0
@@ -145,6 +165,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_09"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Inverter Vendor Beta"
     rated_active_power_w: 5000000.0
@@ -152,6 +173,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_10"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Inverter Vendor Beta"
     rated_active_power_w: 5000000.0
@@ -160,37 +182,44 @@ pcs_units:
 
 transformers:
   - transformer_id: "XFRM_01"
+    illustrative: true
     rating_va: 30000000.0        # 30 MVA
     primary_voltage_v: 690.0
     secondary_voltage_v: 13800.0
 
   - transformer_id: "XFRM_02"
+    illustrative: true
     rating_va: 30000000.0        # 30 MVA
     primary_voltage_v: 690.0
     secondary_voltage_v: 13800.0
 
 switchgear:
   - switchgear_id: "SWG_01"
+    illustrative: true
     rated_voltage_v: 13800.0
     rated_current_a: 3000.0
 
 auxiliary_systems:
   - aux_id: "AUX_01"
+    illustrative: true
     plugin_id: "dummy_auxiliary_v1"
     aux_base_power_w: 50000.0
 
 meters:
   - meter_id: "MTR_POI_01"
+    illustrative: true
     nominal_voltage_v: 13800.0
 
 poi:
   poi_id: "POI_01"
+  illustrative: true
   nominal_voltage_v: 13800.0
   max_export_power_w: 50000000.0 # 50 MW
   max_import_power_w: 50000000.0 # 50 MW
 
 grid:
   grid_id: "GRID_60HZ_01"
+  illustrative: true
   plugin_id: "dummy_grid_v1"
   nominal_frequency_hz: 60.0     # 60 Hz Nominal
   nominal_voltage_v: 13800.0
@@ -198,5 +227,6 @@ grid:
 
 ppc:
   ppc_id: "PPC_50MW_01"
+  illustrative: true
   plant_rated_active_power_w: 50000000.0
   plant_rated_apparent_power_va: 55000000.0

@@ -31,6 +31,18 @@ PowerTwin enforces a comprehensive testing strategy combining unit tests, integr
 - Focuses on individual model equations, equivalent circuit calculations, Pydantic configuration schemas, and controller state machines.
 - Target: $>85\%$ line coverage across all backend modules.
 
+**Current state.** The suite is 400 tests, and the enforced coverage policy
+(`scripts/check_coverage.py`) sets a per-domain floor of 80 % lines / 60 %
+branches globally, with tighter floors on the battery, PCS, controller,
+topology and plugin domains. The policy is enforced by the pipeline, not by
+convention. `tests/test_illustrative_parameters.py` holds the labelling of
+illustrative parameters (`AGENTS.md` §2.14): it asserts that both shipped
+example configurations state the `illustrative` marker on the plant and on
+every one of their items, that an unstated marker labels rather than stays
+silent, that a plant claiming to be validated while one of its items is
+illustrative is refused, and that the plant factory carries the marker into
+the runtime equipment metadata.
+
 ### 2.2 Deterministic Replay & Numerical Stability Verification
 - Automated test suites run 100,000 continuous simulation ticks with fixed random seeds.
 - Verifies bit-exact output matching against pre-recorded golden telemetry baseline files.

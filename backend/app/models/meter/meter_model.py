@@ -59,9 +59,11 @@ class GenericMeterModel:
         self,
         equipment_id: str = "METER_POI_01",
         config: MeterConfigModel | None = None,
+        is_illustrative: bool = True,
     ) -> None:
         self.equipment_id: str = equipment_id
         self.equipment_type: EquipmentType = EquipmentType.METER
+        self.is_illustrative: bool = is_illustrative
         self.config: MeterConfigModel = config if config is not None else MeterConfigModel()
 
         self.active_power_w: float = 0.0
@@ -143,7 +145,9 @@ class GenericMeterModel:
             equipment_id=self.equipment_id,
             equipment_type=self.equipment_type,
             metadata=EquipmentMetadata(
-                manufacturer="Generic BESS", model_name="POI Revenue Meter Class 0.2"
+                manufacturer="Generic BESS",
+                model_name="POI Revenue Meter Class 0.2",
+                is_illustrative=self.is_illustrative,
             ),
             operating_state=self.operating_state,
             is_available=self.is_available,

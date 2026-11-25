@@ -40,9 +40,11 @@ class GenericSwitchgearModel:
         self,
         equipment_id: str = "SWG_01",
         config: SwitchgearConfigModel | None = None,
+        is_illustrative: bool = True,
     ) -> None:
         self.equipment_id: str = equipment_id
         self.equipment_type: EquipmentType = EquipmentType.SWITCHGEAR
+        self.is_illustrative: bool = is_illustrative
         self.config: SwitchgearConfigModel = (
             config if config is not None else SwitchgearConfigModel()
         )
@@ -129,7 +131,9 @@ class GenericSwitchgearModel:
             equipment_id=self.equipment_id,
             equipment_type=self.equipment_type,
             metadata=EquipmentMetadata(
-                manufacturer="Generic BESS", model_name="MV Vacuum Circuit Breaker 13.8kV"
+                manufacturer="Generic BESS",
+                model_name="MV Vacuum Circuit Breaker 13.8kV",
+                is_illustrative=self.is_illustrative,
             ),
             operating_state=self.operating_state,
             is_available=self.is_available,

@@ -2,10 +2,38 @@
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
-class ContainerConfig(BaseModel):
+class IllustrativeConfigModel(BaseModel):
+    """Base for configuration models that declare whether their values are illustrative.
+
+    `AGENTS.md` §2.14 requires illustrative parameters to be clearly labelled.
+    The marker is part of the schema so the label travels with the data and can
+    be asserted by a test, rather than living only in prose.
+
+    The default is `True`. A parameter set is treated as illustrative unless it
+    is explicitly declared to have been validated against authoritative
+    documentation or test data: under-labelling is the dangerous direction, so
+    the default errs towards labelling.
+
+    The runtime counterpart of this field is
+    `backend.app.equipment.models.EquipmentMetadata.is_illustrative`, which the
+    plant factory populates from the configuration.
+    """
+
+    illustrative: bool = Field(
+        default=True,
+        description=(
+            "True when these parameters are illustrative: representative values "
+            "chosen for demonstration and not validated against authoritative "
+            "documentation or test data. Set to False only for a parameter set "
+            "that was validated against a datasheet or a test campaign."
+        ),
+    )
+
+
+class ContainerConfig(IllustrativeConfigModel):
     """Battery Container topology specification."""
 
     container_id: str = Field(description="Unique container ID e.g. 'CONTAINER_01'")
@@ -17,7 +45,7 @@ class ContainerConfig(BaseModel):
     initial_soc_pct: float = Field(default=50.0)
 
 
-class PCSUnitConfig(BaseModel):
+class PCSUnitConfig(IllustrativeConfigModel):
     """PCS Inverter topology specification."""
 
     pcs_id: str = Field(description="Unique PCS ID e.g. 'PCS_01'")
@@ -30,7 +58,7 @@ class PCSUnitConfig(BaseModel):
     dc_voltage_max_v: float = Field(default=1200.0)
 
 
-class TransformerTopologyConfig(BaseModel):
+class TransformerTopologyConfig(IllustrativeConfigModel):
     """Step-Up Transformer topology specification."""
 
     transformer_id: str = Field(default="XFRM_01")
@@ -39,7 +67,7 @@ class TransformerTopologyConfig(BaseModel):
     secondary_voltage_v: float = Field(default=13800.0)
 
 
-class SwitchgearTopologyConfig(BaseModel):
+class SwitchgearTopologyConfig(IllustrativeConfigModel):
     """MV Switchgear topology specification."""
 
     switchgear_id: str = Field(default="SWG_01")
@@ -47,7 +75,7 @@ class SwitchgearTopologyConfig(BaseModel):
     rated_current_a: float = Field(default=2000.0)
 
 
-class AuxiliaryTopologyConfig(BaseModel):
+class AuxiliaryTopologyConfig(IllustrativeConfigModel):
     """Auxiliary Systems topology specification."""
 
     aux_id: str = Field(default="AUX_01")
@@ -55,14 +83,14 @@ class AuxiliaryTopologyConfig(BaseModel):
     aux_base_power_w: float = Field(default=10000.0)
 
 
-class MeterTopologyConfig(BaseModel):
+class MeterTopologyConfig(IllustrativeConfigModel):
     """Power Meter topology specification."""
 
     meter_id: str = Field(default="METER_01")
     nominal_voltage_v: float = Field(default=13800.0)
 
 
-class POITopologyConfig(BaseModel):
+class POITopologyConfig(IllustrativeConfigModel):
     """Point of Interconnection (POI) topology specification."""
 
     poi_id: str = Field(default="POI_METER_01")
@@ -71,7 +99,7 @@ class POITopologyConfig(BaseModel):
     max_import_power_w: float = Field(description="Max import power limit (-W)")
 
 
-class GridTopologyConfig(BaseModel):
+class GridTopologyConfig(IllustrativeConfigModel):
     """Synthetic Grid Model topology specification."""
 
     grid_id: str = Field(default="GRID_MODEL_01")
@@ -81,14 +109,14 @@ class GridTopologyConfig(BaseModel):
     short_circuit_mva: float = Field(default=500.0)
 
 
-class EquipmentControllerTopologyConfig(BaseModel):
+class EquipmentControllerTopologyConfig(IllustrativeConfigModel):
     """Layer A Equipment Controller configuration."""
 
     controller_id: str = Field(default="EQ_CTRL_01")
     max_container_temp_c: float = Field(default=45.0)
 
 
-class PPCTopologyConfig(BaseModel):
+class PPCTopologyConfig(IllustrativeConfigModel):
     """Layer B PPC configuration."""
 
     ppc_id: str = Field(default="PPC_01")
@@ -96,7 +124,7 @@ class PPCTopologyConfig(BaseModel):
     plant_rated_apparent_power_va: float = Field(description="Max plant apparent power")
 
 
-class EMSTopologyConfig(BaseModel):
+class EMSTopologyConfig(IllustrativeConfigModel):
     """Layer C EMS configuration."""
 
     ems_id: str = Field(default="EMS_01")
@@ -104,14 +132,14 @@ class EMSTopologyConfig(BaseModel):
     target_soc_pct: float = Field(default=50.0)
 
 
-class GridServiceTopologyConfig(BaseModel):
+class GridServiceTopologyConfig(IllustrativeConfigModel):
     """Grid Service configuration."""
 
     service_id: str = Field(default="GRID_SVC_01")
     service_type: str = Field(default="FREQUENCY_RESPONSE")
 
 
-class PlantTopologyConfig(BaseModel):
+class PlantTopologyConfig(IllustrativeConfigModel):
     """Root BESS Plant Topology declarative configuration schema."""
 
     plant_id: str = Field(default="POWER_TWIN_PLANT_01")
@@ -133,3 +161,42 @@ class PlantTopologyConfig(BaseModel):
     ems: EMSTopologyConfig = Field(default_factory=EMSTopologyConfig)
     grid_services: list[GridServiceTopologyConfig] = Field(default_factory=list)
     custom_metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _reconcile_illustrative_marker(self) -> "PlantTopologyConfig":
+        """Derive the plant-level marker, and refuse an under-labelled plant.
+
+        The plant-level marker means "this plant contains illustrative
+        parameters". It is derived from the equipment markers when the author
+        did not state it, and it may never contradict them: a plant whose root
+        claims to be validated while one of its items is illustrative would
+        under-label the plant, which is exactly what `AGENTS.md` §2.14
+        forbids.
+        """
+        item_markers: list[bool] = [
+            *(c.illustrative for c in self.containers),
+            *(p.illustrative for p in self.pcs_units),
+            *(t.illustrative for t in self.transformers),
+            *(s.illustrative for s in self.switchgear),
+            *(a.illustrative for a in self.auxiliary_systems),
+            *(m.illustrative for m in self.meters),
+            self.poi.illustrative,
+            self.grid.illustrative,
+            self.equipment_controller.illustrative,
+            self.ppc.illustrative,
+            self.ems.illustrative,
+            *(g.illustrative for g in self.grid_services),
+        ]
+        contains_illustrative = any(item_markers)
+
+        if contains_illustrative and not self.illustrative:
+            raise ValueError(
+                "The plant declares illustrative='false' but at least one of its "
+                "items is marked illustrative. A plant that contains illustrative "
+                "parameters must be labelled as illustrative at plant level too."
+            )
+
+        if not contains_illustrative and "illustrative" not in self.model_fields_set:
+            # Every item was explicitly marked as validated, so the plant is too.
+            self.illustrative = False
+        return self

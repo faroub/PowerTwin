@@ -5,9 +5,12 @@ plant_id: "REF_PLANT_10MW_20MWH"
 name: "PowerTwin Reference 10 MW / 20 MWh BESS Plant"
 rated_power_w: 10000000.0        # 10 MW
 rated_energy_wh: 20000000.0      # 20 MWh
+illustrative: true                 # Illustrative parameters: not validated
+                                  # against authoritative documentation or test data.
 
 containers:
   - container_id: "CONTAINER_01"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Reference Cell Co"
     capacity_wh: 5000000.0       # 5 MWh
@@ -16,6 +19,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_02"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Reference Cell Co"
     capacity_wh: 5000000.0       # 5 MWh
@@ -24,6 +28,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_03"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Reference Cell Co"
     capacity_wh: 5000000.0       # 5 MWh
@@ -32,6 +37,7 @@ containers:
     initial_soc_pct: 50.0
 
   - container_id: "CONTAINER_04"
+    illustrative: true
     plugin_id: "generic_battery_v1"
     vendor: "Reference Cell Co"
     capacity_wh: 5000000.0       # 5 MWh
@@ -41,6 +47,7 @@ containers:
 
 pcs_units:
   - pcs_id: "PCS_01"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Reference Inverter Co"
     rated_active_power_w: 2500000.0    # 2.5 MW
@@ -48,6 +55,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_02"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Reference Inverter Co"
     rated_active_power_w: 2500000.0    # 2.5 MW
@@ -55,6 +63,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_03"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Reference Inverter Co"
     rated_active_power_w: 2500000.0    # 2.5 MW
@@ -62,6 +71,7 @@ pcs_units:
     ac_voltage_v: 690.0
 
   - pcs_id: "PCS_04"
+    illustrative: true
     plugin_id: "generic_pcs_v1"
     vendor: "Reference Inverter Co"
     rated_active_power_w: 2500000.0    # 2.5 MW
@@ -70,32 +80,38 @@ pcs_units:
 
 transformers:
   - transformer_id: "XFRM_MAIN_01"
+    illustrative: true
     rating_va: 11000000.0        # 11 MVA (Covers 4 * 2.75 MVA PCS)
     primary_voltage_v: 690.0
     secondary_voltage_v: 13800.0
 
 switchgear:
   - switchgear_id: "SWG_MAIN_01"
+    illustrative: true
     rated_voltage_v: 13800.0
     rated_current_a: 2000.0
 
 auxiliary_systems:
   - aux_id: "AUX_SYS_01"
+    illustrative: true
     plugin_id: "dummy_auxiliary_v1"
     aux_base_power_w: 10000.0
 
 meters:
   - meter_id: "MTR_POI_01"
+    illustrative: true
     nominal_voltage_v: 13800.0
 
 poi:
   poi_id: "POI_01"
+  illustrative: true
   nominal_voltage_v: 13800.0
   max_export_power_w: 10000000.0 # 10 MW POI limit
   max_import_power_w: 10000000.0 # 10 MW POI limit
 
 grid:
   grid_id: "GRID_50HZ_01"
+  illustrative: true
   plugin_id: "dummy_grid_v1"
   nominal_frequency_hz: 50.0     # 50 Hz Nominal
   nominal_voltage_v: 13800.0
@@ -103,5 +119,6 @@ grid:
 
 ppc:
   ppc_id: "PPC_MAIN_01"
+  illustrative: true
   plant_rated_active_power_w: 10000000.0
   plant_rated_apparent_power_va: 11000000.0

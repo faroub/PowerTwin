@@ -112,6 +112,16 @@ class PlantTopologyFactory:
             parsed_config.name,
             parsed_config.plant_id,
         )
+        logger.info(
+            "Plant '%s' parameter set is %s.",
+            parsed_config.plant_id,
+            (
+                "ILLUSTRATIVE - the values are not validated against authoritative "
+                "documentation or test data"
+                if parsed_config.illustrative
+                else "declared as validated against authoritative documentation or test data"
+            ),
+        )
 
         # 2. Wire Simulation Engine Context
         engine_config = (
@@ -148,14 +158,22 @@ class PlantTopologyFactory:
                 bat_model = GenericBatterySystemModel(equipment_id=c.container_id)
 
             bat_model.equipment_id = c.container_id
-            bat_model.metadata = EquipmentMetadata(manufacturer=c.vendor, model_name=c.plugin_id)
+            bat_model.metadata = EquipmentMetadata(
+                manufacturer=c.vendor,
+                model_name=c.plugin_id,
+                is_illustrative=c.illustrative,
+            )
             battery_systems.append(bat_model)
 
             bms_limits = BMSProtectionLimits(
                 max_charge_current_a=15000.0,
                 max_discharge_current_a=15000.0,
             )
-            bms = GenericBMSModel(equipment_id=f"BMS_{c.container_id}", limits=bms_limits)
+            bms = GenericBMSModel(
+                equipment_id=f"BMS_{c.container_id}",
+                limits=bms_limits,
+                is_illustrative=c.illustrative,
+            )
             bms_units.append(bms)
 
         # 4. Instantiate Authoritative PCS Plugins & Models
@@ -183,7 +201,9 @@ class PlantTopologyFactory:
 
             pcs_model.equipment_id = pcs_c.pcs_id
             pcs_model.metadata = EquipmentMetadata(
-                manufacturer=pcs_c.vendor, model_name=pcs_c.plugin_id
+                manufacturer=pcs_c.vendor,
+                model_name=pcs_c.plugin_id,
+                is_illustrative=pcs_c.illustrative,
             )
             pcs_units.append(pcs_model)
 
@@ -196,7 +216,11 @@ class PlantTopologyFactory:
                 secondary_voltage_v=x_c.secondary_voltage_v,
             )
             transformers.append(
-                GenericTransformerModel(equipment_id=x_c.transformer_id, config=x_cfg)
+                GenericTransformerModel(
+                    equipment_id=x_c.transformer_id,
+                    config=x_cfg,
+                    is_illustrative=x_c.illustrative,
+                )
             )
 
         switchgear_list: list[GenericSwitchgearModel] = []
@@ -205,13 +229,23 @@ class PlantTopologyFactory:
                 rated_voltage_v=s_c.rated_voltage_v, rated_current_a=s_c.rated_current_a
             )
             switchgear_list.append(
-                GenericSwitchgearModel(equipment_id=s_c.switchgear_id, config=s_cfg)
+                GenericSwitchgearModel(
+                    equipment_id=s_c.switchgear_id,
+                    config=s_cfg,
+                    is_illustrative=s_c.illustrative,
+                )
             )
 
         meters: list[GenericMeterModel] = []
         for m_c in parsed_config.meters:
             m_cfg = MeterConfigModel(nominal_voltage_v=m_c.nominal_voltage_v)
-            meters.append(GenericMeterModel(equipment_id=m_c.meter_id, config=m_cfg))
+            meters.append(
+                GenericMeterModel(
+                    equipment_id=m_c.meter_id,
+                    config=m_cfg,
+                    is_illustrative=m_c.illustrative,
+                )
+            )
 
         poi = POIModel(
             equipment_id=parsed_config.poi.poi_id,
@@ -220,6 +254,7 @@ class PlantTopologyFactory:
                 max_export_power_w=parsed_config.poi.max_export_power_w,
                 max_import_power_w=parsed_config.poi.max_import_power_w,
             ),
+            is_illustrative=parsed_config.poi.illustrative,
         )
 
         grid = GenericGridModel(
@@ -229,6 +264,7 @@ class PlantTopologyFactory:
                 nominal_voltage_v=parsed_config.grid.nominal_voltage_v,
                 short_circuit_mva=parsed_config.grid.short_circuit_mva,
             ),
+            is_illustrative=parsed_config.grid.illustrative,
         )
 
         # 6. Instantiate Controllers

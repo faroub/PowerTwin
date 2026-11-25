@@ -57,7 +57,7 @@ the pipeline** and is backed by a test, not only by a document.
 | Formatting | `ruff format --check backend plugins tests scripts` | — | Job fails |
 | Linting | `ruff check backend plugins tests scripts`, rule set pinned in `ruff.toml` and `backend/pyproject.toml` | — | Job fails |
 | Type checking | `mypy --config-file backend/pyproject.toml backend plugins scripts` (`strict = true`) | — | Job fails |
-| Unit and integration tests | `pytest` with unraisable exceptions promoted to errors | The suite itself (388 tests) | Job fails |
+| Unit and integration tests | `pytest` with unraisable exceptions promoted to errors | The suite itself (400 tests) | Job fails |
 | Backend coverage policy | `scripts/check_coverage.py coverage.json` | `tests/test_ci_scripts.py` | Job fails |
 | Frontend coverage policy | `frontend/vite.config.ts` thresholds, applied by `npm run test:coverage` | The Vitest suite (151 tests) | Job fails |
 | Frontend type checking | `npm run lint` (`tsc --noEmit`), covering `src/`, `e2e/` and `playwright.config.ts` | — | Job fails |
@@ -95,7 +95,17 @@ the pipeline** and is backed by a test, not only by a document.
 | 1 | Add `target_metadata` to the migrations and restore the ORM-versus-migration comparison | Medium |
 | 2 | Apply the documented branch protection to `main` (administrator action) | Medium |
 | 3 | Implement the energy-market, calibration and warranty roadmap items | Medium |
-| 4 | Close the low-severity items: the module-level simulation entry point, the dedicated operator-action journal, the `illustrative` schema marker, and the line-length unification | Low |
+| 4 | Close the low-severity items: the module-level simulation entry point, the dedicated operator-action journal, and the line-length unification | Low |
+
+**The `illustrative` schema marker of that list is closed.** Every topology
+configuration model now carries an `illustrative: bool` field that defaults to
+`True`, the plant-level marker is derived from the items and refuses an
+under-labelled plant, the plant factory carries the marker into the runtime
+equipment metadata, both shipped example configurations state it explicitly,
+and `tests/test_illustrative_parameters.py` asserts all of that. The label
+does not yet reach the operator's screen, because the HMI has no
+topology-configuration API; that is recorded in
+`docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.10.
 
 **Item 2 of an earlier revision — "Build the frontend component suite and the
 Playwright end-to-end path, then raise the enforced floor" — is closed.** The
