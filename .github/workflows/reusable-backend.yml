@@ -87,8 +87,14 @@ jobs:
           pip install --require-hashes -r backend/requirements.lock
           pip install -r backend/requirements-ci.txt
 
+      # The output is captured so that a failure can be reported as a
+      # check-run annotation. `pipefail` is what keeps the pipeline honest:
+      # without it `tee` would decide the exit status and a failing test
+      # suite would pass the job.
       - name: Run Pytest with Coverage
+        shell: bash
         run: |
+          set -o pipefail
           PYTHONPATH=. pytest \
             --cov=backend/app \
             --cov=plugins \
@@ -96,7 +102,25 @@ jobs:
             --cov-report=xml:coverage.xml \
             --cov-report=json:coverage.json \
             --cov-report=term-missing \
-            -W "error::pytest.PytestUnraisableExceptionWarning"
+            --junitxml=junit.xml \
+            -W "error::pytest.PytestUnraisableExceptionWarning" \
+            2>&1 | tee pytest-output.txt
+
+      # A failing pipeline has to name the test that failed. The job log can
+      # only be downloaded with repository administration rights, so the
+      # failures are turned into check-run annotations, which the API exposes
+      # to everyone who can read the repository.
+      - name: Report the Failed Tests
+        if: always()
+        run: |
+          python scripts/summarize_pytest_failures.py junit.xml
+          {
+            echo "## Backend test report"
+            echo
+            echo '```text'
+            tail -n 100 pytest-output.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Extract Real Coverage Percentage
         id: cov
@@ -160,6 +184,31 @@ jobs:
       - name: Verify the Installed Environment Matches the Lock
         run: python scripts/verify_locked_environment.py --lock backend/requirements.lock
 
+      # The output is captured so that a failure can be reported as a
+      # check-run annotation. `pipefail` is what keeps the pipeline honest:
+      # without it `tee` would decide the exit status and a failing test
+      # suite would pass the job.
       - name: Run Pytest
+        shell: bash
         run: |
-          PYTHONPATH=. pytest -W "error::pytest.PytestUnraisableExceptionWarning"
+          set -o pipefail
+          PYTHONPATH=. pytest \
+            --junitxml=junit.xml \
+            -W "error::pytest.PytestUnraisableExceptionWarning" \
+            2>&1 | tee pytest-output.txt
+
+      # A failing pipeline has to name the test that failed. The job log can
+      # only be downloaded with repository administration rights, so the
+      # failures are turned into check-run annotations, which the API exposes
+      # to everyone who can read the repository.
+      - name: Report the Failed Tests
+        if: always()
+        run: |
+          python scripts/summarize_pytest_failures.py junit.xml
+          {
+            echo "## Backend test report"
+            echo
+            echo '```text'
+            tail -n 100 pytest-output.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

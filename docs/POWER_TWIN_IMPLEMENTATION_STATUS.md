@@ -57,7 +57,7 @@ the pipeline** and is backed by a test, not only by a document.
 | Formatting | `ruff format --check backend plugins tests scripts deployment` | — | Job fails |
 | Linting | `ruff check backend plugins tests scripts deployment`, rule set pinned in `ruff.toml` and `backend/pyproject.toml`, one declared style for the whole repository | `tests/test_tool_configuration.py` | Job fails |
 | Type checking | `mypy --config-file backend/pyproject.toml backend plugins scripts` (`strict = true`) | — | Job fails |
-| Unit and integration tests | `pytest` with unraisable exceptions promoted to errors | The suite itself (452 tests) | Job fails |
+| Unit and integration tests | `pytest` with unraisable exceptions promoted to errors | The suite itself (477 tests) | Job fails |
 | Backend coverage policy | `scripts/check_coverage.py coverage.json` | `tests/test_ci_scripts.py` | Job fails |
 | Frontend coverage policy | `frontend/vite.config.ts` thresholds, applied by `npm run test:coverage` | The Vitest suite (151 tests) | Job fails |
 | Frontend type checking | `npm run lint` (`tsc --noEmit`), covering `src/`, `e2e/` and `playwright.config.ts` | — | Job fails |
@@ -114,6 +114,23 @@ GITHUB_TOKEN=<your-token> python scripts/apply_branch_protection.py
 The repository currently has **no ruleset** — `GET /repos/faroub/PowerTwin/rulesets`
 returns an empty list — and the legacy branch-protection endpoint needs a
 token to read, so the administrator's run is also the verification.
+
+**A failing pipeline now names the test that failed.** The backend jobs
+write a JUnit report and publish it as **check-run annotations**
+(`scripts/summarize_pytest_failures.py`), and the console output is appended
+to the job summary. This matters because the job log can only be downloaded
+with repository administration permission and the artifacts need
+authentication too: without the annotations, a red pipeline told nobody but
+an administrator what had gone wrong. The report is published with
+`if: always()`, so it appears after a failing run as well as after a
+successful one, and the pytest invocation uses `set -o pipefail`, so `tee`
+cannot swallow the exit status of a failing suite. Both properties are
+asserted by `tests/test_ci_scripts.py`.
+
+**The coverage tool is now pinned as well.** `pytest-cov` only states a lower
+bound for `coverage`, the tool that produces the report the coverage policy
+decides on, so the pipeline was resolving it afresh on every run. It is
+pinned in `backend/requirements-ci.txt` like the rest of the toolchain.
 
 **Audit finding F-09 — "the dedicated operator-action journal" — is closed.**
 The platform now has one dedicated, append-only, tamper-evident
