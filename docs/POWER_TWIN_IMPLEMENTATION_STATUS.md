@@ -57,7 +57,7 @@ the pipeline** and is backed by a test, not only by a document.
 | Formatting | `ruff format --check backend plugins tests scripts deployment` | — | Job fails |
 | Linting | `ruff check backend plugins tests scripts deployment`, rule set pinned in `ruff.toml` and `backend/pyproject.toml`, one declared style for the whole repository | `tests/test_tool_configuration.py` | Job fails |
 | Type checking | `mypy --config-file backend/pyproject.toml backend plugins scripts` (`strict = true`) | — | Job fails |
-| Unit and integration tests | `pytest` with unraisable exceptions promoted to errors | The suite itself (400 tests) | Job fails |
+| Unit and integration tests | `pytest` with unraisable exceptions promoted to errors | The suite itself (452 tests) | Job fails |
 | Backend coverage policy | `scripts/check_coverage.py coverage.json` | `tests/test_ci_scripts.py` | Job fails |
 | Frontend coverage policy | `frontend/vite.config.ts` thresholds, applied by `npm run test:coverage` | The Vitest suite (151 tests) | Job fails |
 | Frontend type checking | `npm run lint` (`tsc --noEmit`), covering `src/`, `e2e/` and `playwright.config.ts` | — | Job fails |
@@ -95,10 +95,28 @@ the pipeline** and is backed by a test, not only by a document.
 | :--- | :--- | :--- |
 | 1 | Apply the documented branch protection to `main` (administrator action) | Medium |
 | 2 | Implement the energy-market, calibration and warranty roadmap items | Medium |
-| 3 | Close the low-severity items: the dedicated operator-action journal | Low |
 
-**Item 3 of an earlier revision — "the module-level simulation entry point" —
-is closed.** The runtime is the single write path to the plant and the
+**Audit finding F-09 — "the dedicated operator-action journal" — is closed.**
+The platform now has one dedicated, append-only, tamper-evident
+journal (`backend/app/core/operator_journal.py`): a JSON Lines file that is
+only ever opened in append mode, in which every entry carries the SHA-256
+hash of its predecessor and of its own canonical content. Changing, removing
+or reordering an entry breaks the chain, and `verify()` reports the first
+break. The chain continues across a restart, the journal is process-scoped so
+that two applications cannot write two trails, and it is always on because
+`AGENTS.md` §2.10 requires the record. Commands and setpoint changes,
+configuration changes, authentication events, faults and the operator's own
+actions — including the ones that were refused — all flow through it.
+`tests/test_operator_journal.py` covers the properties a warranty or dispute
+analysis relies on.
+
+The migration environment silenced the application's loggers as a side
+effect — `logging.config.fileConfig` disables every logger that already
+exists — which would have switched off the audit trail without a word. That
+is fixed, and a test fails if it regresses.
+
+**Audit finding F-08 — "the module-level simulation entry point" — is
+closed.** The runtime is the single write path to the plant and the
 engine: a plant is attached with `SimulationRuntime.attach_plant` and
 detached with `SimulationRuntime.drop`, and both module-level
 `set_active_simulation_engine` helpers are gone. The unit tests construct

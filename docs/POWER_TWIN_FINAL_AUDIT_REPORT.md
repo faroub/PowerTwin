@@ -84,12 +84,14 @@ verified fact:
    the installed environment against the lock. What a green run does *not*
    establish is that the gates cover
    every possible defect — the coverage gaps recorded as F-03, F-04 and
-   F-11 are entirely unaffected by it. F-01, F-03, F-05 and F-11 have since
-   been closed: the frontend component suite and the Playwright end-to-end
-   path are enforced pipeline gates, the ORM-versus-migration drift gate runs
-   in the release job, and the whole repository is linted with one declared
-   style. F-04 remains, because branch protection is an administrator action
-   on the repository configuration rather than a change to the code.
+   F-11 are entirely unaffected by it. F-01, F-03, F-05, F-09 and F-11 have
+   since been closed: the frontend component suite and the Playwright
+   end-to-end path are enforced pipeline gates, the ORM-versus-migration
+   drift gate runs in the release job, the platform has a dedicated
+   tamper-evident operator-action journal, and the whole repository is linted
+   with one declared style. F-04 remains, because branch protection is an
+   administrator action on the repository configuration rather than a change
+   to the code.
 2. **The steps were run locally, in the pipeline's own order.** The backend
    gates were executed on the canonical interpreter **Python 3.12** — the
    interpreter the pipeline uses — in a clean virtual environment built from
@@ -132,16 +134,16 @@ verified fact:
 | 7 | No unvalidated software substitute for certified hardware protection | **COMPLIANT** | `docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §2.2 states explicitly that the BMS model is for control-loop testing and replaces no certified hardware (D) |
 | 8 | Reject invalid, stale, out-of-range, contradictory or mistimestamped commands | **COMPLIANT** | BMS command validation, PCS capability-circle clamping, ramp limiters, and the CIL watchdog all reject rather than clamp silently into an unsafe value (C) |
 | 9 | Safe command limits validated at every boundary | **COMPLIANT** | Limits exist in the BMS, the PCS, the controllers and the gateway service, each applied at its own boundary (C) |
-| 10 | All commands, setpoint changes, configuration changes, faults and operator actions audited | **PARTIAL** | Commands and setpoints pass through the gateway service and the historian. The audit trail is the historian plus structured logging; there is **no** dedicated tamper-evident operator-action log, and this is recorded as finding **F-09** (C) |
+| 10 | All commands, setpoint changes, configuration changes, faults and operator actions audited | **COMPLIANT** | Every category flows through the dedicated operator-action journal (`backend/app/core/operator_journal.py`): an append-only, SHA-256 hash-chained JSON Lines trail that is always on, survives a restart, and reports the first break in its chain. Commands and setpoints through `ControlCommandLog`, configuration changes through `ConfigChangeAuditLog`, authentication events through `AuditLog`, faults through `FaultInjectionEngine`, operator actions through the simulation control endpoint — including the refused ones. Finding **F-09** is closed (C) |
 | 11 | Never silently fall back between a real and a simulated device | **COMPLIANT** | The gateway has a single, explicit mode; there is no fallback path in `backend/app/communication/` (C) |
 | 12 | Never expose writable control interfaces to an untrusted network | **COMPLIANT** | Production startup rejects a non-loopback `HOST`; Modbus writes are refused on a non-loopback gateway host; RBAC denies by default (C) |
 | 13 | No manufacturer-accuracy claim without validation | **COMPLIANT** | No such claim is made in code or documentation; plugin data is labelled as public-datasheet-derived and illustrative (D) |
 | 14 | Illustrative parameters clearly labelled | **COMPLIANT** | `illustrative: bool` on every topology configuration model, defaulting to `True` and refusing an under-labelled plant (`backend/app/topology/schema.py`); carried into the runtime `EquipmentMetadata.is_illustrative` by the plant factory; stated explicitly by both shipped example configurations and asserted by `tests/test_illustrative_parameters.py` (C) |
 
-**Safety conclusion.** Thirteen of the fourteen rules are fully met. The one
-partial rule is the depth of the audit trail — a documentation and tooling
-gap, not a hazard to real equipment, and it cannot expose a physical system
-because no physical system is reachable.
+**Safety conclusion.** All fourteen rules are now fully met. The audit-trail
+rule was the last partial one; it was a documentation and tooling gap, not a
+hazard to real equipment, and it could not expose a physical system because
+no physical system is reachable.
 
 ---
 
@@ -622,11 +624,11 @@ gates and still completed with all twelve jobs green.
 *Residual.* A green run means that no gate failed; it does not mean that the
 gates cover every possible defect. The coverage gaps that remain are recorded
 separately as F-03, F-04 and F-11, and none of them is closed by this run.
-F-01, F-03, F-05 and F-11 have since been closed by the frontend component
-suite, the ORM-versus-migration drift gate, the Playwright end-to-end path and
-the unification of the lint style, all of which now run as enforced pipeline
-gates. F-04 remains open: branch protection is applied in the repository
-configuration by an administrator, not by a change to the code.
+F-01, F-03, F-05, F-09 and F-11 have since been closed by the frontend
+component suite, the ORM-versus-migration drift gate, the Playwright
+end-to-end path, the dedicated operator-action journal and the unification of
+the lint style. F-04 remains open: branch protection is applied in the
+repository configuration by an administrator, not by a change to the code.
 
 ### F-08 — LOW — RESOLVED — The runtime is the single write path to the plant and the engine
 
@@ -664,15 +666,83 @@ remain: they observe the runtime and do not offer a second way to change it.
 `set_active_simulation_engine` again, and that the runtime never holds an
 engine without its plant or the other way round.
 
-### F-09 — LOW — The operator-action audit trail is not dedicated or tamper-evident
+### F-09 — LOW — RESOLVED — The operator-action audit trail is dedicated and tamper-evident
 
-Commands, setpoints and faults reach the historian and the structured logs,
-which satisfies `AGENTS.md` §2.10 for the simulated platform. There is no
-separate, append-only operator-action journal.
+The audit trail was spread over four mechanisms that did not agree with each
+other: `backend/app/core/audit.py` kept authentication events in memory and
+flushed them to a JSON file inside the source tree, `backend/app/core/config_audit.py`
+kept configuration changes in memory only, `backend/app/controllers/command_log.py`
+kept commands and setpoint changes in memory only in a separate instance per
+control layer, and `backend/app/historian/service.py` owned the durable
+`command_records` table that nothing in the running application ever wrote to.
+The operator's primary control surface — `POST /api/v1/simulation/control`,
+which starts, pauses, steps and resets the plant — recorded **nothing at
+all**. The historian's `record_alarm()` had no callers either. The audit
+finding's premise that commands, setpoints and faults "reach the historian"
+was therefore inaccurate: they reached an in-memory buffer.
 
 *Action.* Add an append-only operator-action journal if the platform is ever
 used for warranty or dispute resolution, which is the use case that motivates
 `AGENTS.md` §1's warranty analysis.
+
+**Resolution.** The platform now has one dedicated, append-only,
+tamper-evident journal, and every category that `AGENTS.md` §2.10 names flows
+through it.
+
+- `backend/app/core/operator_journal.py` is the journal. It is a JSON Lines
+  file that is only ever opened in append mode: no method rewrites,
+  truncates or deletes an entry.
+- It is **hash-chained**. Every entry carries the SHA-256 hash of its
+  predecessor and the SHA-256 hash of its own canonical content. Changing,
+  removing or reordering an entry breaks the chain from that point on, and
+  `OperatorActionJournal.verify()` reports the first break.
+- The chain **continues across a restart**: the last persisted entry is read
+  back so that the next entry follows it, rather than a second parallel chain
+  starting in the same file.
+- It is **process-scoped**: one guarded service, one trail. Two applications
+  in one process cannot write two trails that both claim to be complete.
+- It is **always on**. `AGENTS.md` §2.10 requires the record, so there is
+  deliberately no setting that turns it off; `OPERATOR_JOURNAL_PATH` and
+  `OPERATOR_JOURNAL_FSYNC` are the only knobs, and `fsync` defaults to on.
+- Sensitive values in the details are redacted with the existing
+  `redact_details`, so the journal never becomes a second store of
+  credentials.
+
+All five required categories now reach it: commands and setpoint changes
+through `ControlCommandLog`, configuration changes through
+`ConfigChangeAuditLog`, authentication events through `AuditLog`, faults
+through `FaultInjectionEngine`, and the operator's own actions through the
+simulation control endpoint — including the actions that were **refused**,
+because a trail that only records what succeeded cannot show what was
+attempted.
+
+`tests/test_operator_journal.py` (29 tests) covers the properties a warranty
+or dispute analysis relies on: the entry is read back unchanged, the chain
+links every entry to its predecessor, an altered, removed, reordered or
+truncated entry is detected, the chain survives a restart, a failed write is
+reported as a typed error and logged rather than swallowed, and each of the
+five categories really reaches the journal. Each test was probed by breaking
+the behaviour it guards, so a test that cannot fail proves nothing.
+
+**A second defect surfaced on the way.** The journal's promise that "the
+error is never swallowed" is void if the logger itself has been switched off,
+and it had been: `backend/migrations/env.py` called `logging.config.fileConfig`
+with its default `disable_existing_loggers=True`, which disables **every**
+logger that already exists in the process. The migration tooling imports that
+environment inside the process that owns the audit trail, so running the
+migration graph validation silenced the whole application log — the audit
+trail included — without a word. The call now passes
+`disable_existing_loggers=False`, and
+`tests/test_ci_scripts.py::test_the_migration_environment_leaves_the_application_loggers_alone`
+fails if it ever regresses.
+
+*Residual limitation.* A journal write that fails is **fail-open**: the
+error is logged, the journal marks itself degraded, and the action is *not*
+rolled back. This is deliberate — a simulation action cannot be rolled back,
+and failing closed would make the whole plant uncontrollable the moment the
+disk fills — but it means a degraded journal has a gap in its trail. The
+degraded flag and the last error are exposed on the journal for that reason.
+It is recorded in `docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.9.
 
 ### F-10 — LOW — RESOLVED — The illustrative parameters carry a schema marker and a test
 
@@ -845,7 +915,11 @@ files, was green across every job.
    offered a second route to the same state are removed.~~ ~~F-11 is closed:
    the whole repository is linted with one declared style — the same line
    length, the same rule selection and `E501` active in every tree — and a
-   test fails if the two Ruff declarations ever diverge again.~~
+   test fails if the two Ruff declarations ever diverge again.~~ ~~F-09 is
+   closed: the platform has one dedicated, append-only, hash-chained
+   operator-action journal that every command, setpoint change, configuration
+   change, fault and operator action flows through, and the migration
+   environment no longer silences the application's loggers.~~
 
 ---
 
