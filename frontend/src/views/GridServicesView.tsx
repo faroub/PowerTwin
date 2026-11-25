@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
+
 export const GridServicesView: React.FC = () => {
   return (
     <div>
@@ -7,6 +9,8 @@ export const GridServicesView: React.FC = () => {
         <h1 className="view-title">Grid Services</h1>
         <p className="view-subtitle">Frequency Droop Response & Volt-VAR Regulation</p>
       </div>
+
+      <SimulatedDataNotice detail="Illustrative parameters of the simulated grid-service and market framework." />
 
       <div className="grid-cards">
         <div className="card">

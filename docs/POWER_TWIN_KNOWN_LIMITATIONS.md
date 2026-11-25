@@ -100,21 +100,43 @@ through them.
 
 ### 4.1 Frontend Test Coverage
 
-The frontend test suite contains **4 tests in 2 files**. Every one of the 19
-SCADA view components and the React hooks are untested. The measured coverage
-is **4.15 % of lines, 5.95 % of functions and 0 % of branches**.
+The frontend test suite contains **151 tests in 11 files**, and the measured
+coverage is **98.28 % of lines, 98.82 % of functions, 98.29 % of statements
+and 85.92 % of branches**. Every SCADA view, the shared components, the login
+flow, the telemetry hook, the API client and the application entry point are
+covered.
 
-The enforced floor in `frontend/vite.config.ts` equals that measured value, so
-the gate detects a regression but proves very little. The 75 % target that an
-earlier revision of the CI/CD guide published was **aspirational and was never
-implemented**: the configuration declared a threshold that could not be met,
-and the coverage provider was not even installed, so the check could not run.
+The enforced floors in `frontend/vite.config.ts` are **75 %** for every
+metric globally, with tighter floors on the modules that carry the session
+(`src/services/api.ts`, `src/services/auth.ts`), on the shared components
+(`src/components/*.tsx`) and on the views (`src/views/*.tsx`). A directory
+floor is evaluated against the **aggregate** of the files it matches, so a
+view that loses its tests is caught by its own directory's floor even when
+the global figure barely moves. The binding of those floors was verified by
+raising them deliberately until the gate failed.
 
-### 4.2 No End-to-End Test Suite
+What the suite does **not** prove: the branch coverage of 85.92 % is the
+weakest metric, and the 75 % branch floor is the binding global constraint.
+The suite exercises the HMI against a mocked backend, so it proves the HMI's
+own behaviour and not the agreement between the HMI and the real FastAPI
+backend; that agreement is covered by the backend's own HTTP tests.
 
-`AGENTS.md` §4 names Playwright for frontend end-to-end tests. **Playwright is
-not configured.** The operator path — log in, read the overview, issue a
-setpoint, observe the result — is never exercised automatically.
+### 4.2 The End-to-End Suite Runs Against a Mock, Not Against the Backend
+
+`AGENTS.md` §4 names Playwright for frontend end-to-end tests, and a
+Playwright project now exists (`frontend/playwright.config.ts`, specs in
+`frontend/e2e/`). The operator path — log in, read the overview, act on the
+simulation engine behind its confirmation, observe the result, log out — is
+exercised automatically in a real browser against the built artefact.
+
+The suite is **hermetic by construction**: there is no backend behind the
+preview server. `frontend/e2e/mockPlatform.ts` answers every `/api/v1/**`
+request inside the browser, aborts any path it does not model, and blocks any
+request to a host other than the local preview server on `127.0.0.1`. That is
+what makes the suite safe to run anywhere, and it is also its limitation: the
+specs prove the HMI's behaviour, **not** the behaviour of the platform as a
+whole against a live backend. The browser coverage is Chromium only; no
+WebKit, Firefox or mobile viewport is exercised.
 
 ### 4.3 The Python Runtime Dependencies Are Now Pinned, and What That Does Not Cover
 

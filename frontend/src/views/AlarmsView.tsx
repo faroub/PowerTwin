@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
 import { usePlantTelemetry } from '../services/hooks';
 
 export const AlarmsView: React.FC = () => {
@@ -13,6 +14,8 @@ export const AlarmsView: React.FC = () => {
         <h1 className="view-title">Alarms & Events</h1>
         <p className="view-subtitle">System Fault Log and Event Processing</p>
       </div>
+
+      <SimulatedDataNotice detail="Fault and alarm records produced by the simulation engine." />
 
       <div className="card">
         <h3 style={{ color: alarmsCount === 0 ? '#22c55e' : '#ef4444', marginBottom: '12px' }}>

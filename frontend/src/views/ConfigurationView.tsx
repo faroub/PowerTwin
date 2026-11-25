@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
+
 export const ConfigurationView: React.FC = () => {
   return (
     <div>
@@ -8,9 +10,7 @@ export const ConfigurationView: React.FC = () => {
         <p className="view-subtitle">YAML Topology Definitions and Parameter Inspector</p>
       </div>
 
-      <div className="notice-box">
-        <strong>CONFIGURATION SHELL:</strong> Dynamic YAML template loading and validated Pydantic parameter inspection will be wired in WP02+.
-      </div>
+      <SimulatedDataNotice detail="Illustrative YAML topology templates and their validated parameters." />
 
       <div className="card">
         <div className="card-title">Active Configuration</div>

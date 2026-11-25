@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
+
 export const HistorianView: React.FC = () => {
   return (
     <div>
@@ -8,9 +10,7 @@ export const HistorianView: React.FC = () => {
         <p className="view-subtitle">Time-Series Telemetry Querying & Configurable Sampling</p>
       </div>
 
-      <div className="notice-box">
-        <strong>TIMESCALEDB QUERY ENGINE:</strong> Retrieves historical time-series telemetry with configurable sampling steps.
-      </div>
+      <SimulatedDataNotice detail="Retrieves historical time-series telemetry with configurable sampling steps." />
 
       <div className="card">
         <h3 style={{ color: '#38bdf8', marginBottom: '12px' }}>Time-Series Query Controls</h3>

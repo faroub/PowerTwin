@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
 import { usePlantTelemetry } from '../services/hooks';
 
 export const PlantOverviewView: React.FC = () => {
@@ -14,9 +15,7 @@ export const PlantOverviewView: React.FC = () => {
         <p className="view-subtitle">Utility-Scale BESS Operational Dashboard</p>
       </div>
 
-      <div className="notice-box">
-        <strong>SCADA TELEMETRY MONITORING (SIMULATED DATA ONLY):</strong> Real-time operational state metrics streamed from the central simulation engine.
-      </div>
+      <SimulatedDataNotice detail="Real-time operational state metrics streamed from the central simulation engine." />
 
       <div className="grid-cards">
         <div className="card">

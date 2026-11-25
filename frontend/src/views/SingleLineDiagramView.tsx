@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
+
 interface SLDNode {
   id: string;
   name: string;
@@ -48,6 +50,8 @@ export const SingleLineDiagramView: React.FC = () => {
         <h1 className="view-title">Electrical Single-Line Diagram (SLD)</h1>
         <p className="view-subtitle">Interactive Dynamic Electrical Topology Canvas</p>
       </div>
+
+      <SimulatedDataNotice detail="Illustrative single-line topology and equipment ratings of the reference plant. The node list is a placeholder topology, not a scan of real equipment." />
 
       <div style={{ display: 'flex', gap: '20px' }}>
         {/* SLD Canvas */}

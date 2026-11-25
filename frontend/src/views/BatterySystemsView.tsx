@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
 import { usePlantTelemetry } from '../services/hooks';
 
 export const BatterySystemsView: React.FC = () => {
@@ -15,10 +16,7 @@ export const BatterySystemsView: React.FC = () => {
         <p className="view-subtitle">Container & Rack Electro-Thermal Telemetry</p>
       </div>
 
-      <div className="notice-box">
-        <strong>CONTAINER TELEMETRY MONITORING:</strong> Operating parameters read from the
-        simulation engine.
-      </div>
+      <SimulatedDataNotice detail="Container and rack operating parameters read from the simulation engine." />
 
       <div className="grid-cards">
         {initialContainers.map((id) => (

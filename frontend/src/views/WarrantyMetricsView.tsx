@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
+
 export const WarrantyMetricsView: React.FC = () => {
   return (
     <div>
@@ -7,6 +9,8 @@ export const WarrantyMetricsView: React.FC = () => {
         <h1 className="view-title">Warranty Metrics</h1>
         <p className="view-subtitle">Battery Degradation & Equivalent Full Cycles (EFC)</p>
       </div>
+
+      <SimulatedDataNotice detail="Illustrative degradation and warranty figures. They are not measurements of any battery." />
 
       <div className="grid-cards">
         <div className="card">

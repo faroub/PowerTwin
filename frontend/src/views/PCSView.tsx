@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
 import { usePlantTelemetry } from '../services/hooks';
 
 export const PCSView: React.FC = () => {
@@ -13,10 +14,7 @@ export const PCSView: React.FC = () => {
         <p className="view-subtitle">Apparent Power Circle Clamping & 4-Value Setpoint Tracking</p>
       </div>
 
-      <div className="notice-box">
-        <strong>INVERTER DISPATCH TELEMETRY:</strong> Demonstrates P² + Q² ≤ S_max² capability
-        circle clamping.
-      </div>
+      <SimulatedDataNotice detail="Inverter dispatch telemetry demonstrating the P² + Q² ≤ S_max² capability circle clamping." />
 
       <div className="card" style={{ marginBottom: '20px' }}>
         <h3 style={{ marginBottom: '12px', color: '#38bdf8' }}>Explicit 4-Value Setpoint Distinction</h3>

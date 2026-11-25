@@ -83,8 +83,10 @@ verified fact:
    the same across all twelve jobs, including the two new gates that check
    the installed environment against the lock. What a green run does *not*
    establish is that the gates cover
-   every possible defect — the coverage gaps recorded as F-01, F-03, F-04,
-   F-05 and F-11 are entirely unaffected by it.
+   every possible defect — the coverage gaps recorded as F-03, F-04 and
+   F-11 are entirely unaffected by it. F-01 and F-05 have since been closed
+   by the frontend component suite and the Playwright end-to-end path, both
+   of which now run as enforced pipeline gates.
 2. **The steps were run locally, in the pipeline's own order.** The backend
    gates were executed on the canonical interpreter **Python 3.12** — the
    interpreter the pipeline uses — in a clean virtual environment built from
@@ -172,7 +174,7 @@ system because no physical system is reachable.
 | React and TypeScript HMI | **COMPLIANT** | `frontend/` (D) |
 | PostgreSQL/TimescaleDB for persistent data | **COMPLIANT** | Alembic migration `002_user_accounts`, `docker-compose.yml` service (D) |
 | Docker Compose for initial deployment | **COMPLIANT** | `docker-compose.yml` with a loopback-published API (D) |
-| pytest backend tests, Playwright frontend end-to-end tests | **PARTIAL** | pytest is used. **Playwright is not configured**: the frontend has Vitest unit tests only, so no end-to-end path is exercised. Recorded as finding **F-05** (D) |
+| pytest backend tests, Playwright frontend end-to-end tests | **COMPLIANT** | Both are used. The frontend has a Vitest component suite (151 tests) and a Playwright end-to-end suite (6 specs) that drives the built HMI against a hermetic mock platform. Recorded as findings **F-01** and **F-05**, both now resolved (D) |
 | Pinned dependencies, reproducible builds | **COMPLIANT** | The frontend lock file is pinned and `npm ci` is used. The **Python** runtime dependencies are pinned in `backend/requirements.lock` and installed with `--require-hashes`, so a build either reproduces the recorded artefact exactly or fails, and the container build asserts in strict mode that the image carries exactly the locked packages and nothing else. Finding **F-02** is resolved (D) |
 | Structured logging | **COMPLIANT** | `logging.getLogger(__name__)` throughout, including the safety invariants (C) |
 | Exceptions handled explicitly, never swallowed | **COMPLIANT** | The CI helper scripts convert every failure into an explicit error and a non-zero exit status (A) |
@@ -230,7 +232,7 @@ gate that cannot be met is not a gate.
 | The SBOM was not valid SPDX 2.3 and had no unique identifiers | The artefact was not a usable SBOM | A valid SPDX-2.3 document with unique `SPDXID`s, concluded and declared licenses, a unique document namespace and a `SOURCE_DATE_EPOCH`-pinned timestamp |
 | The SBOM and the dependency inventories were not shipped with the release | The release had no dependency evidence | The SBOM, the Python inventory and the full transitive npm inventory are in the archive and covered by `SHA256SUMS` |
 | `release_version` and `random_seed` were decorative inputs | An operator could trigger a release with an arbitrary string | Both are consumed: the version is validated before anything is built, and the seed drives the nightly endurance campaign |
-| The frontend declared a 75 % coverage threshold against a measured 4.15 %, and the coverage provider was not installed | The gate could not run at all | The provider is installed, `coverage.all` counts untested files, and the enforced floor is the measured value |
+| The frontend declared a 75 % coverage threshold against a measured 4.15 %, and the coverage provider was not installed | The gate could not run at all | The provider is installed, `coverage.all` counts untested files, and the enforced floor is **75 %** — a threshold the suite now actually meets at 98.28 % |
 | `npm audit --audit-level=high` was permanently red (1 high, 3 critical) | The security job never passed | The toolchain was upgraded to vite 7 / vitest 4, which clears the esbuild → vite → vitest → tinypool advisory chain; the audit reports **0 vulnerabilities** |
 | The lint configuration was resolved from **outside** the repository | The lint result depended on the machine: a developer's run and the CI runner's run could legitimately disagree | A root `ruff.toml` pins the rule set inside the repository |
 | The pytest and the coverage configuration lived in `backend/pyproject.toml`, where neither tool ever read it | Both tools ran with their built-in defaults: `asyncio_mode = "auto"` was never applied and the coverage `source` was never applied, so the declared configuration was inert | `pytest.ini` and `.coveragerc` at the repository root, which is where the tools are actually invoked |
@@ -249,6 +251,7 @@ gate that cannot be met is not a gate.
 | Coverage policy | `python scripts/check_coverage.py coverage.json` | Job fails |
 | Interpreter compatibility | Matrix on Python 3.13 and 3.14, `fail-fast: false` | Job fails |
 | Frontend lint, test, build and coverage | `npm run lint`, `npm test`, `npm run build`, `npm run test:coverage` | Job fails |
+| Frontend end-to-end path | `npm run test:e2e` (Playwright against the built artefact on the loopback interface, with a hermetic mock platform) | Job fails |
 | Dependency audit | `pip-audit` and `npm audit --audit-level=high` | Job fails |
 | Release version format | `scripts/validate_release_version.py` | Job fails **before** anything is built |
 | Migration graph | `scripts/validate_migrations.py` | Job fails before the archive is assembled |
@@ -294,11 +297,20 @@ results.
 | `python scripts/validate_release_version.py v1.0.0` | Accepted | Accepted | Accepted |
 | `python scripts/endurance_campaign.py --ticks 600 --repeats 2` | Deterministic, fingerprint `58d28d0aab4cd788` | Deterministic, **the same** fingerprint | Deterministic, **the same** fingerprint |
 
-The frontend gates were executed as well: `npm run lint` (TypeScript) clean,
-`npm test` 4 passed in 2 files, `npm run test:coverage` satisfied the enforced
-floor at 4.15 % lines and 5.95 % functions, `npm run build` produced the
-production bundle, and `npm audit --audit-level=high` reported **0
-vulnerabilities**.
+The frontend gates were executed as well. At the time of the audit they were
+`npm run lint` (TypeScript) clean, `npm test` 4 passed in 2 files,
+`npm run test:coverage` satisfied the enforced floor at 4.15 % lines and 5.95 %
+functions, `npm run build` produced the production bundle, and
+`npm audit --audit-level=high` reported **0 vulnerabilities**.
+
+**They have since been re-executed against the frontend component suite and
+the Playwright project**: `npm run lint` clean over `src/`, `e2e/` and
+`playwright.config.ts`; `npm test` **151 passed in 11 files**;
+`npm run test:coverage` satisfied the enforced floors at **98.28 % lines,
+98.82 % functions, 98.29 % statements and 85.92 % branches**;
+`npm run test:e2e` **6 passed** against the built artefact on the loopback
+interface with a hermetic mock platform; `npm run build` produced the
+production bundle.
 
 `pip-audit` was executed against the declared ranges **and** against the fully
 resolved environment: **no known vulnerabilities** in either.
@@ -371,19 +383,32 @@ versions.
 Findings are ordered by severity. Each states the evidence, the impact and the
 recommended action.
 
-### F-01 — HIGH — The frontend test suite covers 4.15 % of the HMI
+### F-01 — HIGH — RESOLVED — The frontend test suite covers 98.28 % of the HMI
 
-The HMI contains 19 SCADA view components and the React hooks. The entire
-frontend suite is **4 tests in 2 files**, and the measured coverage is 4.15 %
-of lines, 5.95 % of functions and 0 % of branches. The enforced floor now
-matches the measured value, so the gate protects against a regression, but it
-protects almost nothing.
+The HMI contains 19 SCADA view components and the React hooks. The frontend
+suite is now **151 tests in 11 files**, and the measured coverage is **98.28 %
+of lines, 98.82 % of functions, 98.29 % of statements and 85.92 % of
+branches**. The entry point, the shared components, the login flow, the
+telemetry hook, the API client, the permission table and every SCADA view are
+covered.
 
-*Impact.* A regression in a view component is detected only by a human opening
-the page. `AGENTS.md` §4 requires Playwright end-to-end tests; none are
-configured.
-*Action.* Add component tests for the views, then a Playwright suite for the
-login → overview → setpoint path. Raise the floor as the suite grows.
+The enforced floors in `frontend/vite.config.ts` are **75 %** for every metric
+globally, with tighter per-directory floors on the session modules, the shared
+components and the views. The binding of the directory-scoped floors was
+verified empirically: they were deliberately raised until the gate failed,
+which confirmed that a view that loses its tests fails the gate even when the
+global figure barely moves.
+
+Two defects were found and fixed while writing the suite, rather than
+asserted around: the telemetry hook cleared its loading flag as soon as the
+request was issued, so the views reported "N/A" for a frame that was still in
+flight; and the views rendered illustrative equipment parameters without the
+label that `AGENTS.md` rule 14 requires, which the shared
+`SimulatedDataNotice` now carries and the test table enforces per view.
+
+*Residual limitation.* The suite exercises the HMI against a mocked backend,
+so it proves the HMI's own behaviour and not the agreement with the live
+FastAPI backend. Branch coverage at 85.92 % is the weakest metric.
 
 ### F-02 — HIGH — RESOLVED — The Python runtime dependencies are pinned and hash-verified
 
@@ -470,15 +495,35 @@ merge into `main` without a green build.
 *Action.* An administrator applies the documented rule set. This is an
 operations task, not a code change.
 
-### F-05 — MEDIUM — Playwright end-to-end testing is not configured
+### F-05 — MEDIUM — RESOLVED — The Playwright end-to-end path is configured and runs in the pipeline
 
-`AGENTS.md` §4 names Playwright for frontend end-to-end tests. The repository
-has Vitest unit tests only.
+`AGENTS.md` §4 names Playwright for frontend end-to-end tests. A Playwright
+project now exists: `frontend/playwright.config.ts` and six specs in
+`frontend/e2e/`, driving the **built** HMI in Chromium against a **hermetic
+mock platform**.
 
-*Impact.* The full operator path — log in, read the overview, issue a
-setpoint, observe the result — is never exercised automatically.
-*Action.* Add a Playwright project with a mock API, once the frontend has a
-stable test harness.
+The mock answers every `/api/v1/**` request inside the browser, **aborts**
+any path it does not model, and **blocks** any request to a host other than
+the local preview server on `127.0.0.1`. The specs assert that neither an
+unmodelled path nor a blocked host occurred, so the suite cannot quietly come
+to depend on an endpoint nobody modelled or on a network that should not
+exist. The specs cover the operator path — log in, read the overview, pause
+the engine behind its confirmation, observe the result, log out — and the
+safety posture: the session token travels in memory and in the `Authorization`
+header only, never in `localStorage`, `sessionStorage` or a cookie; a backend
+that is not ready is reported as disconnected rather than replaced by
+invented figures; a refused control action is reported as a failure without
+the engine state being set to a successful one.
+
+The suite runs in the `Frontend Lint, Test & Build` pipeline job, after
+`npx playwright install --with-deps chromium`. `frontend/tsconfig.json`
+includes `e2e/` and `playwright.config.ts`, so the end-to-end code is
+type-checked by the same gate as the application, and
+`tests/test_deployment_images.py` asserts the properties of the configuration
+so that the gate cannot be silently removed.
+
+*Residual limitation.* The suite runs against a mock, not against the live
+backend, and covers Chromium only.
 
 ### F-06 — MEDIUM — Two mission items of `AGENTS.md` §1 are not implemented
 
@@ -539,8 +584,9 @@ gates and still completed with all twelve jobs green.
 
 *Residual.* A green run means that no gate failed; it does not mean that the
 gates cover every possible defect. The coverage gaps that remain are recorded
-separately as F-01, F-03, F-04, F-05 and F-11, and none of them is
-closed by this run.
+separately as F-03, F-04 and F-11, and none of them is closed by this run.
+F-01 and F-05 have since been closed by the frontend component suite and the
+Playwright end-to-end path, both of which now run as enforced pipeline gates.
 
 ### F-08 — LOW — A module-level simulation entry point remains
 
@@ -661,8 +707,11 @@ files, was green across every job.
 1. **Close the migration-metadata gap** (F-03). Add `target_metadata` and an
    ephemeral PostgreSQL service to the release job, then restore
    `alembic check`.
-2. **Build the frontend test suite** (F-01) and the Playwright end-to-end
-   path (F-05), then raise the enforced floor as the suite grows.
+2. ~~**Build the frontend test suite** (F-01) and the Playwright end-to-end
+   path** (F-05), then raise the enforced floor.~~ **Done.** The component
+   suite measures 151 tests and 98.28 % line coverage with an enforced 75 %
+   floor, the Playwright project drives the built HMI against a hermetic mock
+   platform, and both run as enforced pipeline gates.
 3. **Apply the branch protection** (F-04). An administrator action, using the
    documented check names.
 4. **Schedule the roadmap items** (F-06) explicitly, and keep them marked

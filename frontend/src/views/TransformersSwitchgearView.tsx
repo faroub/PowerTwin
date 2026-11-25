@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
+
 export const TransformersSwitchgearView: React.FC = () => {
   return (
     <div>
@@ -7,6 +9,8 @@ export const TransformersSwitchgearView: React.FC = () => {
         <h1 className="view-title">Transformers & Switchgear</h1>
         <p className="view-subtitle">Balance of Plant (BoP) Transformation and Breaker Interlocks</p>
       </div>
+
+      <SimulatedDataNotice detail="Illustrative balance-of-plant ratings and breaker interlocks of the reference plant." />
 
       <div className="grid-cards">
         <div className="card">
