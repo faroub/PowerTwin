@@ -226,7 +226,7 @@ gate that cannot be met is not a gate.
 | Original defect | Consequence | Replacement |
 | :--- | :--- | :--- |
 | The coverage policy existed only as a table in `docs/CI_CD_GUIDE.md` | Nothing enforced it | `scripts/check_coverage.py` — a tested, single-source-of-truth policy with global and per-domain floors, applied to the `pytest-cov` JSON report |
-| The release workflow ran `alembic check` | It needed a live database and a non-empty `target_metadata`, so it failed with an import error **before** the release could be built | `scripts/validate_migrations.py` — offline, deterministic, credential-free validation of the migration graph |
+| The release workflow ran `alembic check` | It needed a live database and a non-empty `target_metadata`, so it failed with an import error **before** the release could be built | `scripts/validate_migrations.py` — offline, deterministic, credential-free validation of the migration graph, **plus** the drift gate of F-03: `alembic upgrade head` and `alembic check` against an ephemeral service container |
 | `backend/alembic.ini` used relative paths | The path resolved differently depending on the working directory | `%(here)s` interpolation and `path_separator = os` |
 | The SBOM was not valid SPDX 2.3 and had no unique identifiers | The artefact was not a usable SBOM | A valid SPDX-2.3 document with unique `SPDXID`s, concluded and declared licenses, a unique document namespace and a `SOURCE_DATE_EPOCH`-pinned timestamp |
 | The SBOM and the dependency inventories were not shipped with the release | The release had no dependency evidence | The SBOM, the Python inventory and the full transitive npm inventory are in the archive and covered by `SHA256SUMS` |
@@ -471,17 +471,44 @@ deployed artefact. The strict environment check covers the *installed set*; it
 does not by itself prove that every artefact in the lock came from the
 upstream publisher, because a hash proves integrity rather than provenance.
 
-### F-03 — MEDIUM — The ORM models are not compared against the migrations
+### F-03 — MEDIUM — RESOLVED — The ORM models are compared against the migrations
 
-The offline migration validation checks that the graph has exactly one head and
-that the whole chain renders to SQL. It does **not** compare the ORM metadata
+The offline migration validation checked that the graph has exactly one head and
+that the whole chain renders to SQL. It did **not** compare the ORM metadata
 with the migration history, because that check requires a live database and a
 non-empty `target_metadata`.
 
-*Impact.* A model column that was added without a migration can reach a
+*Impact.* A model column that was added without a migration could reach a
 release undetected.
 *Action.* Add a `target_metadata` to `migrations/env.py` and run `alembic
 check` against an ephemeral PostgreSQL service container in the release job.
+
+**Resolution.** `backend/migrations/env.py` sets `target_metadata =
+Base.metadata` and passes an `include_object` hook to Alembic that excludes
+`telemetry_data_timestamp_ns_idx`, the index TimescaleDB creates itself when
+the migration converts `telemetry_data` into a hypertable. The release job
+declares a digest-pinned `timescale/timescaledb` service container and runs
+`alembic upgrade head` followed by `alembic check`, so the schema the
+migrations describe is built and then compared with the schema the ORM
+declares.
+
+Making that comparison clean exposed a real drift that the offline validator
+had never been able to see: the ORM declared six individual column indexes on
+`command_records` and `alarms_and_events` that no migration creates, and it
+omitted the two composite indexes the migrations do create. The ORM was
+corrected to declare exactly the deployed index set — `idx_cmd_target` on
+`command_records` and `idx_users_username` on `users` — **without a schema
+migration**, so the deployed database is untouched and no data is migrated.
+The change is metadata only.
+
+Two limits of the gate remain and are recorded in `docs/POWER_TWIN_KNOWN_LIMITATIONS.md`
+§4.4: Alembic's autogenerate does not compare **primary keys**, and the gate
+runs at release time rather than on every pull request.
+
+`tests/test_deployment_images.py` asserts that the environment declares the
+metadata, that the TimescaleDB-owned index is excluded, that the ORM and the
+migrations declare the same index set, and that the release job runs the gate
+against a database whose credentials agree with the service container's.
 
 ### F-04 — MEDIUM — Branch protection of `main` is documented but not applied
 
@@ -730,9 +757,12 @@ files, was green across every job.
 
 ### 11.2 Recommended actions, in order
 
-1. **Close the migration-metadata gap** (F-03). Add `target_metadata` and an
+1. ~~**Close the migration-metadata gap** (F-03). Add `target_metadata` and an
    ephemeral PostgreSQL service to the release job, then restore
-   `alembic check`.
+   `alembic check`.~~ **Done.** The Alembic environment declares the ORM
+   metadata, the release job builds the schema and compares it against the
+   ORM against an ephemeral TimescaleDB service container, and the ORM now
+   declares exactly the index set the migrations create.
 2. ~~**Build the frontend test suite** (F-01) and the Playwright end-to-end
    path** (F-05), then raise the enforced floor.~~ **Done.** The component
    suite measures 151 tests and 98.28 % line coverage with an enforced 75 %

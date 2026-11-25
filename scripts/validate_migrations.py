@@ -19,9 +19,11 @@ checked without a database:
    every revision is importable, that every ``down_revision`` resolves and
    that every operation is well formed.
 
-Comparing the ORM metadata against the migrations still requires a live
-database and is therefore **NOT IMPLEMENTED** here. It is listed as a known
-limitation in ``docs/CI_CD_GUIDE.md``.
+The comparison of the ORM metadata against the migrations is **not** part of
+this script: it needs a database by nature. It is now implemented as a
+separate release step, ``alembic upgrade head`` followed by ``alembic check``,
+that runs against an ephemeral TimescaleDB service container. See
+``docs/CI_CD_GUIDE.md`` section 5.2.
 
 Safety note
 -----------

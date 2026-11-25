@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 import threading
 from collections.abc import Iterator
@@ -24,6 +25,9 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+import yaml
+
+from backend.app.historian.models import Base
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_DOCKERFILE = REPO_ROOT / "deployment" / "Dockerfile.backend"
@@ -34,6 +38,9 @@ COMPOSE_FILES = (
 )
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 SECURITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "security.yml"
+RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
+MIGRATION_ENV = REPO_ROOT / "backend" / "migrations" / "env.py"
+MIGRATION_VERSIONS = REPO_ROOT / "backend" / "migrations" / "versions"
 
 # The value the CI workflow supplies to the compose validation step. It is a
 # placeholder for a syntax check, not a credential.
@@ -471,3 +478,130 @@ class TestFrontendEndToEndSuite:
         ignore = (REPO_ROOT / ".gitignore").read_text()
         assert "frontend/test-results/" in ignore
         assert "frontend/playwright-report/" in ignore
+
+
+class TestMigrationDriftGate:
+    """A release must fail when the ORM and the migrations disagree.
+
+    The offline validator proves that the migration graph has a single head
+    and that the whole chain renders to SQL. It cannot prove that the ORM
+    models describe the same schema as the migration history: that comparison
+    needs a live database and a non-empty `target_metadata`.
+
+    Four properties have to hold, and none of them is visible to the
+    application test suite on its own:
+
+    * The Alembic environment must declare the ORM metadata, otherwise the
+      comparison is empty and always passes.
+    * The TimescaleDB-owned index must be excluded, otherwise the comparison
+      always fails for a difference nobody is allowed to fix.
+    * The release pipeline must run the comparison against a real database,
+      otherwise the difference is never noticed.
+    * The ORM must declare the index set the migrations create, otherwise the
+      comparison fails on every release.
+    """
+
+    def test_the_alembic_environment_declares_the_orm_metadata(self) -> None:
+        text = MIGRATION_ENV.read_text()
+        assert "target_metadata = Base.metadata" in text, (
+            "the Alembic environment does not compare the ORM metadata with the "
+            "migrations, so a model changed without a migration goes unnoticed"
+        )
+        assert "target_metadata = None" not in text
+
+    def test_the_alembic_environment_excludes_the_timescaledb_owned_index(self) -> None:
+        text = MIGRATION_ENV.read_text()
+        assert "telemetry_data_timestamp_ns_idx" in text, (
+            "the index that TimescaleDB creates is not excluded from the "
+            "comparison, so every release would report it as drift"
+        )
+        assert "include_object=include_object" in text, (
+            "the exclusion is declared but not passed to Alembic"
+        )
+
+    def test_the_orm_declares_the_index_set_the_migrations_create(self) -> None:
+        created: set[str] = set()
+        for migration in sorted(MIGRATION_VERSIONS.glob("*.py")):
+            created.update(
+                re.findall(r'op\.create_index\(\s*"([^"]+)"', migration.read_text())
+            )
+        assert created, "no index was found in the migrations"
+        declared = {
+            index.name
+            for table in Base.metadata.tables.values()
+            for index in table.indexes
+        }
+        assert declared == created, (
+            "the ORM and the migrations declare different index sets, so "
+            "`alembic check` would fail on every release"
+        )
+
+    @staticmethod
+    def _release_job() -> dict[str, object]:
+        workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text())
+        job = workflow["jobs"]["release-build"]
+        assert isinstance(job, dict)
+        return job
+
+    @staticmethod
+    def _drift_gate_step(job: dict[str, object]) -> dict[str, object]:
+        """Return the one step that runs `alembic check`."""
+        steps = job["steps"]
+        assert isinstance(steps, list)
+        gates = [
+            step
+            for step in steps
+            if re.search(r"alembic[^\n]*\bcheck\b", step.get("run", ""))
+        ]
+        assert len(gates) == 1, (
+            f"the drift gate must be a single, identifiable step, found {len(gates)}"
+        )
+        gate = gates[0]
+        assert isinstance(gate, dict)
+        return gate
+
+    def test_the_release_pipeline_runs_the_drift_gate_against_a_database(self) -> None:
+        job = self._release_job()
+        assert job.get("services"), (
+            "the release job has no database to compare the ORM metadata against"
+        )
+        services = job["services"]
+        assert isinstance(services, dict)
+        service = next(iter(services.values()))
+        assert service["image"].startswith("timescale/timescaledb@sha256:"), (
+            "the drift gate must run against a digest-pinned TimescaleDB image: "
+            "the migrations convert a table into a hypertable, which a plain "
+            "PostgreSQL server cannot do"
+        )
+        assert "pg_isready" in service["options"], (
+            "the drift gate may start before the database is ready to serve"
+        )
+
+        gate = self._drift_gate_step(job)
+        run = gate["run"]
+        assert "upgrade head" in run, (
+            "the drift gate does not build the schema the migrations describe"
+        )
+        check = re.search(r"alembic[^\n]*\bcheck\b", run)
+        assert check is not None
+        assert run.index("upgrade head") < check.start(), (
+            "the drift gate compares before the schema it compares against exists"
+        )
+
+    def test_the_drift_gate_step_and_the_service_container_agree_on_the_credentials(
+        self,
+    ) -> None:
+        job = self._release_job()
+        services = job["services"]
+        assert isinstance(services, dict)
+        service = next(iter(services.values()))
+        service_env = service["env"]
+
+        step_env = self._drift_gate_step(job)["env"]
+        for key in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"):
+            assert step_env[key] == service_env[key], (
+                f"the drift gate and its database disagree on {key}"
+            )
+        assert "POSTGRES_SERVER" in step_env and "POSTGRES_PORT" in step_env, (
+            "the drift gate does not say where the database is"
+        )

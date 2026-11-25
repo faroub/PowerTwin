@@ -23,6 +23,34 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write
+
+    # The historian schema is only comparable with the ORM metadata when there
+    # is a database to compare against. This container is ephemeral: it lives
+    # for the duration of the job, holds no data that leaves the runner, and
+    # is discarded with the job.
+    #
+    # TimescaleDB rather than plain PostgreSQL: migration `001_initial_schema`
+    # converts `telemetry_data` into a hypertable, and that call needs the
+    # extension. A plain PostgreSQL server would fail the upgrade before the
+    # comparison could run. The image is pinned by digest, as every other
+    # image this repository builds or runs.
+    services:
+      timescaledb:
+        image: timescale/timescaledb@sha256:5d7a2f9d9d593315368338aa6054fda37d7707b4a12a912e30dcb7523385e2b4
+        env:
+          POSTGRES_USER: postgres
+          # A validation-only placeholder for a throwaway container that lives
+          # for one job. It is not a credential and grants access to nothing.
+          POSTGRES_PASSWORD: release-migration-drift-check-not-a-credential
+          POSTGRES_DB: powertwin_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -89,6 +117,26 @@ jobs:
       - name: Validate Database Migrations
         run: |
           python scripts/validate_migrations.py
+
+      # The offline validator above proves that the migration graph has one
+      # head and renders to SQL. It cannot prove that the ORM models and the
+      # migration history describe the same schema, because that comparison
+      # needs a database and a non-empty `target_metadata`.
+      #
+      # `alembic upgrade head` builds the schema the migrations describe and
+      # `alembic check` then compares it with the schema the ORM declares.
+      # A model that was changed without a migration fails this step, so it
+      # cannot reach a release.
+      - name: Check the ORM Metadata Against the Migration History
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: release-migration-drift-check-not-a-credential
+          POSTGRES_SERVER: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: powertwin_db
+        run: |
+          python -m alembic -c backend/alembic.ini upgrade head
+          python -m alembic -c backend/alembic.ini check
 
       - name: Run Full Pytest Suite
         run: |

@@ -64,6 +64,17 @@ vendor plugins are derived from publicly available datasheet specifications.
 ### 2.6 Historian
 
 - **Ring Buffer Before TimescaleDB**: Telemetry is held in a bounded in-memory ring buffer and flushed to the database. The disk-overflow fallback writes append-only JSON files; it protects against silent loss but it is not a queryable time-series store.
+- **The `alarms_and_events` query path has no supporting index.** The
+  deployed schema carries indexes on `telemetry_data`
+  (`idx_telemetry_query`, `idx_telemetry_run`), on `command_records`
+  (`idx_cmd_target`) and on `users` (`idx_users_username`), but none on
+  `alarms_and_events`, whose query filters on `equipment_id` and orders by
+  `timestamp_ns`. The ORM used to declare three individual column indexes
+  there that no migration ever created, so the models claimed an index the
+  database did not have; reconciling the two removed the false claim. The
+  performance characteristic is unchanged — it was always an unindexed scan —
+  and adding the index is a schema change that needs its own migration and its
+  own approval.
 
 ---
 
@@ -194,14 +205,25 @@ vulnerabilities. Four things remain outside it:
 
 The frontend **is** pinned, by `frontend/package-lock.json` and `npm ci`.
 
-### 4.4 The ORM Metadata Is Not Compared With the Migrations
+### 4.4 The Drift Gate Does Not Compare Primary Keys, and It Runs Only at Release Time
 
-The release pipeline validates the Alembic migration graph **offline**: it
-checks that the graph has exactly one head and that the whole chain renders to
-SQL. It does **not** compare the ORM metadata against the migration history,
-because that check requires a live database connection *and* a non-empty
-`target_metadata` in `migrations/env.py`. A model column added without a
-migration can therefore reach a release undetected.
+The release pipeline **does** compare the ORM metadata against the migration
+history: `backend/migrations/env.py` sets `target_metadata = Base.metadata`,
+and the release job runs `alembic upgrade head` followed by `alembic check`
+against an ephemeral TimescaleDB service container. A model column added
+without a migration now fails the release. See `docs/CI_CD_GUIDE.md` §5.2.1.
+
+Two limits of that gate remain, and they are properties of Alembic's
+autogenerate rather than of the implementation:
+
+- **Primary keys are not compared.** Alembic compares tables, columns,
+  indexes, constraints and types, but it does not compare primary keys, so a
+  model whose primary key was changed without a migration is not detected by
+  the gate. Such a change needs a migration and a reviewer's attention.
+- **The gate runs at release time, not on every pull request.** A drift
+  introduced on a branch is caught when the release is built, not when the
+  branch is merged. Moving the gate into the pull-request pipeline would catch
+  it earlier, at the cost of a database container on every pull request.
 
 ### 4.5 Branch Protection Is Documented, Not Applied
 

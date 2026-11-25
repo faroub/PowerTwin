@@ -32,7 +32,7 @@ test can never consume a runner indefinitely.
 | **Main CI** | `.github/workflows/ci.yml` | `pull_request` (any branch), `push (main)`, `workflow_dispatch` | Fast-feedback testing, formatting, linting, type-checking, system validation |
 | **Security** | `.github/workflows/security.yml` | `pull_request` (any branch), `push (main)`, `schedule (03:00 UTC)`, `workflow_dispatch` | CodeQL static analysis, pip/npm dependency audit, secret scanning, Trivy container scan |
 | **Nightly** | `.github/workflows/nightly.yml` | `schedule (01:00 UTC)`, `workflow_dispatch` | Long-duration regression, multi-cycle degradation, large plant topologies, historian throughput, endurance campaign |
-| **Release** | `.github/workflows/release.yml` | `push (tags: v*)`, `workflow_dispatch` | Version validation, migration validation, SBOM generation, container build, release tarball packaging |
+| **Release** | `.github/workflows/release.yml` | `push (tags: v*)`, `workflow_dispatch` | Version validation, migration-graph validation, ORM-versus-migration drift gate against an ephemeral database, SBOM generation, container build, release tarball packaging |
 | **Reusable Backend** | `.github/workflows/reusable-backend.yml` | `workflow_call` | Modular backend lint, type-check, test, coverage-gate and interpreter-compatibility jobs |
 | **Reusable Frontend** | `.github/workflows/reusable-frontend.yml` | `workflow_call` | Modular frontend test, coverage-gate and build job |
 
@@ -377,11 +377,49 @@ renders to SQL. Every migration is therefore importable, every
 `down_revision` resolves and every operation is well formed, and the check is
 deterministic and reproducible.
 
-> **NOT IMPLEMENTED:** comparing the ORM metadata against the migrations.
-> That check is what `alembic check` does, and it requires a live database
-> connection *and* a non-empty `target_metadata` in `migrations/env.py`.
-> Neither was available in CI, so the command failed with an import error
-> before the release could be built at all. It is listed in section 8.
+#### 5.2.1 The ORM-versus-migration drift gate
+
+The offline validator above cannot detect the drift that matters most: a model
+that was changed without a migration to match it. That comparison needs a
+database, so the release job runs it against an **ephemeral service
+container**:
+
+```bash
+python -m alembic -c backend/alembic.ini upgrade head
+python -m alembic -c backend/alembic.ini check
+```
+
+`upgrade head` builds the schema the migrations describe. `alembic check`
+then compares that schema with the schema the ORM declares and fails the
+release if the two differ, so a column that was added to a model without a
+migration cannot reach a release.
+
+Three details make the gate trustworthy rather than decorative:
+
+- **The comparison is not empty.** `backend/migrations/env.py` sets
+  `target_metadata = Base.metadata`. With an empty metadata the command has
+  nothing to compare and would always pass.
+- **The comparison is not noisy.** TimescaleDB creates
+  `telemetry_data_timestamp_ns_idx` when the migration converts
+  `telemetry_data` into a hypertable. The ORM cannot declare that index,
+  because TimescaleDB owns it, and it is re-created every time the migration
+  runs. The environment excludes it through an `include_object` hook, so the
+  gate reports only differences that a developer can actually fix.
+- **The comparison is against the right schema.** The ORM models declare the
+  index set the migrations create, and no other. A difference here would make
+  every release fail, so the two are kept in step and asserted by
+  `tests/test_deployment_images.py`.
+
+The container is a digest-pinned `timescale/timescaledb` image rather than a
+plain PostgreSQL server, because migration `001_initial_schema` converts a
+table into a hypertable and that call needs the extension. It is created for
+the job, holds no data that leaves the runner, and is discarded with the job.
+The credentials it uses are a validation-only placeholder for a throwaway
+container, not a secret and not a credential for anything else.
+
+Alembic does not compare **primary keys**. A change to the primary key of a
+model is therefore not detected by this gate and still needs a migration and a
+reviewer's eye.
 
 ### 5.3 Software bill of materials
 
@@ -521,9 +559,15 @@ still has to supply its own secret.
 
 ## 8. Known Limitations of the CI/CD System
 
-- **The metadata comparison of the migrations is NOT IMPLEMENTED.** The
-  offline validation of section 5.2 checks the graph and the rendering, not
-  the agreement between the ORM models and the migrations.
+- **The drift gate does not compare primary keys, and it runs only at release
+  time.** Alembic's autogenerate compares tables, columns, indexes,
+  constraints and types, but not primary keys, so a model whose primary key
+  was changed without a migration is not detected by the gate of section 5.2.1.
+  The gate is also a **release** step, not a pull-request step: a drift
+  introduced on a branch is caught when the release is built, not when the
+  branch is merged. Both are deliberate consequences of the tool, not
+  oversights, and both are stated so that a reviewer knows what the gate does
+  not cover.
 - **The frontend coverage floors are a regression guard, not a quality
   claim.** The suite measures 98.28 % lines, so the 75 % global floor has a
   wide margin, and the directory-scoped floors are the ones that actually
