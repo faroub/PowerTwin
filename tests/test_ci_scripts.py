@@ -46,6 +46,9 @@ endurance_campaign = _load_script(
     "powertwin_endurance_campaign", "endurance_campaign.py"
 )
 generate_sbom = _load_script("powertwin_generate_sbom", "generate_sbom.py")
+check_dependency_lock = _load_script(
+    "powertwin_check_dependency_lock", "check_dependency_lock.py"
+)
 
 
 # =============================================================================
@@ -523,3 +526,402 @@ def test_a_node_inventory_of_the_wrong_shape_is_reported(tmp_path: Path) -> None
 
     with pytest.raises(RuntimeError, match="must be a JSON object"):
         generate_sbom.load_node_inventory(inventory)
+
+
+# =============================================================================
+# Dependency lock verification
+# =============================================================================
+
+
+def _lock_entry(
+    name: str,
+    version: str,
+    digest: str = "a" * 64,
+    required_by: tuple[str, ...] = ("-r backend/requirements.txt",),
+) -> str:
+    """Build one entry of a lock file, in the format pip-compile writes."""
+    lines = [f"{name}=={version} \\", f"    --hash=sha256:{digest} \\"]
+    lines.append(f"    --hash=sha256:{'b' * 64}")
+    if len(required_by) == 1:
+        lines.append(f"    # via {required_by[0]}")
+    else:
+        lines.append("    # via")
+        lines.extend(f"    #   {parent}" for parent in required_by)
+    return "\n".join(lines)
+
+
+def test_the_lock_of_the_repository_is_a_faithful_resolution() -> None:
+    """Test that the committed lock matches the committed requirements."""
+    declared = check_dependency_lock.parse_requirements(
+        (REPO_ROOT / "backend" / "requirements.txt").read_text(encoding="utf-8")
+    )
+    locked = check_dependency_lock.parse_lock(
+        (REPO_ROOT / "backend" / "requirements.lock").read_text(encoding="utf-8")
+    )
+
+    assert check_dependency_lock.check_lock(declared, locked) == []
+
+
+def test_every_locked_package_carries_a_hash() -> None:
+    """Test that no package in the committed lock is installed without a hash."""
+    locked = check_dependency_lock.parse_lock(
+        (REPO_ROOT / "backend" / "requirements.lock").read_text(encoding="utf-8")
+    )
+
+    assert locked, "the committed lock is empty"
+    for package in locked.values():
+        assert package.hashes, f"{package.name} is pinned without a hash"
+        for digest in package.hashes:
+            assert len(digest) == 64
+
+
+def test_every_locked_package_is_pinned_to_one_exact_version() -> None:
+    """Test that the lock contains no range, only exact versions."""
+    locked = check_dependency_lock.parse_lock(
+        (REPO_ROOT / "backend" / "requirements.lock").read_text(encoding="utf-8")
+    )
+
+    for package in locked.values():
+        assert ">" not in package.version
+        assert "<" not in package.version
+        assert "*" not in package.version
+
+
+def test_a_requirement_that_is_not_locked_is_reported() -> None:
+    """Test that a declared requirement missing from the lock is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(_lock_entry("httpx", "0.28.1"))
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any(
+        "fastapi" in problem and "not in the lock" in problem for problem in problems
+    )
+
+
+def test_a_locked_version_outside_the_declared_range_is_reported() -> None:
+    """Test that a lock that violates a declared range is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(_lock_entry("fastapi", "0.100.0"))
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any("does not satisfy" in problem for problem in problems)
+
+
+def test_a_locked_package_without_a_hash_is_reported() -> None:
+    """Test that a lock entry without a hash is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(
+        "fastapi==0.165.0\n    # via -r backend/requirements.txt\n"
+    )
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any("without a single hash" in problem for problem in problems)
+
+
+def test_a_locked_package_that_nothing_declares_is_reported() -> None:
+    """Test that a lock entry which is no longer declared is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(
+        _lock_entry("fastapi", "0.165.0") + "\n" + _lock_entry("httpx", "0.28.1")
+    )
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any(
+        "httpx" in problem and "does not declare it" in problem for problem in problems
+    )
+
+
+def test_an_unreachable_locked_package_is_reported() -> None:
+    """Test that a lock entry no declared requirement reaches is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(
+        _lock_entry("fastapi", "0.165.0")
+        + "\n"
+        + _lock_entry("httpx", "0.28.1", required_by=())
+    )
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any("no declared requirement reaches" in problem for problem in problems)
+
+
+def test_a_dependency_edge_naming_a_missing_package_is_reported() -> None:
+    """Test that a provenance entry naming an absent package is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(
+        _lock_entry("fastapi", "0.165.0", required_by=("httpx",))
+    )
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any("which the lock does not contain" in problem for problem in problems)
+
+
+def test_a_requirement_that_is_declared_twice_is_rejected() -> None:
+    """Test that a duplicated declaration is reported rather than accepted."""
+    with pytest.raises(ValueError, match="declared more than once"):
+        check_dependency_lock.parse_requirements("fastapi>=0.110.0\nfastapi>=0.111.0\n")
+
+
+def test_a_malformed_declaration_is_rejected() -> None:
+    """Test that a declaration that is not a requirement is reported."""
+    with pytest.raises(ValueError, match="not a valid requirement"):
+        check_dependency_lock.parse_requirements("not a requirement at all\n")
+
+
+def test_the_lock_cli_accepts_the_committed_lock(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that the command line check accepts the committed lock."""
+    exit_code = check_dependency_lock.main([])
+
+    assert exit_code == 0
+    assert "faithful resolution" in capsys.readouterr().out
+
+
+def test_the_lock_cli_fails_on_a_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that the command line check fails and explains a mismatch."""
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("fastapi>=99.0.0\n", encoding="utf-8")
+    lock = tmp_path / "requirements.lock"
+    lock.write_text(_lock_entry("fastapi", "0.165.0"), encoding="utf-8")
+
+    exit_code = check_dependency_lock.main(
+        ["--requirements", str(requirements), "--lock", str(lock)]
+    )
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "does not match" in captured.err
+    assert "does not satisfy" in captured.err
+
+
+def test_the_lock_cli_fails_on_an_unreadable_lock(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that the command line check fails when a file cannot be read."""
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("fastapi>=0.110.0\n", encoding="utf-8")
+
+    exit_code = check_dependency_lock.main(
+        [
+            "--requirements",
+            str(requirements),
+            "--lock",
+            str(tmp_path / "does-not-exist.lock"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "could not be read" in capsys.readouterr().err
+
+
+# =============================================================================
+# Locked environment verification
+# =============================================================================
+
+
+verify_locked_environment = _load_script(
+    "powertwin_verify_locked_environment", "verify_locked_environment.py"
+)
+
+
+def _installed(name: str, version: str) -> verify_locked_environment.InstalledPackage:
+    """Build an installed-package record for the verification tests."""
+    return verify_locked_environment.InstalledPackage(name=name, version=version)
+
+
+def test_the_locked_versions_are_read_from_the_lock() -> None:
+    """Test that the pinned versions of a lock file are read correctly."""
+    text = (
+        "fastapi==0.165.0 \\\n"
+        "    --hash=sha256:" + "a" * 64 + " \\\n"
+        "    # via -r backend/requirements.txt\n"
+        "\n"
+        "PyYAML==6.0.4 \\\n"
+        "    --hash=sha256:" + "b" * 64 + " \\\n"
+        "    # via -r backend/requirements.txt\n"
+    )
+
+    versions = verify_locked_environment.parse_locked_versions(text)
+
+    assert versions == {"fastapi": "0.165.0", "pyyaml": "6.0.4"}
+
+
+def test_the_names_are_normalised_the_way_pep_503_defines() -> None:
+    """Test that the name normalisation folds the separators together."""
+    assert verify_locked_environment.canonicalize("PyYAML") == "pyyaml"
+    assert (
+        verify_locked_environment.canonicalize("typing_extensions")
+        == "typing-extensions"
+    )
+    assert verify_locked_environment.canonicalize("pydantic_core") == "pydantic-core"
+    assert verify_locked_environment.canonicalize("SQLAlchemy") == "sqlalchemy"
+
+
+def test_a_package_that_the_lock_pins_twice_is_refused() -> None:
+    """Test that a lock with a duplicate entry is rejected rather than merged."""
+    text = "fastapi==0.165.0\nfastapi==0.166.0\n"
+
+    with pytest.raises(ValueError, match="more than once"):
+        verify_locked_environment.parse_locked_versions(text)
+
+
+def test_an_environment_that_matches_the_lock_has_no_problem() -> None:
+    """Test that an environment identical to the lock passes the check."""
+    locked = {"fastapi": "0.165.0", "pyyaml": "6.0.4"}
+    installed = {
+        "fastapi": _installed("fastapi", "0.165.0"),
+        "pyyaml": _installed("PyYAML", "6.0.4"),
+    }
+
+    problems, extra = verify_locked_environment.verify_environment(
+        locked, installed, strict=True
+    )
+
+    assert problems == []
+    assert extra == []
+
+
+def test_a_locked_package_that_is_not_installed_is_reported() -> None:
+    """Test that a package the lock pins but the environment lacks is reported."""
+    locked = {"fastapi": "0.165.0", "pyyaml": "6.0.4"}
+    installed = {"fastapi": _installed("fastapi", "0.165.0")}
+
+    problems, _ = verify_locked_environment.verify_environment(
+        locked, installed, strict=True
+    )
+
+    assert len(problems) == 1
+    assert "pyyaml" in problems[0]
+    assert "not installed" in problems[0]
+
+
+def test_a_package_installed_at_another_version_is_reported() -> None:
+    """Test that a substituted version is reported."""
+    locked = {"fastapi": "0.165.0"}
+    installed = {"fastapi": _installed("fastapi", "0.166.0")}
+
+    problems, _ = verify_locked_environment.verify_environment(
+        locked, installed, strict=True
+    )
+
+    assert len(problems) == 1
+    assert "0.165.0" in problems[0]
+    assert "0.166.0" in problems[0]
+
+
+def test_a_package_beyond_the_lock_is_a_problem_only_in_the_strict_mode() -> None:
+    """Test that an unpinned package is tolerated by default and refused strictly.
+
+    This is the case that the container build has to catch: a build tool that
+    is removed again can leave its own dependency behind, and the environment
+    then carries a package that no hash in the lock covers.
+    """
+    locked = {"fastapi": "0.165.0"}
+    installed = {
+        "fastapi": _installed("fastapi", "0.165.0"),
+        "packaging": _installed("packaging", "26.4"),
+    }
+
+    problems, extra = verify_locked_environment.verify_environment(
+        locked, installed, strict=False
+    )
+    assert problems == []
+    assert extra == ["packaging"]
+
+    problems, extra = verify_locked_environment.verify_environment(
+        locked, installed, strict=True
+    )
+    assert len(problems) == 1
+    assert "packaging" in problems[0]
+    assert extra == ["packaging"]
+
+
+def test_the_environment_cli_succeeds_on_a_matching_environment(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that the command line check succeeds on a matching environment."""
+    lock = tmp_path / "requirements.lock"
+    lock.write_text("fastapi==0.165.0\n", encoding="utf-8")
+    monkeypatch.setattr(
+        verify_locked_environment,
+        "read_installed_packages",
+        lambda: {"fastapi": _installed("fastapi", "0.165.0")},
+    )
+
+    exit_code = verify_locked_environment.main(["--lock", str(lock), "--strict"])
+
+    assert exit_code == 0
+    assert "matches the lock" in capsys.readouterr().out
+
+
+def test_the_environment_cli_fails_on_a_package_beyond_the_lock(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that the command line check refuses an unpinned package.
+
+    This is the case the container build has to catch: a build tool that is
+    removed again can leave its own dependency behind, and the environment then
+    carries a package that no hash in the lock covers.
+    """
+    lock = tmp_path / "requirements.lock"
+    lock.write_text("fastapi==0.165.0\n", encoding="utf-8")
+    monkeypatch.setattr(
+        verify_locked_environment,
+        "read_installed_packages",
+        lambda: {
+            "fastapi": _installed("fastapi", "0.165.0"),
+            "packaging": _installed("packaging", "26.4"),
+        },
+    )
+
+    exit_code = verify_locked_environment.main(["--lock", str(lock), "--strict"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "does not match" in captured.err
+    assert "packaging" in captured.err
+
+
+def test_the_environment_cli_reports_an_unreadable_lock(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that the command line check fails when the lock cannot be read."""
+    exit_code = verify_locked_environment.main(
+        ["--lock", str(tmp_path / "does-not-exist.lock")]
+    )
+
+    assert exit_code == 1
+    assert "could not be read" in capsys.readouterr().err
+
+
+def test_the_two_lock_parsers_agree_on_the_committed_lock() -> None:
+    """Test that the two independent readers of the lock report the same thing.
+
+    The lock checker and the environment verifier parse the lock separately
+    and for different purposes. If one of them drifts away from the format
+    pip-compile writes, the two would disagree about what the lock says, and
+    one of the two gates would be checking the wrong thing.
+    """
+    lock = REPO_ROOT / "backend" / "requirements.lock"
+    text = lock.read_text(encoding="utf-8")
+
+    by_version = verify_locked_environment.parse_locked_versions(text)
+    by_package = check_dependency_lock.parse_lock(text)
+
+    assert by_version, "the committed lock pins no package"
+    assert set(by_version) == set(by_package)
+    for canonical, package in by_package.items():
+        assert by_version[canonical] == package.version
+        assert package.hashes, f"the lock pins '{package.name}' without a hash"

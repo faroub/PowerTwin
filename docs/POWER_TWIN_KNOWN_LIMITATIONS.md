@@ -116,21 +116,59 @@ and the coverage provider was not even installed, so the check could not run.
 not configured.** The operator path — log in, read the overview, issue a
 setpoint, observe the result — is never exercised automatically.
 
-### 4.3 The Python Runtime Dependencies Are Not Pinned
+### 4.3 The Python Runtime Dependencies Are Now Pinned, and What That Does Not Cover
 
-`backend/requirements.txt` declares every runtime dependency with `>=`.
-Two builds of the same commit can therefore resolve to different versions, and
-the release archive is not byte-for-byte reproducible. `pip-audit` audits the
-declared *ranges* rather than one exact build.
+`backend/requirements.txt` declares every runtime dependency with `>=`, as
+the file a human maintains. The **resolution** of those declarations is
+`backend/requirements.lock`: every dependency, including the transitive ones,
+pinned to one exact version and carrying the SHA-256 hash of every
+distribution of that version.
 
-The **CI toolchain** is pinned to exact versions in
-`backend/requirements-ci.txt`, so the linters, the type checker and the test
-runner are identical in every pipeline run. The **runtime** dependencies are
-not. The size of the gap was observed during the final audit: the same source
-tree resolved to FastAPI 0.165 and bcrypt 5.0 on a clean Python 3.12
-environment, against 0.118 and 4.x on the machine it had been developed on.
-The suite passed against both, which is reassuring but is not the same as
-being pinned.
+The container image and every workflow install the lock with
+`--require-hashes`, so a build either reproduces the recorded artefact
+exactly or fails. The lock is checked against the declarations by
+`scripts/check_dependency_lock.py`, which the pipeline runs and which the test
+suite exercises, so the lock cannot silently drift away from the ranges it
+was generated from. The size of the gap this closed was observed during the
+final audit: the same source tree resolved to FastAPI 0.165 and bcrypt 5.0 on
+a clean Python 3.12 environment, against 0.118 and 4.x on the machine it had
+been developed on.
+
+The **installed set** is checked as well, in the direction the hash check
+cannot reach. `scripts/verify_locked_environment.py` compares the
+distributions that are actually installed against the packages the lock pins.
+The container build runs it in strict mode, so an image carrying a package
+that no hash covers fails to build; the pipeline runs it in the default mode,
+so a runtime package that was quietly substituted during the CI toolchain
+install fails the job. This matters because the build tool used to install
+the dependencies has a dependency of its own, which removing the tool alone
+leaves behind.
+
+**What the pinning does not cover.** A lock records the resolution that was
+produced on the day it was generated. It does not make the *declared ranges*
+reproducible, and it does not prove that the pinned versions are free of
+vulnerabilities. Four things remain outside it:
+
+- **The lock is a snapshot, not a live resolution.** A newly published
+  release of a dependency does not enter the lock until somebody regenerates
+  it. That is the intended behaviour — a change to the deployed artefact has
+  to be a visible, reviewable change to a committed file — but it means that
+  the lock ages until it is regenerated.
+- **The lock was resolved for one interpreter.** It was generated on Python
+  3.12 and is installed with `--require-hashes` on 3.12, 3.13 and 3.14. The
+  three interpreters were each verified to install it and to pass the suite,
+  but a package that publishes no wheel for a future interpreter would have
+  to be built from its source distribution, which the hash check still
+  enforces but which is slower and needs a compiler.
+- **The CI toolchain is pinned separately.** `backend/requirements-ci.txt`
+  pins the linters, the type checker and the test runner to exact versions,
+  as it did before, and those pins are not hash-verified. They are build
+  tooling: they never enter a deployed artefact.
+- **A hash proves integrity, not provenance.** The lock records the SHA-256
+  hash of every distribution, and `--require-hashes` makes pip refuse any
+  artefact whose hash does not match. That proves the installed artefact is
+  the one the lock recorded. It does not, on its own, prove where that
+  artefact was published.
 
 The frontend **is** pinned, by `frontend/package-lock.json` and `npm ci`.
 

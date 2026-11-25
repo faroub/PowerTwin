@@ -98,6 +98,84 @@ declines to make, and would reject well-formatted files. In `backend/` the line
 length is 100 and the formatter's output already satisfies `E501`, so the check
 is meaningful and is kept there.
 
+### 2.3 Dependency resolution and hash verification
+
+The runtime dependencies are declared in `backend/requirements.txt` as version
+**ranges**, because a range is what a human maintains: it says which major
+version the project is written against and leaves the exact build to the
+resolver. The **resolution** is `backend/requirements.lock`, which was
+generated with `pip-compile --generate-hashes` and commits, for all 35
+packages including the transitive ones, one exact version and the SHA-256
+hash of every distribution of that version.
+
+| Artefact | Holds | Who maintains it |
+| :--- | :--- | :--- |
+| `backend/requirements.txt` | The declared ranges, and the extras that are wanted | A human, together with the source change that needs them |
+| `backend/requirements.lock` | The exact resolution, with the hashes | `pip-compile`, regenerated and committed alongside a change to the file above |
+| `backend/requirements-ci.txt` | The build tooling, pinned to exact versions | A human, on a deliberate tooling upgrade |
+
+**Everything that installs the runtime dependencies installs the lock, with
+`--require-hashes`.** That applies to the container image, to the main CI
+workflow, to the reusable backend workflow on all three interpreters, to the
+nightly campaign and to the release workflow. Pip refuses to install an
+artefact whose hash does not match the recorded one, so a build either
+reproduces the recorded dependency set exactly or fails. It also refuses a
+lock that is missing a package or that carries an unhashed entry, which makes
+the lock's own completeness a property that the pipeline proves on every run.
+
+**The lock cannot drift away from the declarations.**
+`scripts/check_dependency_lock.py` compares the two and reports a declared
+requirement that is missing from the lock, a locked version that no longer
+satisfies its declared range, a locked entry without a hash, a locked entry
+that no declared requirement reaches, and a dependency edge that names a
+package the lock does not contain. The pipeline runs it as a step, and the
+test suite exercises it, so a range that is changed without regenerating the
+lock fails the build rather than passing silently.
+
+**The runtime image contains only the packages of the lock.** Python 3.12 no
+longer installs `setuptools` into a fresh virtual environment, and nothing in
+the service needs it. The build tool that is used to install the dependencies
+is removed again afterwards, together with the dependency it drags in — the
+wheel builder requires `packaging`, and removing the builder alone leaves
+that dependency behind. The base image's own `pip` is removed as well, so the
+shipped image carries no package installer at all.
+
+That last statement is a claim, and claims of this kind are worth proving
+rather than leaving to the reading of an uninstall chain.
+`scripts/verify_locked_environment.py` compares the distributions that are
+actually installed against the packages the lock pins, and reports a locked
+package that is missing, one that is installed at a different version, and one
+that is installed but that the lock does not pin.
+
+| Mode | Used by | What it requires |
+| :--- | :--- | :--- |
+| strict | the container build | the installed set is **exactly** the locked set |
+| default | the pipeline | every locked package is present at exactly the pinned version; additional packages are reported and permitted |
+
+The container build runs the strict mode, so an image that carries a package
+no hash covers **fails to build** rather than being published. The pipeline
+runs the default mode, which asserts that the CI toolchain install did not
+quietly replace a runtime package with another version — a check that is
+worth having precisely because it is the kind of substitution that a range
+based install would perform silently.
+
+The script uses the standard library only. That is deliberate: it has to run
+inside the container image, whose virtual environment carries nothing but the
+packages of the lock.
+
+`pip-audit` audits the **lock**, not the declared ranges. Auditing the ranges
+reports the newest version each range would resolve to, which is not
+necessarily the version that is installed or that is shipped.
+
+To change a runtime dependency, edit `backend/requirements.txt`, regenerate
+the lock and commit both files:
+
+```bash
+pip-compile --generate-hashes --strip-extras \
+    --output-file=backend/requirements.lock backend/requirements.txt
+python scripts/check_dependency_lock.py
+```
+
 ---
 
 ## 3. Branch Protection & GitHub Settings
@@ -410,13 +488,16 @@ still has to supply its own secret.
 - **The branch protection of `main` is documented, not applied.** The setting
   is a property of the repository configuration on GitHub, not of the source
   code, and must be applied by an administrator.
-- **The dependency ranges of `backend/requirements.txt` are not pinned.** The
-  Python dependencies are declared with `>=`, so two builds of the same commit
-  can resolve to different versions. The lock file of the frontend is pinned
-  and `npm ci` is used. Pinning the Python dependencies is remaining work.
-- **`pip-audit` audits the declared ranges, not a lock file.** It resolves
-  the ranges at audit time, so the result describes the ranges and not one
-  exact build.
+- **The lock file is a snapshot.** `backend/requirements.lock` pins the
+  runtime dependencies to the versions that were current when it was
+  generated. A newly published upstream release enters it only when somebody
+  regenerates it, which is the intended behaviour but means that the lock
+  ages until it is regenerated. It was resolved on Python 3.12 and is
+  installed with `--require-hashes` on 3.12, 3.13 and 3.14.
+- **The CI toolchain is pinned without hashes.** `backend/requirements-ci.txt`
+  pins the linters, the type checker and the test runner to exact versions.
+  They are build tooling and never enter a deployed artefact, so they are not
+  hash-verified the way the runtime dependencies are.
 - **The endurance campaign covers the reference plant only.** It does not
   exercise every topology variant.
 - **The release workflow publishes only on a tag.** A manual dispatch is a
@@ -430,15 +511,19 @@ Developers can execute all CI checks locally prior to opening a pull request.
 
 ### Environment
 
-The pipeline installs the runtime requirements first and the CI toolchain
-second, so the pinned tool versions win whatever the runtime ranges resolve
-to. A local environment should be built the same way:
+The pipeline installs the runtime lock first and the CI toolchain second, so
+the pinned tool versions win whatever the runtime ranges resolve to. A local
+environment should be built the same way:
 
 ```bash
 python3.12 -m venv .venv
 . .venv/bin/activate
-pip install -r backend/requirements.txt -r backend/requirements-ci.txt
+pip install --require-hashes -r backend/requirements.lock
+pip install -r backend/requirements-ci.txt
 ```
+
+Installing the lock rather than the declared ranges is what makes a local run
+and a pipeline run exercise the same package versions.
 
 Run every command **from the repository root**. Ruff, pytest and coverage all
 discover their configuration by walking up from the working directory, so a
@@ -500,6 +585,12 @@ python scripts/validate_release_version.py v1.0.0
 
 # Validate the migration graph offline
 python scripts/validate_migrations.py
+
+# Check that the dependency lock still matches the declared requirements
+python scripts/check_dependency_lock.py
+
+# Check that the installed environment is the one the lock describes
+python scripts/verify_locked_environment.py --lock backend/requirements.lock
 
 # Run the endurance campaign
 PYTHONPATH=. python scripts/endurance_campaign.py --ticks 36000 --seed 42 --repeats 2

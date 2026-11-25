@@ -19,3 +19,21 @@ bcrypt>=4.1.0
 # in backend/requirements-ci.txt, which pins them to exact versions, so that a
 # deployment never installs a tool it does not need and the pipeline always
 # runs the same tool versions.
+#
+# This file declares the runtime dependencies as ranges, because a range is
+# what a human maintains: it says which major version the project is written
+# against and leaves the exact build to the resolver. The resolution is
+# backend/requirements.lock, which pins every dependency, including the
+# transitive ones, to one exact version and carries the hash of every
+# distribution of that version. The container image and the pipeline install
+# the lock with --require-hashes, so a build either reproduces the recorded
+# artefact exactly or fails.
+#
+# The lock is generated from this file and is checked against it by
+# scripts/check_dependency_lock.py, so it cannot drift away from the ranges
+# declared here. Regenerate it with:
+#
+#   pip-compile --generate-hashes --strip-extras \
+#       --output-file=backend/requirements.lock backend/requirements.txt
+#
+# and commit the result together with the change to this file.

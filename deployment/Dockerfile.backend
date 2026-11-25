@@ -30,31 +30,51 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 # The toolchain lives here and only here. Every runtime dependency in
-# backend/requirements.txt ships a manylinux wheel, so the compiler is a
+# backend/requirements.lock ships a manylinux wheel, so the compiler is a
 # fallback for a platform without one rather than the normal path.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY backend/requirements.txt /tmp/requirements.txt
+COPY backend/requirements.txt backend/requirements.lock /tmp/
 
 # A self-contained virtual environment is copied into the runtime stage as a
 # whole, so the runtime never needs a package manager, a compiler or a
 # network connection to install anything.
 #
+# The dependencies are installed from the lock, with --require-hashes, so the
+# image contains exactly one known version of every package and pip refuses to
+# install anything whose hash does not match the recorded one. The lock is
+# generated from backend/requirements.txt by pip-compile and is checked
+# against it by scripts/check_dependency_lock.py, so it cannot drift away
+# from the declared ranges.
+#
 # The package installer and the wheel builder are removed again once the
 # dependencies are in place. A deployed artefact is not a build environment,
-# and the two of them are not runtime dependencies of this service. Their
-# absence is also what keeps the container security scan honest: the wheel
-# builder is the only thing that still carries a vulnerable copy of the
-# setuptools package index, and it has no business being on a runtime layer.
+# and neither of them is a runtime dependency of this service.
+#
+# Python 3.12 no longer installs setuptools into a fresh virtual environment,
+# and nothing in this service needs it, so the runtime layer carries only the
+# packages of the lock, each of them hash-verified.
+#
+# The wheel builder has a dependency of its own - `packaging`, the only
+# distribution it requires - which has to go with it: removing the builder
+# alone leaves that dependency behind, and the environment would then carry a
+# package that no hash in the lock covers. The strict verification below is
+# what proves the claim, rather than leaving it to the reading of an
+# uninstall chain.
+COPY scripts/verify_locked_environment.py /tmp/verify_locked_environment.py
+
 RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt \
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip wheel \
+    && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock \
     && /opt/venv/bin/pip uninstall -y wheel \
+    && /opt/venv/bin/pip uninstall -y packaging \
     && /opt/venv/bin/pip uninstall -y pip \
     && rm -f /opt/venv/bin/pip /opt/venv/bin/pip3 /opt/venv/bin/pip3.12 \
+    && /opt/venv/bin/python /tmp/verify_locked_environment.py \
+        --lock /tmp/requirements.lock --strict \
     && /opt/venv/bin/python -c "import bcrypt, fastapi, httpx, jwt, passlib, psycopg2, pydantic, pymodbus, sqlalchemy, uvicorn, yaml"
 
 # =============================================================================
@@ -74,6 +94,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
+
+# The base image ships pip for the system interpreter. The runtime layer has
+# no use for a package installer: the dependencies were installed in the
+# builder stage and were hash-verified there, and the container runs as a
+# non-root user that cannot write to the system site-packages in any case.
+# Removing it means the shipped image carries no way to install anything at
+# run time, which is what "a container image is a deployed artefact, not a
+# build environment" has to mean in practice.
+RUN rm -rf /usr/local/lib/python3.12/site-packages/pip \
+    && rm -rf /usr/local/lib/python3.12/site-packages/pip-*.dist-info \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
 
 COPY --from=builder /opt/venv /opt/venv
 

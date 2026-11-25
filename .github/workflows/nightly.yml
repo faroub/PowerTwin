@@ -35,13 +35,23 @@ jobs:
           cache: "pip"
           cache-dependency-path: |
             backend/requirements.txt
+            backend/requirements.lock
             backend/requirements-ci.txt
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
+          # The runtime dependencies are installed from the lock, with
+          # --require-hashes, so every job exercises exactly the versions the
+          # container image ships.
+          pip install --require-hashes -r backend/requirements.lock
           pip install -r backend/requirements-ci.txt
+
+      # The lock says which versions must be installed; this says that the
+      # versions that are installed are those. It also catches the toolchain
+      # install above quietly replacing a runtime package with another one.
+      - name: Verify the Installed Environment Matches the Lock
+        run: python scripts/verify_locked_environment.py --lock backend/requirements.lock
 
       - name: Large Plant Topology Regression (50 MW / 200 MWh Variant)
         run: |
