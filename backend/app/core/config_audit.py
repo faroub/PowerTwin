@@ -1,10 +1,22 @@
-"""Configuration Change Audit Logger."""
+"""Configuration Change Audit Logger.
+
+Every configuration change is recorded here and written to the dedicated
+operator-action journal (`backend.app.core.operator_journal`), which is the
+platform's durable, hash-chained audit trail.
+"""
 
 import datetime
+import logging
 
 from pydantic import BaseModel, Field
 
+from backend.app.core.operator_journal import (
+    OperatorJournalError,
+    get_operator_journal,
+)
 from backend.app.core.secrets import is_sensitive_name, redact_text, redact_value
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigChangeRecord(BaseModel):
@@ -65,4 +77,28 @@ class ConfigChangeAuditLog:
             reason=reason,
         )
         self.entries.append(record)
+        self._write_to_journal(record)
         return record
+
+    def _write_to_journal(self, record: ConfigChangeRecord) -> None:
+        """Write the change to the dedicated operator-action journal.
+
+        A journal that cannot be written is reported as an error and the
+        journal marks itself degraded; the error is never swallowed.
+        """
+        try:
+            get_operator_journal().record(
+                action="CONFIGURATION_CHANGE",
+                actor=record.user_id,
+                target=f"{record.component_name}.{record.parameter_name}",
+                source="CONFIG",
+                outcome="SUCCESS",
+                details={
+                    "old_value": record.old_value,
+                    "new_value": record.new_value,
+                    "reason": record.reason,
+                },
+                timestamp_ns=record.timestamp_ns,
+            )
+        except OperatorJournalError as err:
+            logger.error("The configuration change could not reach the journal: %s", err)

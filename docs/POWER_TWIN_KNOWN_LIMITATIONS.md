@@ -309,19 +309,36 @@ The nightly determinism campaign builds the 10 MW / 20 MWh reference plant.
 It does not exercise every topology variant, every vendor plugin combination,
 or the 50 MW / 200 MWh variant under long-duration load.
 
-### 4.8 A Module-Level Simulation Entry Point Remains
+### 4.8 The Simulation Runtime Has a Single Write Path
 
-`backend/app/api/v1/simulation_ctrl.py` keeps `set_active_simulation_engine(...)`
-as a compatibility helper for the unit tests. It writes to the
-application-scoped runtime under a lock, so it is not an unguarded global, but
-it is a second way to reach the same state.
+The application-scoped runtime is the only way to attach or detach a plant
+and its engine. The module-level `set_active_simulation_engine(...)` helpers
+that used to offer a second route to the same state are gone: a plant is
+attached with `SimulationRuntime.attach_plant` and detached with
+`SimulationRuntime.drop`, and `tests/test_simulation_runtime.py` asserts that
+neither module can offer the old way back.
 
-### 4.9 The Operator-Action Journal Is Not Dedicated or Tamper-Evident
+### 4.9 The Operator-Action Journal Is Fail-Open When a Write Fails
 
-Commands, setpoint changes, faults and configuration changes reach the
-historian and the structured logs, which satisfies `AGENTS.md` §2.10 for the
-simulated platform. There is no separate, append-only, tamper-evident operator
-action journal. A warranty or dispute-resolution use case would require one.
+The platform has one dedicated, append-only, tamper-evident operator-action
+journal (`backend/app/core/operator_journal.py`). Every command, setpoint
+change, configuration change, fault and operator action flows through it, and
+`OperatorActionJournal.verify()` reports the first break in its hash chain.
+
+The boundary worth knowing about is what happens when a write **fails**. The
+failure is not swallowed: it is raised as an `OperatorJournalError`, logged as
+an error, and the journal marks itself `degraded` and exposes the message.
+But the action that was being recorded is **not** rolled back, and the entry
+is **not** written later. The trail therefore has a gap.
+
+This is deliberate. A simulation action cannot be undone — the engine has
+already advanced by the time the record is written — and failing closed would
+make the whole plant uncontrollable the moment the disk fills. The operator
+can tell "nothing happened" from "the record could not be written" by reading
+the journal's `degraded` flag and `last_error`; the trail itself does not
+record the gap, and the journal is not a substitute for a signed external
+record. A deployment that needs the trail to survive the loss of the disk
+should copy it off the host.
 
 ### 4.10 The Illustrative Label Does Not Yet Reach the Operator's Screen
 

@@ -10,6 +10,7 @@ only being exercised by the pipeline that calls them.
 from __future__ import annotations
 
 import importlib.util
+import logging
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -305,6 +306,25 @@ def test_a_missing_alembic_configuration_is_reported() -> None:
     """Test that a missing Alembic configuration is an explicit failure."""
     with pytest.raises(FileNotFoundError):
         validate_migrations_module.validate_migrations(Path("/nonexistent/alembic.ini"))
+
+
+def test_the_migration_environment_leaves_the_application_loggers_alone() -> None:
+    """Test that loading the Alembic environment does not silence the application.
+
+    ``logging.config.fileConfig`` disables every logger that already exists
+    unless it is told otherwise. The Alembic environment is imported by the
+    migration tooling inside the process that owns the audit trail, so the
+    default would switch off the application's loggers — and with them the
+    audit trail that ``AGENTS.md`` §2.10 requires — without a word.
+    """
+    logger = logging.getLogger("backend.app.core.operator_journal")
+    logger.disabled = False
+    try:
+        validate_migrations_module.validate_migrations()
+        assert logger.disabled is False
+        assert logger.isEnabledFor(logging.ERROR) is True
+    finally:
+        logger.disabled = False
 
 
 # =============================================================================

@@ -203,6 +203,30 @@ class TestComposeFiles:
             if '- "' in line and "ports" not in line:
                 assert "127.0.0.1:" in line, f"a published port is not loopback bound: {line}"
 
+    @pytest.mark.parametrize("path", COMPOSE_FILES, ids=lambda p: p.name)
+    def test_the_operator_action_journal_survives_the_container(self, path: Path) -> None:
+        """The audit trail must not disappear with the container that wrote it.
+
+        The operator-action journal is the platform's append-only, tamper-evident
+        record. Left in the container's writable layer it is lost as soon as the
+        container is replaced, which is exactly when a warranty or dispute
+        analysis needs it.
+        """
+        compose = yaml.safe_load(path.read_text())
+        backend = compose["services"]["backend"]
+        journal_path = backend["environment"]["OPERATOR_JOURNAL_PATH"]
+
+        mounts = backend.get("volumes") or []
+        assert any("operator_journal" in str(mount) for mount in mounts), (
+            f"{path.name} does not mount a volume for the operator-action journal"
+        )
+        assert any(str(mount).endswith(journal_path.rsplit("/", 1)[0]) for mount in mounts), (
+            f"{path.name} mounts the journal volume somewhere other than the journal's directory"
+        )
+        assert "operator_journal" in (compose.get("volumes") or {}), (
+            f"{path.name} mounts a journal volume it never declares"
+        )
+
 
 class TestCiWorkflow:
     """The pipeline must validate the compose file without weakening it."""

@@ -204,6 +204,25 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     JSON_LOGS: bool = False
 
+    # Operator-Action Journal
+    #
+    # The journal is the platform's dedicated, append-only and tamper-evident
+    # audit trail. It is always on: AGENTS.md §2.10 requires every command,
+    # setpoint change, configuration change, fault and operator action to be
+    # recorded, so there is deliberately no switch that turns it off.
+    OPERATOR_JOURNAL_PATH: str = Field(
+        default="var/operator_actions.jsonl",
+        description="Path of the append-only operator-action journal (JSON Lines)",
+    )
+    OPERATOR_JOURNAL_FSYNC: bool = Field(
+        default=True,
+        description=(
+            "Force every journal entry to the storage device before the write returns. "
+            "Turning it off keeps the entry in the operating system's page cache, "
+            "which survives a process crash but not a machine crash"
+        ),
+    )
+
     def create_simulation_configuration(self) -> "SimulationConfiguration":
         """Build the simulation engine configuration from these settings."""
         from backend.app.simulation.config import SimulationConfiguration

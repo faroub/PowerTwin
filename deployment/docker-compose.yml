@@ -31,6 +31,13 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DEBUG: ${DEBUG:-True}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # The operator-action journal is the platform's append-only, tamper-evident
+      # audit trail. It lives on a named volume so that it survives a container
+      # replacement: a trail that disappears with the container it was written
+      # in cannot answer a warranty or dispute question.
+      OPERATOR_JOURNAL_PATH: /app/var/operator_actions.jsonl
+    volumes:
+      - operator_journal:/app/var
     ports:
       - "127.0.0.1:8000:8000"  # Bound strictly to loopback interface
     depends_on:
@@ -59,4 +66,6 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  operator_journal:
     driver: local

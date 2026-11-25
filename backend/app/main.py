@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.api import health, router
 from backend.app.core.config import settings
 from backend.app.core.logging import setup_logging
+from backend.app.core.operator_journal import close_operator_journal
 from backend.app.core.safety import get_safety_report, validate_safety_invariants
 from backend.app.simulation.application import close_simulation, init_simulation
 
@@ -28,6 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
     print("Shutting down PowerTwin BESS Platform.")
     close_simulation(app)
+    close_operator_journal()
 
 
 def create_application() -> FastAPI:

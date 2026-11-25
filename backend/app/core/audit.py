@@ -7,6 +7,12 @@ configured interval or when the table reaches `flush_threshold` entries.
 
 Flushes are performed out of the critical section so a blocked writer cannot
 deadlock the process that appends the record.
+
+Every event is **also** written to the dedicated operator-action journal
+(`backend.app.core.operator_journal`), which is the platform's durable,
+hash-chained audit trail. This module keeps its own buffer and its own file
+because the authentication events are read back from that file by the
+operational tooling; the journal is what makes the trail verifiable.
 """
 
 import datetime
@@ -18,6 +24,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from backend.app.core.operator_journal import (
+    OperatorJournalError,
+    get_operator_journal,
+)
 from backend.app.core.secrets import redact_details
 
 logger = logging.getLogger(__name__)
@@ -113,7 +123,13 @@ class AuditLog:
         The write to disk happens outside the lock so that a slow disk cannot
         deadlock the thread that records the event. A non-reentrant lock would
         freeze the process in that case.
+
+        The event is written to the operator-action journal first: the journal
+        is the durable trail, and the in-memory buffer is only a fast view of
+        it.
         """
+        self._write_to_journal(event)
+
         with self._lock:
             self._entries.append(event)
             entries = self._entries.copy() if len(self._entries) >= self.flush_threshold else []
@@ -122,6 +138,25 @@ class AuditLog:
         if entries:
             self._flush(entries)
         return event
+
+    def _write_to_journal(self, event: AuditEvent) -> None:
+        """Write the event to the dedicated operator-action journal.
+
+        A journal that cannot be written is reported as an error and the
+        journal marks itself degraded; the error is never swallowed.
+        """
+        try:
+            get_operator_journal().record(
+                action=event.action,
+                actor=event.actor,
+                target=event.target,
+                source=event.source,
+                outcome=event.outcome,
+                details=event.details,
+                timestamp_ns=event.timestamp_ns,
+            )
+        except OperatorJournalError as err:
+            logger.error("The authentication event could not reach the journal: %s", err)
 
     def _flush(self, entries: list[AuditEvent]) -> None:
         """Write the supplied entries to the append-only log file (no lock)."""

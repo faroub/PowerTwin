@@ -48,7 +48,35 @@ To enforce Safety Rule **SR-003** and **SR-012**:
 - Authentication is rate-limited and rejects empty, malformed, or expired tokens. Every successful and failed login attempt is appended to the audit trail.
 
 ### 3.2 Audit Trail Cryptographic Integrity
-- Audit log records are stored with SHA-256 hash checksums chaining each log entry to the previous entry, preventing undetected record deletion or manipulation.
+
+Every command, setpoint change, configuration change, fault and operator
+action is recorded in one dedicated, append-only, tamper-evident journal
+(`backend/app/core/operator_journal.py`). The journal is a JSON Lines file
+that is only ever opened in append mode, and every entry carries the SHA-256
+hash of its predecessor and of its own canonical content. Changing, removing,
+reordering or truncating an entry breaks the chain from that point on, and
+`OperatorActionJournal.verify()` reports the first break — so record deletion
+or manipulation cannot go undetected.
+
+The chain continues across a restart, the journal is process-scoped so that
+two applications in one process cannot write two trails that both claim to be
+complete, and it is always on: `AGENTS.md` §2.10 requires the record, so
+there is deliberately no setting that turns it off. `OPERATOR_JOURNAL_PATH`
+and `OPERATOR_JOURNAL_FSYNC` are the only knobs, and `fsync` defaults to on.
+
+In the Compose deployments the journal lives on the named `operator_journal`
+volume at `/app/var/operator_actions.jsonl`, so the trail survives a container
+replacement: a trail that disappears with the container that wrote it cannot
+answer a warranty or dispute question. Copy the file off the host if the
+trail has to survive the loss of the disk.
+
+The boundary worth knowing about is that a journal write that **fails** is
+fail-open: the error is logged as an error, the journal marks itself
+`degraded` and exposes the message, but the action is not rolled back and the
+entry is not written later, so the trail has a gap. A simulation action cannot
+be undone, and failing closed would make the plant uncontrollable the moment
+the disk fills. This is recorded in `docs/POWER_TWIN_KNOWN_LIMITATIONS.md`
+§4.9.
 
 ### 3.3 Container Security Hardening
 - Container images built from minimal base images (`python:3.12-slim`, `nginx:alpine`).

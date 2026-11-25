@@ -1,4 +1,12 @@
-"""Fault Injection Engine — Controlled, Reproducible Fault & Disturbance Injection."""
+"""Fault Injection Engine — Controlled, Reproducible Fault & Disturbance Injection.
+
+Every injected and cleared fault is recorded in the engine's own in-memory
+audit list **and** in the dedicated operator-action journal
+(`backend.app.core.operator_journal`), which is the platform's durable,
+hash-chained audit trail. A fault is an operator action: it changes what the
+plant does, and a warranty or dispute analysis has to be able to say when and
+why it happened.
+"""
 
 import logging
 import random
@@ -7,6 +15,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from backend.app.core.operator_journal import (
+    OperatorJournalError,
+    get_operator_journal,
+)
 from backend.app.equipment.models import AlarmRecord, AlarmSeverity, OperatingState
 from backend.app.models.grid.grid_model import DisturbanceType, GridDisturbance
 from backend.app.topology.factory import BuiltPlantInstance
@@ -72,6 +84,32 @@ class FaultInjectionEngine:
     def schedule_fault(self, fault: FaultEventSpec) -> None:
         """Schedule a fault for injection during simulation execution."""
         self.scheduled_faults.append(fault)
+
+    def _record_audit(self, record: FaultAuditRecord) -> None:
+        """Append a fault record to the in-memory list and to the journal.
+
+        A journal that cannot be written is reported as an error and the
+        journal marks itself degraded; the error is never swallowed. The fault
+        itself is not undone: it has already been applied to the simulated
+        plant, and a simulated fault cannot be rolled back.
+        """
+        self.audit_records.append(record)
+        try:
+            get_operator_journal().record(
+                action=f"FAULT_{record.action}",
+                actor="FAULT_INJECTION_ENGINE",
+                target=record.target_equipment_id,
+                source="SIMULATION",
+                outcome="SUCCESS",
+                details={
+                    "fault_id": record.fault_id,
+                    "fault_type": record.fault_type.value,
+                    "details": record.details,
+                },
+                timestamp_ns=record.timestamp_ns,
+            )
+        except OperatorJournalError as err:
+            logger.error("The fault record could not reach the journal: %s", err)
 
     def process_tick(self, current_time_ns: int, plant: BuiltPlantInstance) -> None:
         """Process fault schedule against current simulation clock timestamp."""
@@ -174,7 +212,7 @@ class FaultInjectionEngine:
             plant.grid.apply_disturbance(dist)
 
         # Audit Record
-        self.audit_records.append(
+        self._record_audit(
             FaultAuditRecord(
                 timestamp_ns=current_time_ns,
                 fault_id=fault.fault_id,
@@ -217,7 +255,7 @@ class FaultInjectionEngine:
             if swg.equipment_id == eq_id:
                 swg.clear_faults()
 
-        self.audit_records.append(
+        self._record_audit(
             FaultAuditRecord(
                 timestamp_ns=current_time_ns,
                 fault_id=fault.fault_id,
