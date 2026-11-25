@@ -371,6 +371,49 @@ application. `tests/test_deployment_images.py` asserts the properties of
 this configuration from the Python suite, so the end-to-end gate cannot be
 silently removed from the pipeline.
 
+### 4.4 Reading a failed backend run
+
+A failing pipeline has to name the test that failed. The job log can only be
+downloaded with repository administration permission, and the artifacts need
+authentication too, so the failures are reported in the one place the public
+API exposes: the **annotations of the job's check run**.
+
+The backend jobs therefore write a JUnit report and publish it:
+
+```bash
+# pytest writes the report; the pipeline keeps the console output as well.
+PYTHONPATH=. pytest --junitxml=junit.xml ... 2>&1 | tee pytest-output.txt
+
+# the report becomes one annotation per failed test.
+python scripts/summarize_pytest_failures.py junit.xml
+```
+
+`scripts/summarize_pytest_failures.py` prints one `::error` workflow command
+per failed test, carrying the file, the line and the reason. GitHub renders
+each of them as an annotation on the check run, so the failing test can be
+read with the API:
+
+```bash
+curl -s https://api.github.com/repos/faroub/PowerTwin/check-runs/<check-run-id>/annotations
+```
+
+The same step appends the tail of the console output to the job summary, so
+the run is also readable in the web interface without any permission at all.
+
+Two details matter:
+
+- The step runs with `if: always()`, so the report is published after a
+  **failing** run as well as after a successful one. A report step that only
+  ran on success would report nothing exactly when the report matters.
+- The pytest invocation uses `set -o pipefail`. Without it `tee` would decide
+  the exit status of the pipeline and a failing test suite would pass the job.
+  `tests/test_ci_scripts.py` asserts both properties, so neither can be
+  removed silently.
+
+The reporting script never fails the build. The gate is the pytest exit
+status; a reporting step that failed would mask the failure it exists to
+explain.
+
 ---
 
 ## 5. Release Engineering
@@ -627,9 +670,12 @@ still has to supply its own secret.
   ages until it is regenerated. It was resolved on Python 3.12 and is
   installed with `--require-hashes` on 3.12, 3.13 and 3.14.
 - **The CI toolchain is pinned without hashes.** `backend/requirements-ci.txt`
-  pins the linters, the type checker and the test runner to exact versions.
-  They are build tooling and never enter a deployed artefact, so they are not
-  hash-verified the way the runtime dependencies are.
+  pins the linters, the type checker, the test runner and the coverage tool
+  to exact versions. The coverage tool is pinned because it produces the
+  report the coverage policy of section 4 decides on: an unpinned version
+  would let a release change those numbers without any change to the
+  repository. They are build tooling and never enter a deployed artefact, so
+  they are not hash-verified the way the runtime dependencies are.
 - **The endurance campaign covers the reference plant only.** It does not
   exercise every topology variant.
 - **The release workflow publishes only on a tag.** A manual dispatch is a
