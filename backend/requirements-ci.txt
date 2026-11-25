@@ -32,6 +32,13 @@ pytest==9.2.0
 pytest-asyncio==1.5.0
 pytest-cov==7.1.0
 
+# The tool that measures the coverage the policy gate reads. It is pinned
+# because pytest-cov only states a lower bound for it, and a coverage report
+# produced by an unpinned version is a report the pipeline cannot reproduce:
+# a tool upgrade would then change the numbers the gate decides on without
+# any change to the repository.
+coverage==7.17.5
+
 # Property-based physics testing.
 hypothesis==6.170.17
 

@@ -1203,3 +1203,261 @@ def test_a_malformed_repository_is_rejected(capsys: pytest.CaptureFixture[str]) 
 
     assert exit_code == 1
     assert "owner/name" in capsys.readouterr().err
+
+
+# =============================================================================
+# Failed-test reporting
+# =============================================================================
+
+
+summarize_pytest_failures = _load_script(
+    "powertwin_summarize_pytest_failures", "summarize_pytest_failures.py"
+)
+
+_JUNIT_REPORT = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="pytest" errors="1" failures="1" skipped="0" tests="3">
+    <testcase classname="tests.test_example" name="test_that_passes" time="0.01"/>
+    <testcase classname="tests.test_example" name="test_that_fails" time="0.02">
+      <failure message="assert 1 == 2">def test_that_fails():&#10;
+>       assert 1 == 2&#10;
+E       assert 1 == 2&#10;
+&#10;
+tests/test_example.py:20: AssertionError</failure>
+    </testcase>
+    <testcase classname="tests.test_example" name="test_that_errors" time="0.03">
+      <error message="the plant could not be built">Traceback:&#10;
+&#10;
+tests/test_example.py:30: RuntimeError</error>
+    </testcase>
+  </testsuite>
+</testsuites>
+"""
+
+
+def _write_report(tmp_path: Path, body: str) -> Path:
+    """Write a JUnit report into a temporary directory and return its path."""
+    report = tmp_path / "junit.xml"
+    report.write_text(body, encoding="utf-8")
+    return report
+
+
+def test_a_failed_test_is_reported_as_an_annotation(tmp_path: Path) -> None:
+    """Test that a failure becomes an annotation that names the test and its line."""
+    report = _write_report(tmp_path, _JUNIT_REPORT)
+
+    failures = summarize_pytest_failures.parse_failures(report, root=tmp_path)
+
+    assert len(failures) == 2
+    failure = failures[0]
+    assert failure.name == "tests.test_example::test_that_fails"
+    assert failure.file == "tests/test_example.py"
+    assert failure.line == 20
+    assert failure.message == "assert 1 == 2"
+
+    annotation = summarize_pytest_failures.render_annotation(failure)
+    assert annotation.startswith("::error ")
+    assert "file=tests/test_example.py" in annotation
+    assert "line=20" in annotation
+    assert "assert 1 == 2" in annotation
+
+
+def test_the_location_is_read_from_the_report_pytest_actually_writes(tmp_path: Path) -> None:
+    """Test that the file and the line are found where pytest records them.
+
+    Pytest does not write the location into the attributes of the test case;
+    it appends it to the failure text. An annotation without a location is an
+    annotation nobody can act on.
+    """
+    report = _write_report(tmp_path, _JUNIT_REPORT)
+
+    failures = summarize_pytest_failures.parse_failures(report, root=tmp_path)
+
+    assert failures[0].file == "tests/test_example.py"
+    assert failures[0].line == 20
+
+
+def test_a_location_written_as_an_attribute_is_used(tmp_path: Path) -> None:
+    """Test that an explicit location wins over the one in the text."""
+    report = _write_report(
+        tmp_path,
+        f"""<?xml version="1.0" encoding="utf-8"?>
+        <testsuites><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1">
+        <testcase classname="tests.test_example" name="test_that_fails" time="0.01"
+                  file="{tmp_path}/tests/test_example.py" line="7">
+          <failure message="boom">tests/test_example.py:20: AssertionError</failure>
+        </testcase>
+        </testsuite></testsuites>
+        """,
+    )
+
+    failures = summarize_pytest_failures.parse_failures(report, root=tmp_path)
+
+    assert failures[0].file == "tests/test_example.py"
+    assert failures[0].line == 7
+
+
+def test_a_report_without_a_location_still_names_the_test(tmp_path: Path) -> None:
+    """Test that a failure with no location at all is still reported.
+
+    A collection error carries no location in some reports. The test that
+    failed must still be named, or the annotation says nothing.
+    """
+    report = _write_report(
+        tmp_path,
+        """<?xml version="1.0" encoding="utf-8"?>
+        <testsuites><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1">
+        <testcase classname="tests.test_example" name="test_that_errors" time="0.01">
+          <error message="the plant could not be built">boom</error>
+        </testcase>
+        </testsuite></testsuites>
+        """,
+    )
+
+    failures = summarize_pytest_failures.parse_failures(report, root=tmp_path)
+
+    assert failures[0].name == "tests.test_example::test_that_errors"
+    assert failures[0].file == "tests/test_example.py"
+
+
+def test_a_test_that_raised_is_reported_too(tmp_path: Path) -> None:
+    """Test that a test which raised is reported as an error, not ignored."""
+    report = _write_report(tmp_path, _JUNIT_REPORT)
+
+    failures = summarize_pytest_failures.parse_failures(report, root=tmp_path)
+
+    assert failures[1].kind == "error"
+    assert failures[1].name == "tests.test_example::test_that_errors"
+    assert failures[1].message == "the plant could not be built"
+    assert failures[1].line == 30
+
+
+def test_a_passing_run_reports_nothing(tmp_path: Path) -> None:
+    """Test that a report without a failure produces no annotation."""
+    report = _write_report(
+        tmp_path,
+        """<?xml version="1.0" encoding="utf-8"?>
+        <testsuites><testsuite name="pytest" errors="0" failures="0">
+        <testcase classname="tests.test_example" name="test_that_passes" time="0.01"/>
+        </testsuite></testsuites>
+        """,
+    )
+
+    assert summarize_pytest_failures.parse_failures(report, root=tmp_path) == []
+
+
+def test_the_annotation_escapes_the_characters_that_would_end_the_command() -> None:
+    """Test that a failure message cannot break out of the annotation.
+
+    A newline ends a workflow command and a percent sign starts an escape
+    sequence. A failure message that contains either one would otherwise be
+    able to forge a command of its own.
+    """
+    failure = summarize_pytest_failures.FailedTest(
+        name="tests.test_example::test_that_fails",
+        file="tests/test_example.py",
+        line=20,
+        kind="failure",
+        message="100% failed\n::error file=forged.py::forged",
+    )
+
+    annotation = summarize_pytest_failures.render_annotation(failure)
+
+    assert "\n" not in annotation
+    assert "%0A" in annotation
+    assert "%25" in annotation
+    # The forged command stays inside the message: the newline that would
+    # have ended the command is encoded, so it never starts one.
+    message = annotation.split("::", 2)[2]
+    assert message == "100%25 failed%0A::error file=forged.py::forged"
+
+
+def test_a_property_that_contains_a_separator_is_escaped() -> None:
+    """Test that a path or a title cannot break the property list apart."""
+    failure = summarize_pytest_failures.FailedTest(
+        name="tests.test_example::test_that_fails",
+        file="tests/te:st,example.py",
+        line=20,
+        kind="failure",
+        message="boom",
+    )
+
+    annotation = summarize_pytest_failures.render_annotation(failure)
+
+    assert "file=tests/te%3Ast%2Cexample.py" in annotation
+
+
+def test_the_reporting_step_never_fails_the_build(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that reporting a failure does not become a second failure.
+
+    The gate is the pytest exit status. A reporting step that failed would
+    hide the failure it exists to explain.
+    """
+    report = _write_report(tmp_path, _JUNIT_REPORT)
+
+    exit_code = summarize_pytest_failures.main([str(report)])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "::error " in captured.out
+    assert "2 test(s) did not pass" in captured.out
+
+
+def test_a_missing_report_is_reported_without_failing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that a run which produced no report says so instead of failing."""
+    exit_code = summarize_pytest_failures.main([str(tmp_path / "absent.xml")])
+
+    assert exit_code == 0
+    assert "No test report was found" in capsys.readouterr().out
+
+
+def test_the_pipeline_reports_the_failed_tests_as_annotations() -> None:
+    """Test that a failing pipeline names the test that failed.
+
+    The job log can only be downloaded with repository administration rights,
+    so without this a red pipeline tells nobody but an administrator what
+    went wrong.
+    """
+    workflow = (REPO_ROOT / ".github" / "workflows" / "reusable-backend.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "--junitxml=junit.xml" in workflow
+    assert "scripts/summarize_pytest_failures.py" in workflow
+    assert "set -o pipefail" in workflow
+    assert "GITHUB_STEP_SUMMARY" in workflow
+
+
+def test_the_report_step_runs_even_when_the_tests_failed() -> None:
+    """Test that the report is published after a failing run, not only after a good one.
+
+    A report step that only runs when the step before it succeeded would
+    report nothing exactly when the report matters.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "reusable-backend.yml").read_text(encoding="utf-8")
+    )
+
+    steps = workflow["jobs"]["backend-test"]["steps"]
+    reporting = [step for step in steps if step.get("name") == "Report the Failed Tests"]
+
+    assert len(reporting) == 1, "the backend job does not report its failed tests"
+    assert str(reporting[0].get("if")) == "always()"
+
+
+def test_the_coverage_tool_is_pinned() -> None:
+    """Test that the tool that measures the enforced coverage is pinned.
+
+    The coverage policy gate decides on the numbers this tool produces. An
+    unpinned version would let a release change those numbers without any
+    change to the repository.
+    """
+    requirements = (REPO_ROOT / "backend" / "requirements-ci.txt").read_text(encoding="utf-8")
+
+    assert "coverage==" in requirements
