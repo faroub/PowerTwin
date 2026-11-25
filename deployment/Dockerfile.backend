@@ -57,12 +57,24 @@ COPY backend/requirements.txt backend/requirements.lock /tmp/
 # Python 3.12 no longer installs setuptools into a fresh virtual environment,
 # and nothing in this service needs it, so the runtime layer carries only the
 # packages of the lock, each of them hash-verified.
+#
+# The wheel builder has a dependency of its own - `packaging`, the only
+# distribution it requires - which has to go with it: removing the builder
+# alone leaves that dependency behind, and the environment would then carry a
+# package that no hash in the lock covers. The strict verification below is
+# what proves the claim, rather than leaving it to the reading of an
+# uninstall chain.
+COPY scripts/verify_locked_environment.py /tmp/verify_locked_environment.py
+
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip wheel \
     && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock \
     && /opt/venv/bin/pip uninstall -y wheel \
+    && /opt/venv/bin/pip uninstall -y packaging \
     && /opt/venv/bin/pip uninstall -y pip \
     && rm -f /opt/venv/bin/pip /opt/venv/bin/pip3 /opt/venv/bin/pip3.12 \
+    && /opt/venv/bin/python /tmp/verify_locked_environment.py \
+        --lock /tmp/requirements.lock --strict \
     && /opt/venv/bin/python -c "import bcrypt, fastapi, httpx, jwt, passlib, psycopg2, pydantic, pymodbus, sqlalchemy, uvicorn, yaml"
 
 # =============================================================================
@@ -82,6 +94,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
+
+# The base image ships pip for the system interpreter. The runtime layer has
+# no use for a package installer: the dependencies were installed in the
+# builder stage and were hash-verified there, and the container runs as a
+# non-root user that cannot write to the system site-packages in any case.
+# Removing it means the shipped image carries no way to install anything at
+# run time, which is what "a container image is a deployed artefact, not a
+# build environment" has to mean in practice.
+RUN rm -rf /usr/local/lib/python3.12/site-packages/pip \
+    && rm -rf /usr/local/lib/python3.12/site-packages/pip-*.dist-info \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
 
 COPY --from=builder /opt/venv /opt/venv
 

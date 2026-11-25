@@ -50,6 +50,12 @@ jobs:
           pip install --require-hashes -r backend/requirements.lock
           pip install -r backend/requirements-ci.txt
 
+      # The lock says which versions must be installed; this says that the
+      # versions that are installed are those. It also catches the toolchain
+      # install above quietly replacing a runtime package with another one.
+      - name: Verify the Installed Environment Matches the Lock
+        run: python scripts/verify_locked_environment.py --lock backend/requirements.lock
+
       - name: Reference Plant Configuration & Topology Validation
         run: |
           PYTHONPATH=. pytest tests/test_plant_topology.py
@@ -137,6 +143,18 @@ jobs:
             exit 1
           fi
           echo "The backend container reported healthy."
+          # A deployed image must not carry a package installer. This is the
+          # behavioural half of the claim; the static half is asserted by
+          # tests/test_deployment_images.py.
+          docker exec "$container" /bin/sh -c '
+            for interpreter in /opt/venv/bin/python /usr/local/bin/python3; do
+              if "$interpreter" -m pip --version >/dev/null 2>&1; then
+                echo "the running container ships a package installer at $interpreter"
+                exit 1
+              fi
+            done
+          '
+          echo "The running container ships no package installer."
           python3 - <<'PY'
           import json
           import urllib.request

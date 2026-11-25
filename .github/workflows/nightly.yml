@@ -47,6 +47,12 @@ jobs:
           pip install --require-hashes -r backend/requirements.lock
           pip install -r backend/requirements-ci.txt
 
+      # The lock says which versions must be installed; this says that the
+      # versions that are installed are those. It also catches the toolchain
+      # install above quietly replacing a runtime package with another one.
+      - name: Verify the Installed Environment Matches the Lock
+        run: python scripts/verify_locked_environment.py --lock backend/requirements.lock
+
       - name: Large Plant Topology Regression (50 MW / 200 MWh Variant)
         run: |
           PYTHONPATH=. pytest tests/test_plant_topology.py -k "test_variant_50mw_200mwh"

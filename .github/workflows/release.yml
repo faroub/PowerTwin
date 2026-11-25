@@ -80,6 +80,12 @@ jobs:
         run: |
           python scripts/check_dependency_lock.py
 
+      # The lock says which versions must be installed; this says that the
+      # versions that are installed are those. It also catches the toolchain
+      # install above quietly replacing a runtime package with another one.
+      - name: Verify the Installed Environment Matches the Lock
+        run: python scripts/verify_locked_environment.py --lock backend/requirements.lock
+
       - name: Validate Database Migrations
         run: |
           python scripts/validate_migrations.py

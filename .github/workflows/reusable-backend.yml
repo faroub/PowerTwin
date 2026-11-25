@@ -42,6 +42,12 @@ jobs:
       - name: Verify the Dependency Lock Matches the Declared Requirements
         run: python scripts/check_dependency_lock.py
 
+      # The lock says which versions must be installed; this says that the
+      # versions that are installed are those. It also catches the toolchain
+      # install above quietly replacing a runtime package with another one.
+      - name: Verify the Installed Environment Matches the Lock
+        run: python scripts/verify_locked_environment.py --lock backend/requirements.lock
+
       - name: Verify Formatting (Ruff)
         run: ruff format --check backend plugins tests scripts
 
@@ -147,6 +153,12 @@ jobs:
           # does not match the recorded one.
           pip install --require-hashes -r backend/requirements.lock
           pip install -r backend/requirements-ci.txt
+
+      # Each interpreter in the matrix has to resolve the lock to the same
+      # versions. A wheel that is only published for some of them would
+      # otherwise show up as a silent substitution.
+      - name: Verify the Installed Environment Matches the Lock
+        run: python scripts/verify_locked_environment.py --lock backend/requirements.lock
 
       - name: Run Pytest
         run: |
