@@ -10,7 +10,7 @@ jobs:
   frontend-ci:
     name: Frontend Lint, Test & Build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout Code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -46,6 +46,16 @@ jobs:
         run: |
           cd frontend
           npm run build
+
+      - name: Install the Playwright Browser
+        run: |
+          cd frontend
+          npx playwright install --with-deps chromium
+
+      - name: Run Playwright End-to-End Tests
+        run: |
+          cd frontend
+          npm run test:e2e
 
       - name: Upload Frontend Coverage Report
         if: always()

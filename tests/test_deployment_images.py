@@ -15,6 +15,7 @@ an unpinned base image, a mandatory secret that became optional - does.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import threading
 from collections.abc import Iterator
@@ -383,3 +384,90 @@ class TestHealthProbe:
         assert healthcheck.main(["healthcheck.py"]) == 0
         monkeypatch.setattr(healthcheck, "probe", lambda url: False)
         assert healthcheck.main(["healthcheck.py"]) == 1
+
+
+class TestFrontendEndToEndSuite:
+    """The end-to-end suite drives the shipped HMI against a mock platform.
+
+    The suite is the only part of the repository that runs the HMI as an
+    operator would. Two properties have to hold for it, and neither is
+    visible to the Python test suite on its own:
+
+    * It must never be able to reach a running platform. A test that could
+      address a live installation would be an outward-facing action that
+      nobody authorised, so the mock answers every API request, aborts the
+      paths it does not model, and blocks every host but the local preview
+      server.
+    * It must be part of the pipeline. A suite that only runs on a
+      developer's machine is documentation, not a gate.
+    """
+
+    FRONTEND = REPO_ROOT / "frontend"
+    WORKFLOW = REPO_ROOT / ".github" / "workflows" / "reusable-frontend.yml"
+    CONFIG = FRONTEND / "playwright.config.ts"
+    MOCK = FRONTEND / "e2e" / "mockPlatform.ts"
+
+    def test_the_pipeline_runs_the_end_to_end_suite(self) -> None:
+        text = self.WORKFLOW.read_text()
+        assert "npm run test:e2e" in text, (
+            "the end-to-end suite is not run by the pipeline"
+        )
+        assert "npx playwright install --with-deps chromium" in text, (
+            "the pipeline runs the end-to-end suite without installing its browser"
+        )
+
+    def test_the_browser_is_installed_before_the_suite_runs(self) -> None:
+        text = self.WORKFLOW.read_text()
+        assert text.index("playwright install") < text.index("npm run test:e2e")
+
+    def test_the_suite_serves_the_built_artefact_on_the_loopback_interface(
+        self,
+    ) -> None:
+        text = self.CONFIG.read_text()
+        assert "PREVIEW_HOST = '127.0.0.1'" in text
+        assert "vite preview" in text, (
+            "the suite does not run against the built artefact"
+        )
+        # The preview server must not be bound to every interface: an
+        # end-to-end run must not be reachable from an untrusted network.
+        assert "0.0.0.0" not in text
+
+    def test_the_mock_answers_every_api_request_and_blocks_every_other_host(
+        self,
+    ) -> None:
+        text = self.MOCK.read_text()
+        assert "'**/api/v1/**'" in text, "the mock does not intercept the platform API"
+        assert "route.abort('failed')" in text, (
+            "an API path the mock does not model is not aborted"
+        )
+        assert "route.abort('blockedbyclient')" in text, (
+            "a request to a host other than the preview server is not blocked"
+        )
+
+    def test_the_end_to_end_scripts_are_declared(self) -> None:
+        package = json.loads((self.FRONTEND / "package.json").read_text())
+        scripts = package["scripts"]
+        assert scripts["test:e2e"] == "playwright test"
+        # The end-to-end suite must exercise a fresh build of the artefact,
+        # never a stale one left over from an earlier run.
+        assert "build" in scripts["pretest:e2e"]
+
+    def test_the_playwright_dependency_is_declared(self) -> None:
+        package = json.loads((self.FRONTEND / "package.json").read_text())
+        assert "@playwright/test" in package["devDependencies"]
+
+    def test_the_unit_suite_does_not_collect_the_end_to_end_specs(self) -> None:
+        text = (self.FRONTEND / "vite.config.ts").read_text()
+        assert "e2e/**" in text, (
+            "Vitest would collect the Playwright specs, which run in a browser"
+        )
+
+    def test_the_end_to_end_code_is_type_checked(self) -> None:
+        config = json.loads((self.FRONTEND / "tsconfig.json").read_text())
+        assert "e2e" in config["include"]
+        assert "playwright.config.ts" in config["include"]
+
+    def test_the_end_to_end_artifacts_are_not_committed(self) -> None:
+        ignore = (REPO_ROOT / ".gitignore").read_text()
+        assert "frontend/test-results/" in ignore
+        assert "frontend/playwright-report/" in ignore
