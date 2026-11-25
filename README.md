@@ -55,8 +55,15 @@ npm run lint
 # Run Vitest component tests
 npm test
 
+# Run the coverage gate
+npm run test:coverage
+
 # Build production Web HMI bundle
 npm run build
+
+# Run the Playwright end-to-end path against the built bundle
+# (first run only: npx playwright install --with-deps chromium)
+npm run test:e2e
 ```
 
 ---

@@ -271,14 +271,17 @@ The frontend policy lives in `frontend/vite.config.ts` and is enforced by the
 
 | Scope | Lines | Functions | Statements | Branches |
 | :--- | :--- | :--- | :--- | :--- |
-| Global (`src/**`) | 4 % | 5 % | 4 % | not enforced |
-| `src/services/api.ts` | 18 % | 38 % | 18 % | not enforced |
-| `src/services/auth.ts` | 11 % | — | 11 % | not enforced |
+| Global (`src/**`) | **75 %** | **75 %** | **75 %** | **75 %** |
+| `src/services/api.ts` | 95 % | 95 % | 95 % | 80 % |
+| `src/services/auth.ts` | 95 % | 95 % | 95 % | 95 % |
+| `src/components/*.tsx` | 95 % | 95 % | 95 % | 90 % |
+| `src/views/*.tsx` | 90 % | 90 % | 90 % | 70 % |
 
-The frontend test suite currently contains **4 tests in 2 files**. Every one
-of the 19 SCADA view components and the React hooks are untested, so the
-real coverage of the HMI is **4.15 % lines, 5.95 % functions and 0 %
-branches**.
+The frontend test suite contains **151 tests in 11 files**, and the measured
+coverage of the HMI is **98.28 % lines, 98.82 % functions, 98.29 %
+statements and 85.92 % branches**. Every one of the 19 SCADA view
+components, the shared components, the React hooks and the entry point are
+covered.
 
 The coverage configuration counts every file of `src/`, including the files
 that no test touches. Without that, the untested views would disappear from
@@ -287,10 +290,49 @@ the report and the figure would look far better than the reality.
 > **The 75 % frontend target that an earlier revision of this guide
 > published was aspirational and was never implemented.** The Vitest
 > configuration declared a 75 % threshold against a measured 4.15 %, and the
-> coverage provider was not even installed, so the check could not run. Both
-> the configuration and this guide now state the enforced floor and the
-> measured value. Reaching 75 % requires component tests for the SCADA views
-> and is tracked as remaining work.
+> coverage provider was not even installed, so the check could not run. The
+> component suite now measures 98.28 % lines, and **75 % is the enforced
+> floor** for every metric, with tighter floors on the modules that carry the
+> session, the telemetry polling, the shared components and the views. The
+> binding of the directory-scoped floors was verified by deliberately raising
+> them until the gate failed, so they are known to bind and not merely
+> declared.
+
+### 4.3 End-to-end testing of the HMI
+
+The HMI is exercised end to end by **Playwright**, in a real browser, against
+the built artefact. The suite is configured in `frontend/playwright.config.ts`
+and the specs live in `frontend/e2e/`.
+
+| Property | Value |
+| :--- | :--- |
+| Base URL | `http://127.0.0.1:4173` (loopback only) |
+| Server under test | `vite preview` serving `frontend/dist/` |
+| Browser | Chromium, installed by `npx playwright install --with-deps chromium` |
+| Command | `npm run test:e2e` (a fresh `npm run build` runs first) |
+| Pipeline step | `Run Playwright End-to-End Tests` of the `Frontend Lint, Test & Build` job |
+
+The suite is **hermetic by construction**. There is no backend behind the
+preview server: `frontend/e2e/mockPlatform.ts` answers every `/api/v1/**`
+request inside the browser, **aborts** any path it does not model, and
+**blocks** any request to a host other than the local preview server. The
+specs assert that neither an unmodelled path nor a blocked host occurred, so
+a spec cannot quietly depend on an endpoint nobody modelled or on a network
+that should not exist.
+
+The specs cover the operator path — log in, read the overview, pause the
+engine behind its confirmation, observe the result, log out — and the safety
+posture: the session token travels in memory and in the `Authorization`
+header only, never in `localStorage`, `sessionStorage` or a cookie; a backend
+that is not ready is reported as disconnected rather than replaced by
+invented figures; and a refused control action is reported as a failure
+without the engine state being set to a successful one.
+
+`frontend/tsconfig.json` includes `e2e/` and `playwright.config.ts`, so the
+end-to-end code is type-checked by the same `npm run lint` gate as the
+application. `tests/test_deployment_images.py` asserts the properties of
+this configuration from the Python suite, so the end-to-end gate cannot be
+silently removed from the pipeline.
 
 ---
 
@@ -482,9 +524,18 @@ still has to supply its own secret.
 - **The metadata comparison of the migrations is NOT IMPLEMENTED.** The
   offline validation of section 5.2 checks the graph and the rendering, not
   the agreement between the ORM models and the migrations.
-- **The frontend coverage is 4.15 %.** The enforced floor is a regression
-  guard, not a quality claim. The SCADA view components have no component
-  tests.
+- **The frontend coverage floors are a regression guard, not a quality
+  claim.** The suite measures 98.28 % lines, so the 75 % global floor has a
+  wide margin, and the directory-scoped floors are the ones that actually
+  bite: a view or a shared component that loses its tests fails the gate
+  even when the global figure barely moves. The branch coverage of 85.92 % is
+  the weakest metric, and the 75 % branch floor is the binding global
+  constraint.
+- **The end-to-end suite runs against a mock platform, not against the real
+  backend.** That is deliberate — the suite must never be able to address a
+  running installation — but it means the specs prove the HMI's own
+  behaviour, not the agreement between the HMI and the FastAPI backend. That
+  agreement is covered by the backend's own HTTP tests.
 - **The branch protection of `main` is documented, not applied.** The setting
   is a property of the repository configuration on GitHub, not of the source
   code, and must be applied by an administrator.
@@ -572,6 +623,11 @@ npm run test:coverage
 
 # Production build
 npm run build
+
+# End-to-end path (Playwright, against the built artefact on the loopback
+# interface, with a hermetic mock platform). The first run needs the browser:
+#   npx playwright install --with-deps chromium
+npm run test:e2e
 
 # Dependency audit
 npm audit --audit-level=high
