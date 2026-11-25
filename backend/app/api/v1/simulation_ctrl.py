@@ -4,9 +4,11 @@ All values are read from the application-scoped simulation runtime rather than
 a module-level global singleton so that the plant, engine and execution runner
 are the ones attached by the application start-up.
 
-The legacy helpers (``set_active_simulation_engine``) are kept for unit tests
-that build their own plant: writing the engine there lands on the same
-app-scoped runtime that the endpoints resolve.
+The runtime is the **single** write path to that state. A plant is attached
+with ``SimulationRuntime.attach_plant`` and detached with
+``SimulationRuntime.drop``; this module deliberately offers no second way in,
+because a second entry point is a second way for the API and the start-up to
+disagree about which engine is live.
 """
 
 from enum import StrEnum
@@ -17,34 +19,11 @@ from pydantic import BaseModel, Field
 
 from backend.app.core.rbac import Permission, require_permission
 from backend.app.core.safety import get_safety_report
-from backend.app.simulation.runner import SimulationRunner
 from backend.app.simulation.runtime import (
     get_simulation_runtime,
 )
 
 router = APIRouter(tags=["Simulation Control"])
-
-
-def set_active_simulation_engine(
-    engine: Any = None,
-    plant: Any = None,
-    app: Any = None,
-) -> None:
-    """Attach a plant/engine to the active application-scoped runtime.
-
-    ``engine`` is the ``SimulationRunManager`` of a built plant; ``plant`` is
-    the ``BuiltPlantInstance`` so the overview and telemetry readers can follow
-    the engine. When the engine is set to None the runner (if any) and the
-    plant are detached.
-    """
-    runtime = get_simulation_runtime(app=app)
-    with runtime._lock:
-        runtime.engine = engine
-        runtime.active_plant = plant
-        if engine is not None and runtime.runner is None:
-            runtime.runner = SimulationRunner(engine, plant, runtime=runtime)
-        elif engine is None:
-            runtime.runner = None
 
 
 class SimulationActionEnum(StrEnum):

@@ -156,7 +156,7 @@ because no physical system is reachable.
 | Every measurement and command has timestamp, quality and source | **COMPLIANT** | Telemetry carries the timestamp, the quality flag and the source; the PCS keeps requested, accepted, actual and measured values distinct (C) |
 | Requested / accepted / actual / measured kept distinct | **COMPLIANT** | `REQ-PCS-001` is implemented in `backend/app/models/pcs/pcs_model.py` and verified by `test_pcs_four_explicit_p_and_q_values_distinction` (A) |
 | Central simulation clock, deterministic scheduling | **COMPLIANT** | `SimulationClock` is an integer nanosecond clock; the five-phase DAG is fixed and ordered (A/C) |
-| No global mutable state | **PARTIAL** | The simulation runtime is application-scoped with a lock, but `simulation_ctrl.set_active_simulation_engine` remains a module-level compatibility entry point kept for the unit tests. Recorded as finding **F-08** (C) |
+| No global mutable state | **COMPLIANT** | The simulation runtime is application-scoped with a lock, and the runtime is the single write path to the plant and the engine: a plant is attached with `SimulationRuntime.attach_plant` and detached with `SimulationRuntime.drop`. The module-level `set_active_simulation_engine` helpers that offered a second route to the same state were removed with finding **F-08** (C) |
 | No circular dependencies | **COMPLIANT** | Verified by the mypy run over `backend`, `plugins` and `scripts`, which resolves all imports (B) |
 | Modules independently testable | **COMPLIANT** | The plant, the engine and the controllers are constructed in isolation by the test suite (A) |
 
@@ -614,15 +614,41 @@ separately as F-03, F-04 and F-11, and none of them is closed by this run.
 F-01 and F-05 have since been closed by the frontend component suite and the
 Playwright end-to-end path, both of which now run as enforced pipeline gates.
 
-### F-08 — LOW — A module-level simulation entry point remains
+### F-08 — LOW — RESOLVED — The runtime is the single write path to the plant and the engine
 
-`backend/app/api/v1/simulation_ctrl.py` keeps
+`backend/app/api/v1/simulation_ctrl.py` kept
 `set_active_simulation_engine(...)` as a compatibility helper for the unit
 tests. It writes to the application-scoped runtime under a lock, so it is not
-an unguarded global, but it is a second way to reach the same state.
+an unguarded global, but it is a second way to reach the same state. A second
+copy of the same helper also existed in `backend/app/simulation/runtime.py`.
 
 *Action.* Remove it once the tests construct their plant through the
 application-scoped runtime directly.
+
+**Resolution.** Both copies of the helper are gone. The runtime's own methods
+are now the only way in:
+
+- `SimulationRuntime.attach_plant(plant)` attaches the plant, its engine and a
+  runner, and stops any runner that was still attached.
+- `SimulationRuntime.drop()` detaches them and stops the runner thread.
+
+The tests now construct their plant through the runtime
+(`get_simulation_runtime(app=client.app).attach_plant(plant)`), which is the
+route the API itself resolves, so a test exercises the same path the
+application does.
+
+Two defects disappeared with the helper rather than with it. The API-module
+copy detached the plant **without stopping the runner thread**, so a
+detached runtime could leave a live execution thread behind; `drop()` stops
+the runner. And the integration test attached its plant to the app-scoped
+runtime but detached it from the module fall-back runtime, so the teardown
+never actually ran; both ends now address the same runtime.
+
+The read-only accessors `get_active_simulation_engine` and `get_active_plant`
+remain: they observe the runtime and do not offer a second way to change it.
+`tests/test_simulation_runtime.py` asserts that neither module exposes
+`set_active_simulation_engine` again, and that the runtime never holds an
+engine without its plant or the other way round.
 
 ### F-09 — LOW — The operator-action audit trail is not dedicated or tamper-evident
 
@@ -776,7 +802,9 @@ files, was green across every job.
    next maintenance pass. ~~F-10 is closed: the illustrative parameters carry
    a schema marker that defaults to labelling, the plant factory carries it
    into the runtime equipment, and a test asserts that every shipped example
-   configuration states it.~~
+   configuration states it.~~ ~~F-08 is closed: the runtime is the single
+   write path to the plant and the engine, and the module-level helpers that
+   offered a second route to the same state are removed.~~
 
 ---
 

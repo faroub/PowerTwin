@@ -2,7 +2,6 @@
 
 from fastapi.testclient import TestClient
 
-from backend.app.api.v1.simulation_ctrl import set_active_simulation_engine
 from backend.app.equipment.models import OperatingState
 from backend.app.historian.service import HistorianService
 from backend.app.main import app
@@ -11,6 +10,7 @@ from backend.app.simulation.fault_injection import (
     FaultInjectionEngine,
     FaultType,
 )
+from backend.app.simulation.runtime import get_simulation_runtime
 from backend.app.topology.factory import PlantTopologyFactory
 
 
@@ -127,10 +127,9 @@ def test_25_step_e2e_scheduler_driven_workflow(
 
     # Step 17: Verify live HMI telemetry with authenticated session token
     client = TestClient(app)
-    plant.simulation_engine.shared_state["plant_instance"] = plant
-    # Bind the engine to the *app-scoped* runtime so the overview endpoint reads
+    # Bind the plant to the *app-scoped* runtime so the overview endpoint reads
     # the plant attached to this very app.
-    set_active_simulation_engine(plant.simulation_engine, app=client.app)
+    get_simulation_runtime(app=client.app).attach_plant(plant)
 
     login_res = client.post(
         "/api/v1/auth/login",
@@ -205,4 +204,4 @@ def test_25_step_e2e_scheduler_driven_workflow(
     plant.simulation_engine.restore_snapshot(snap)
     assert plant.simulation_engine.clock.time_ns == 0
 
-    set_active_simulation_engine(None)
+    get_simulation_runtime(app=client.app).drop()
