@@ -79,7 +79,10 @@ verified fact:
    failed with real defects that were then reproduced locally, corrected and
    re-verified locally. The corrected files were subsequently merged into
    `main`, and the run on commit `9928aec` completed with **every job
-   green**. What a green run does *not* establish is that the gates cover
+   green**. The subsequent dependency-locking change, commit `4d69c20`, did
+   the same across all twelve jobs, including the two new gates that check
+   the installed environment against the lock. What a green run does *not*
+   establish is that the gates cover
    every possible defect — the coverage gaps recorded as F-01, F-03, F-04,
    F-05 and F-11 are entirely unaffected by it.
 2. **The steps were run locally, in the pipeline's own order.** The backend
@@ -530,7 +533,9 @@ validation, the backend unit and integration tests, the backend lint and
 typecheck, the backend test matrix on Python 3.13 and 3.14, the system
 engineering and physics validation, the frontend lint/test/build, the final CI
 summary, the Trivy container scan, the Python and npm dependency audit, the
-secret and credential scan, and CodeQL.
+secret and credential scan, and CodeQL. The same result was reproduced on
+the dependency-locking change, commit `4d69c20`, which added two further
+gates and still completed with all twelve jobs green.
 
 *Residual.* A green run means that no gate failed; it does not mean that the
 gates cover every possible defect. The coverage gaps that remain are recorded

@@ -216,7 +216,9 @@ healthy and upholds the safety invariants.
 
 **The gap has since been closed.** The corrected workflow files were merged
 into `main` and executed by GitHub Actions themselves. The run on commit
-`9928aec` completed with **every job green**:
+`9928aec` completed with **every job green**, and the run on the dependency-
+locking change, commit `4d69c20`, did the same — all twelve jobs, including
+the two new gates that check the installed environment against the lock:
 
 | Workflow | Job | Result |
 | :--- | :--- | :--- |
