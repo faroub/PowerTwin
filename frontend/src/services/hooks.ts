@@ -65,13 +65,18 @@ export function usePlantTelemetry(
     } catch (err) {
       setError('Network error connecting to backend API.');
       void err;
+    } finally {
+      // The loading flag has to stay raised until the first frame has actually
+      // arrived. Clearing it as soon as the request was issued made the views
+      // report "N/A" — meaning "not available" — for the frame that was still
+      // in flight, which is a different statement from the one they mean.
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     let isMounted = true;
     refresh();
-    setLoading(false);
     const interval = setInterval(() => {
       if (isMounted) {
         refresh();
