@@ -93,8 +93,27 @@ the pipeline** and is backed by a test, not only by a document.
 
 | # | Item | Severity |
 | :--- | :--- | :--- |
-| 1 | Apply the documented branch protection to `main` (administrator action) | Medium |
+| 1 | Apply the documented branch protection to `main` (administrator action — the rule set is now executable, see below) | Medium |
 | 2 | Implement the energy-market, calibration and warranty roadmap items | Medium |
+
+**Audit finding F-04 — "the branch protection of `main` is documented but not
+applied" — is partially addressed, and still needs one administrator
+command.** The rule set is no longer a prose checklist: it is declared once in
+`scripts/apply_branch_protection.py`, can be printed without touching the
+network (`--dry-run`), is applied and then **read back** from GitHub, and the
+script exits non-zero if what is in force is looser than what was documented.
+Three tests hold the documentation, the declaration and the workflow job
+names together, so a renamed job fails the suite rather than silently
+blocking every merge. What remains is the application itself, which needs a
+token with `administration` permission on the repository:
+
+```bash
+GITHUB_TOKEN=<your-token> python scripts/apply_branch_protection.py
+```
+
+The repository currently has **no ruleset** — `GET /repos/faroub/PowerTwin/rulesets`
+returns an empty list — and the legacy branch-protection endpoint needs a
+token to read, so the administrator's run is also the verification.
 
 **Audit finding F-09 — "the dedicated operator-action journal" — is closed.**
 The platform now has one dedicated, append-only, tamper-evident

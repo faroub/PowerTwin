@@ -185,10 +185,11 @@ python scripts/check_dependency_lock.py
 
 ## 3. Branch Protection & GitHub Settings
 
-> **These settings are applied by a repository administrator in the GitHub
-> settings. They are documented here, and deliberately NOT applied by this
-> repository, because the branch-protection configuration of a repository is
-> not part of its source code.**
+> **These settings are a property of the repository on GitHub, not of the
+> source code, so they are applied by a repository administrator and are
+> deliberately NOT applied by this repository automatically.** What this
+> repository does provide is an **executable, verifiable** version of the
+> rule set below: `scripts/apply_branch_protection.py`.
 
 To maintain repository integrity, configure the following settings in GitHub
 Repository Settings → Branches → Branch protection rules → `main`:
@@ -210,9 +211,40 @@ Repository Settings → Branches → Branch protection rules → `main`:
 
 - **Require linear commit history**.
 - **Require signed commits**.
+- **Require branches to be up to date before merging**, so that a check that
+  passed against an older base cannot be counted as a pass against the
+  current `main`.
 - **Do not allow bypassing the above settings**, so that the checks cannot be
   skipped by an administrator.
 - **Block force pushes and deletions**.
+
+### 3.1 Applying the Rule Set
+
+A prose checklist is not a control: it goes stale the moment a job is
+renamed, and it cannot be verified. The rule set above is therefore also
+declared, once, in `scripts/apply_branch_protection.py`, and the script
+applies it and then **reads it back** from GitHub, so the result is a verified
+fact rather than a claim.
+
+```bash
+# See exactly what would be sent, without touching the network.
+python scripts/apply_branch_protection.py --dry-run
+
+# Apply it and verify it. The token needs 'administration' permission on the
+# repository; it is read from GITHUB_TOKEN, never printed and never stored.
+GITHUB_TOKEN=<your-token> python scripts/apply_branch_protection.py
+```
+
+The script exits non-zero if the rule it read back is looser than the one
+that was documented — a missing check, a missing approval, an administrator
+who can bypass the rule, a permitted force push or a permitted deletion all
+count as a failure.
+
+Three tests in `tests/test_ci_scripts.py` hold the three sources together:
+the check names in this table, the declaration in the script, and the `name:`
+of every job in `.github/workflows/`. A check that is renamed in a workflow,
+or a row that is added to this table without a matching job, fails the suite
+rather than silently blocking every merge on the branch.
 
 ---
 
