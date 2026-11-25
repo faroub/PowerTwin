@@ -91,7 +91,9 @@ verified fact:
    tamper-evident operator-action journal, and the whole repository is linted
    with one declared style. F-04 remains, because branch protection is an
    administrator action on the repository configuration rather than a change
-   to the code.
+   to the code — although the rule set is now executable and verifiable
+   through `scripts/apply_branch_protection.py`, so applying it is one
+   command rather than a manual transcription of a checklist.
 2. **The steps were run locally, in the pipeline's own order.** The backend
    gates were executed on the canonical interpreter **Python 3.12** — the
    interpreter the pipeline uses — in a clean virtual environment built from
@@ -523,7 +525,7 @@ metadata, that the TimescaleDB-owned index is excluded, that the ORM and the
 migrations declare the same index set, and that the release job runs the gate
 against a database whose credentials agree with the service container's.
 
-### F-04 — MEDIUM — Branch protection of `main` is documented but not applied
+### F-04 — MEDIUM — Branch protection of `main` is not applied, but the rule set is now executable and verifiable
 
 `docs/CI_CD_GUIDE.md` §3 lists the exact required status checks, but the
 branch-protection configuration is a property of the repository on GitHub and
@@ -533,6 +535,39 @@ is not part of the source code.
 merge into `main` without a green build.
 *Action.* An administrator applies the documented rule set. This is an
 operations task, not a code change.
+
+**Partial progress — the action is now executable.** A prose checklist is not
+a control: it goes stale the moment a job is renamed, and it cannot be
+verified. `scripts/apply_branch_protection.py` turns the checklist into an
+action:
+
+- the required status checks are declared **once**, in the script;
+- the payload is built from that declaration and can be printed without
+  touching the network (`--dry-run`), so an administrator can see exactly
+  what would be sent before sending it;
+- after the rule is applied it is **read back** from GitHub and compared
+  against the declaration, and the script exits non-zero if what is in force
+  is looser than what was documented — a missing check, a missing approval,
+  an administrator who can bypass the rule, a permitted force push or a
+  permitted deletion all count as a failure.
+
+Three tests in `tests/test_ci_scripts.py` hold the three sources together:
+the check names in the §3 table, the declaration in the script, and the
+`name:` of every job in `.github/workflows/`. A check renamed in a workflow,
+or a row added to the table without a matching job, fails the suite instead
+of silently blocking every merge on the branch. Each of the three was probed
+by breaking the source it guards, so a test that cannot fail proves nothing.
+
+**The finding remains open.** The rule is still not applied, and applying it
+requires a token with `administration` permission on the repository, which
+this work has no way to obtain. What could be verified from outside the
+repository was verified: the repository's **rulesets list is empty**
+(`GET /repos/faroub/PowerTwin/rulesets` returns `[]`), and the legacy
+branch-protection endpoint answers `401 Requires authentication`, so the
+legacy setting could not be read anonymously either. The absence of a ruleset
+is therefore a verified fact; the absence of a legacy branch-protection rule
+is not, because reading it needs a token. **An administrator must run the
+script and confirm its exit status.**
 
 ### F-05 — MEDIUM — RESOLVED — The Playwright end-to-end path is configured and runs in the pipeline
 
@@ -903,7 +938,11 @@ files, was green across every job.
    floor, the Playwright project drives the built HMI against a hermetic mock
    platform, and both run as enforced pipeline gates.
 3. **Apply the branch protection** (F-04). An administrator action, using the
-   documented check names.
+   documented check names. The rule set is now executable and verifiable:
+   `python scripts/apply_branch_protection.py --dry-run` prints exactly what
+   would be sent, and `GITHUB_TOKEN=<token> python
+   scripts/apply_branch_protection.py` applies it and then reads it back,
+   exiting non-zero if what is in force is looser than what was documented.
 4. **Schedule the roadmap items** (F-06) explicitly, and keep them marked
    `NOT_IMPLEMENTED` until they exist.
 5. **Close the low-severity items** (F-08, F-09, F-10, F-11) as part of the

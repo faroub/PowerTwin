@@ -10,6 +10,7 @@ only being exercised by the pipeline that calls them.
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import sys
 from pathlib import Path
@@ -907,3 +908,298 @@ def test_the_two_lock_parsers_agree_on_the_committed_lock() -> None:
     for canonical, package in by_package.items():
         assert by_version[canonical] == package.version
         assert package.hashes, f"the lock pins '{package.name}' without a hash"
+
+
+# =============================================================================
+# Branch protection
+# =============================================================================
+
+
+apply_branch_protection = _load_script(
+    "powertwin_apply_branch_protection", "apply_branch_protection.py"
+)
+
+
+def _documented_status_checks() -> list[str]:
+    """Return the status checks that ``docs/CI_CD_GUIDE.md`` section 3 lists."""
+    guide = (REPO_ROOT / "docs" / "CI_CD_GUIDE.md").read_text(encoding="utf-8")
+    start = guide.index("**Require status checks to pass before merging**")
+    end = guide.index("- **Require linear commit history**", start)
+    section = guide[start:end]
+
+    checks: list[str] = []
+    for line in section.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        name = cells[0]
+        if name.startswith("`") and name.endswith("`"):
+            checks.append(name.strip("`"))
+    return checks
+
+
+def _workflow_status_checks() -> set[str]:
+    """Return the names of every check the workflows produce.
+
+    A job whose name carries a matrix expression produces one check per
+    matrix value, which is how a single job becomes several required checks.
+    """
+    import yaml
+
+    produced: set[str] = set()
+    for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job in (workflow.get("jobs") or {}).values():
+            name = job.get("name")
+            if not isinstance(name, str):
+                continue
+            matrix = ((job.get("strategy") or {}).get("matrix") or {}).get("python-version")
+            if "matrix.python-version" in name and isinstance(matrix, list):
+                for version in matrix:
+                    produced.add(name.replace("${{ matrix.python-version }}", str(version)))
+            else:
+                produced.add(name)
+    return produced
+
+
+def test_the_required_checks_are_the_documented_ones() -> None:
+    """Test that the script applies exactly the checks the guide documents.
+
+    A prose checklist and an executable control drift apart unless something
+    holds them together. This is that something.
+    """
+    documented = _documented_status_checks()
+
+    assert documented, "the guide documents no status check"
+    assert tuple(documented) == apply_branch_protection.REQUIRED_STATUS_CHECKS
+
+
+def test_every_required_check_is_produced_by_a_workflow() -> None:
+    """Test that each required check is a name a workflow actually produces.
+
+    A required check that no workflow produces can never pass, which would
+    block every merge on the branch forever.
+    """
+    produced = _workflow_status_checks()
+
+    for check in apply_branch_protection.REQUIRED_STATUS_CHECKS:
+        assert check in produced, f"no workflow produces the check '{check}'"
+
+
+def test_the_documented_checks_are_produced_by_a_workflow() -> None:
+    """Test that every check the guide documents is one a workflow produces."""
+    produced = _workflow_status_checks()
+
+    for check in _documented_status_checks():
+        assert check in produced, f"the guide requires '{check}', which no workflow produces"
+
+
+def test_the_protection_payload_matches_the_documented_rule() -> None:
+    """Test that the payload maps onto every rule the guide lists."""
+    guide = (REPO_ROOT / "docs" / "CI_CD_GUIDE.md").read_text(encoding="utf-8")
+    payload = apply_branch_protection.build_protection_payload()
+
+    assert payload["required_status_checks"]["contexts"] == list(
+        apply_branch_protection.REQUIRED_STATUS_CHECKS
+    )
+    assert payload["required_status_checks"]["strict"] is True
+    assert payload["required_pull_request_reviews"]["required_approving_review_count"] == 1
+    assert payload["required_linear_history"] is True
+    assert payload["enforce_admins"] is True
+    assert payload["allow_force_pushes"] is False
+    assert payload["allow_deletions"] is False
+    assert apply_branch_protection.build_signatures_payload() == {
+        "required_signatures": {"enabled": True}
+    }
+
+    # A field that tightens the rule beyond what the guide lists would apply
+    # a policy nobody agreed to, so the guide has to name it.
+    assert "**Require branches to be up to date before merging**" in guide
+    assert "**Require linear commit history**" in guide
+    assert "**Require signed commits**" in guide
+    assert "**Do not allow bypassing the above settings**" in guide
+    assert "**Block force pushes and deletions**" in guide
+
+
+def test_the_script_refuses_to_run_without_a_token(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that the script never runs unauthenticated.
+
+    The token is the only credential the script needs and it must come from
+    the operator, never from a guess.
+    """
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    exit_code = apply_branch_protection.main([])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "GITHUB_TOKEN" in captured.err
+    assert captured.out == ""
+
+
+def test_a_dry_run_makes_no_network_call(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that the dry run prints the requests without making them."""
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the dry run must not reach the network")
+
+    monkeypatch.setattr(apply_branch_protection.urllib.request, "urlopen", forbidden)
+
+    exit_code = apply_branch_protection.main(["--dry-run"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "PUT" in captured.out
+    assert "required_signatures" in captured.out
+    assert "dry run" in captured.out
+
+
+def test_a_missing_check_is_reported() -> None:
+    """Test that a rule that dropped a check is reported as incomplete."""
+    applied = {
+        "required_status_checks": {
+            "contexts": list(apply_branch_protection.REQUIRED_STATUS_CHECKS[:-1])
+        }
+    }
+
+    missing = apply_branch_protection.missing_required_checks(applied)
+
+    assert missing == [apply_branch_protection.REQUIRED_STATUS_CHECKS[-1]]
+
+
+def test_a_rule_that_an_administrator_can_bypass_is_not_ok() -> None:
+    """Test that a loose rule is reported as incomplete.
+
+    A rule that requires the checks but lets an administrator skip them is
+    not the rule that was documented.
+    """
+    report = apply_branch_protection.build_report(
+        {
+            "required_status_checks": {
+                "contexts": list(apply_branch_protection.REQUIRED_STATUS_CHECKS)
+            },
+            "required_pull_request_reviews": {"required_approving_review_count": 1},
+            "enforce_admins": False,
+            "required_linear_history": True,
+            "allow_force_pushes": False,
+            "allow_deletions": False,
+        },
+        {"required_signatures": {"enabled": True}},
+    )
+
+    assert report.missing_checks == ()
+    assert report.ok is False
+
+
+def test_the_rule_is_reported_as_ok_only_when_everything_is_in_force() -> None:
+    """Test that a fully applied rule is reported as satisfied."""
+    report = apply_branch_protection.build_report(
+        {
+            "required_status_checks": {
+                "contexts": list(apply_branch_protection.REQUIRED_STATUS_CHECKS)
+            },
+            "required_pull_request_reviews": {"required_approving_review_count": 1},
+            "enforce_admins": True,
+            "required_linear_history": True,
+            "allow_force_pushes": False,
+            "allow_deletions": False,
+        },
+        {"required_signatures": {"enabled": True}},
+    )
+
+    assert report.ok is True
+    assert report.missing_checks == ()
+
+
+def test_apply_protection_reads_the_rule_back_and_reports_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that the report describes what GitHub enforces, not what was asked for.
+
+    The rule is applied and then read back. A server that accepted the
+    request but enforced something else must be reported as a failure.
+    """
+    calls: list[tuple[str, str]] = []
+
+    class _FakeResponse:
+        def __init__(self, body: str) -> None:
+            self._body = body.encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._body
+
+        def __enter__(self) -> _FakeResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def fake_urlopen(request: object, timeout: float = 0.0) -> _FakeResponse:
+        method = getattr(request, "method", "?")
+        url = getattr(request, "full_url", "?")
+        calls.append((method, url))
+        if method == "GET" and url.endswith("/required_signatures"):
+            return _FakeResponse('{"required_signatures": {"enabled": true}}')
+        if method == "GET":
+            return _FakeResponse(
+                '{"required_status_checks": {"contexts": '
+                f"{json.dumps(list(apply_branch_protection.REQUIRED_STATUS_CHECKS))}"
+                '}, "required_pull_request_reviews": '
+                '{"required_approving_review_count": 1}, "enforce_admins": true, '
+                '"required_linear_history": true, "allow_force_pushes": false, '
+                '"allow_deletions": false}'
+            )
+        return _FakeResponse("{}")
+
+    monkeypatch.setattr(apply_branch_protection.urllib.request, "urlopen", fake_urlopen)
+
+    report = apply_branch_protection.apply_protection("faroub", "PowerTwin", "main", "token")
+
+    assert report.ok is True
+    methods = [method for method, _ in calls]
+    assert methods == ["PUT", "POST", "GET", "GET"]
+
+
+def test_apply_protection_reports_a_server_that_enforces_less(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that a server that enforces less than documented is reported as a failure."""
+
+    class _FakeResponse:
+        def __init__(self, body: str) -> None:
+            self._body = body.encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._body
+
+        def __enter__(self) -> _FakeResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def fake_urlopen(request: object, timeout: float = 0.0) -> _FakeResponse:
+        url = getattr(request, "full_url", "?")
+        if url.endswith("/required_signatures"):
+            return _FakeResponse('{"required_signatures": {"enabled": false}}')
+        return _FakeResponse('{"required_status_checks": {"contexts": []}}')
+
+    monkeypatch.setattr(apply_branch_protection.urllib.request, "urlopen", fake_urlopen)
+
+    report = apply_branch_protection.apply_protection("faroub", "PowerTwin", "main", "token")
+
+    assert report.ok is False
+    assert report.signed_commits_required is False
+    assert len(report.missing_checks) == len(apply_branch_protection.REQUIRED_STATUS_CHECKS)
+
+
+def test_a_malformed_repository_is_rejected(capsys: pytest.CaptureFixture[str]) -> None:
+    """Test that a repository that is not in the 'owner/name' form is refused."""
+    exit_code = apply_branch_protection.main(["--repository", "PowerTwin", "--dry-run"])
+
+    assert exit_code == 1
+    assert "owner/name" in capsys.readouterr().err
