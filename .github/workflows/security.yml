@@ -51,6 +51,7 @@ jobs:
           cache: "pip"
           cache-dependency-path: |
             backend/requirements.txt
+            backend/requirements.lock
             backend/requirements-ci.txt
 
       - name: Python Dependency Audit (pip-audit)
@@ -58,7 +59,11 @@ jobs:
           # pip-audit is pinned in backend/requirements-ci.txt so that the audit
           # is reproducible and cannot silently change behaviour.
           pip install -r backend/requirements-ci.txt
-          pip-audit -r backend/requirements.txt
+          # The lock is audited, not the declared ranges. Auditing the ranges
+          # reports the newest version that each range would resolve to,
+          # which is not necessarily the version that is installed or that is
+          # shipped. The lock is what the image actually contains.
+          pip-audit -r backend/requirements.lock
 
       - name: Set up Node.js 20
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

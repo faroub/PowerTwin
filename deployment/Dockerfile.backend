@@ -30,28 +30,36 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 # The toolchain lives here and only here. Every runtime dependency in
-# backend/requirements.txt ships a manylinux wheel, so the compiler is a
+# backend/requirements.lock ships a manylinux wheel, so the compiler is a
 # fallback for a platform without one rather than the normal path.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY backend/requirements.txt /tmp/requirements.txt
+COPY backend/requirements.txt backend/requirements.lock /tmp/
 
 # A self-contained virtual environment is copied into the runtime stage as a
 # whole, so the runtime never needs a package manager, a compiler or a
 # network connection to install anything.
 #
+# The dependencies are installed from the lock, with --require-hashes, so the
+# image contains exactly one known version of every package and pip refuses to
+# install anything whose hash does not match the recorded one. The lock is
+# generated from backend/requirements.txt by pip-compile and is checked
+# against it by scripts/check_dependency_lock.py, so it cannot drift away
+# from the declared ranges.
+#
 # The package installer and the wheel builder are removed again once the
 # dependencies are in place. A deployed artefact is not a build environment,
-# and the two of them are not runtime dependencies of this service. Their
-# absence is also what keeps the container security scan honest: the wheel
-# builder is the only thing that still carries a vulnerable copy of the
-# setuptools package index, and it has no business being on a runtime layer.
+# and neither of them is a runtime dependency of this service.
+#
+# Python 3.12 no longer installs setuptools into a fresh virtual environment,
+# and nothing in this service needs it, so the runtime layer carries only the
+# packages of the lock, each of them hash-verified.
 RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt \
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip wheel \
+    && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock \
     && /opt/venv/bin/pip uninstall -y wheel \
     && /opt/venv/bin/pip uninstall -y pip \
     && rm -f /opt/venv/bin/pip /opt/venv/bin/pip3 /opt/venv/bin/pip3.12 \

@@ -112,6 +112,12 @@ class TestBackendImage:
         runtime = _runtime_stage(BACKEND_DOCKERFILE)
         assert "pip install" not in runtime
 
+    def test_the_dependencies_are_installed_from_the_lock_with_hashes(self) -> None:
+        builder = _stages(BACKEND_DOCKERFILE)[0]
+        assert "requirements.lock" in builder
+        assert "--require-hashes" in builder
+        assert "-r /tmp/requirements.txt" not in builder
+
     def test_the_service_runs_as_a_non_root_user(self) -> None:
         runtime = _runtime_stage(BACKEND_DOCKERFILE)
         assert "\nUSER powertwin" in runtime
@@ -196,6 +202,40 @@ class TestCiWorkflow:
         text = CI_WORKFLOW.read_text()
         assert "powertwin-backend:ci-test" in text
         assert "simulation_only" in text
+
+
+class TestDependencyLock:
+    """Every workflow must install the pinned, hash-verified dependency set."""
+
+    WORKFLOWS = tuple((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+
+    def test_the_lock_is_committed(self) -> None:
+        lock = REPO_ROOT / "backend" / "requirements.lock"
+        assert lock.is_file(), "the dependency lock is not committed"
+        assert lock.read_text().strip()
+
+    def test_every_workflow_installs_the_lock_with_hashes(self) -> None:
+        for workflow in self.WORKFLOWS:
+            for line in workflow.read_text().splitlines():
+                stripped = line.strip()
+                if not stripped.startswith("pip install"):
+                    continue
+                assert "backend/requirements.txt" not in stripped, (
+                    f"{workflow.name} installs the declared ranges instead of the lock: {stripped}"
+                )
+                if "backend/requirements.lock" in stripped:
+                    assert "--require-hashes" in stripped, (
+                        f"{workflow.name} installs the lock without verifying its hashes: {stripped}"
+                    )
+
+    def test_the_workflows_cache_the_lock(self) -> None:
+        for workflow in self.WORKFLOWS:
+            text = workflow.read_text()
+            if "pip install" not in text:
+                continue
+            assert "backend/requirements.lock" in text, (
+                f"{workflow.name} does not declare the lock as a cache dependency"
+            )
 
 
 class TestSecurityWorkflow:

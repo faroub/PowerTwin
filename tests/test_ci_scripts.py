@@ -46,6 +46,9 @@ endurance_campaign = _load_script(
     "powertwin_endurance_campaign", "endurance_campaign.py"
 )
 generate_sbom = _load_script("powertwin_generate_sbom", "generate_sbom.py")
+check_dependency_lock = _load_script(
+    "powertwin_check_dependency_lock", "check_dependency_lock.py"
+)
 
 
 # =============================================================================
@@ -523,3 +526,198 @@ def test_a_node_inventory_of_the_wrong_shape_is_reported(tmp_path: Path) -> None
 
     with pytest.raises(RuntimeError, match="must be a JSON object"):
         generate_sbom.load_node_inventory(inventory)
+
+
+# =============================================================================
+# Dependency lock verification
+# =============================================================================
+
+
+def _lock_entry(
+    name: str,
+    version: str,
+    digest: str = "a" * 64,
+    required_by: tuple[str, ...] = ("-r backend/requirements.txt",),
+) -> str:
+    """Build one entry of a lock file, in the format pip-compile writes."""
+    lines = [f"{name}=={version} \\", f"    --hash=sha256:{digest} \\"]
+    lines.append(f"    --hash=sha256:{'b' * 64}")
+    if len(required_by) == 1:
+        lines.append(f"    # via {required_by[0]}")
+    else:
+        lines.append("    # via")
+        lines.extend(f"    #   {parent}" for parent in required_by)
+    return "\n".join(lines)
+
+
+def test_the_lock_of_the_repository_is_a_faithful_resolution() -> None:
+    """Test that the committed lock matches the committed requirements."""
+    declared = check_dependency_lock.parse_requirements(
+        (REPO_ROOT / "backend" / "requirements.txt").read_text(encoding="utf-8")
+    )
+    locked = check_dependency_lock.parse_lock(
+        (REPO_ROOT / "backend" / "requirements.lock").read_text(encoding="utf-8")
+    )
+
+    assert check_dependency_lock.check_lock(declared, locked) == []
+
+
+def test_every_locked_package_carries_a_hash() -> None:
+    """Test that no package in the committed lock is installed without a hash."""
+    locked = check_dependency_lock.parse_lock(
+        (REPO_ROOT / "backend" / "requirements.lock").read_text(encoding="utf-8")
+    )
+
+    assert locked, "the committed lock is empty"
+    for package in locked.values():
+        assert package.hashes, f"{package.name} is pinned without a hash"
+        for digest in package.hashes:
+            assert len(digest) == 64
+
+
+def test_every_locked_package_is_pinned_to_one_exact_version() -> None:
+    """Test that the lock contains no range, only exact versions."""
+    locked = check_dependency_lock.parse_lock(
+        (REPO_ROOT / "backend" / "requirements.lock").read_text(encoding="utf-8")
+    )
+
+    for package in locked.values():
+        assert ">" not in package.version
+        assert "<" not in package.version
+        assert "*" not in package.version
+
+
+def test_a_requirement_that_is_not_locked_is_reported() -> None:
+    """Test that a declared requirement missing from the lock is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(_lock_entry("httpx", "0.28.1"))
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any(
+        "fastapi" in problem and "not in the lock" in problem for problem in problems
+    )
+
+
+def test_a_locked_version_outside_the_declared_range_is_reported() -> None:
+    """Test that a lock that violates a declared range is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(_lock_entry("fastapi", "0.100.0"))
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any("does not satisfy" in problem for problem in problems)
+
+
+def test_a_locked_package_without_a_hash_is_reported() -> None:
+    """Test that a lock entry without a hash is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(
+        "fastapi==0.165.0\n    # via -r backend/requirements.txt\n"
+    )
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any("without a single hash" in problem for problem in problems)
+
+
+def test_a_locked_package_that_nothing_declares_is_reported() -> None:
+    """Test that a lock entry which is no longer declared is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(
+        _lock_entry("fastapi", "0.165.0") + "\n" + _lock_entry("httpx", "0.28.1")
+    )
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any(
+        "httpx" in problem and "does not declare it" in problem for problem in problems
+    )
+
+
+def test_an_unreachable_locked_package_is_reported() -> None:
+    """Test that a lock entry no declared requirement reaches is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(
+        _lock_entry("fastapi", "0.165.0")
+        + "\n"
+        + _lock_entry("httpx", "0.28.1", required_by=())
+    )
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any("no declared requirement reaches" in problem for problem in problems)
+
+
+def test_a_dependency_edge_naming_a_missing_package_is_reported() -> None:
+    """Test that a provenance entry naming an absent package is reported."""
+    declared = check_dependency_lock.parse_requirements("fastapi>=0.110.0\n")
+    locked = check_dependency_lock.parse_lock(
+        _lock_entry("fastapi", "0.165.0", required_by=("httpx",))
+    )
+
+    problems = check_dependency_lock.check_lock(declared, locked)
+
+    assert any("which the lock does not contain" in problem for problem in problems)
+
+
+def test_a_requirement_that_is_declared_twice_is_rejected() -> None:
+    """Test that a duplicated declaration is reported rather than accepted."""
+    with pytest.raises(ValueError, match="declared more than once"):
+        check_dependency_lock.parse_requirements("fastapi>=0.110.0\nfastapi>=0.111.0\n")
+
+
+def test_a_malformed_declaration_is_rejected() -> None:
+    """Test that a declaration that is not a requirement is reported."""
+    with pytest.raises(ValueError, match="not a valid requirement"):
+        check_dependency_lock.parse_requirements("not a requirement at all\n")
+
+
+def test_the_lock_cli_accepts_the_committed_lock(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that the command line check accepts the committed lock."""
+    exit_code = check_dependency_lock.main([])
+
+    assert exit_code == 0
+    assert "faithful resolution" in capsys.readouterr().out
+
+
+def test_the_lock_cli_fails_on_a_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that the command line check fails and explains a mismatch."""
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("fastapi>=99.0.0\n", encoding="utf-8")
+    lock = tmp_path / "requirements.lock"
+    lock.write_text(_lock_entry("fastapi", "0.165.0"), encoding="utf-8")
+
+    exit_code = check_dependency_lock.main(
+        ["--requirements", str(requirements), "--lock", str(lock)]
+    )
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "does not match" in captured.err
+    assert "does not satisfy" in captured.err
+
+
+def test_the_lock_cli_fails_on_an_unreadable_lock(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that the command line check fails when a file cannot be read."""
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("fastapi>=0.110.0\n", encoding="utf-8")
+
+    exit_code = check_dependency_lock.main(
+        [
+            "--requirements",
+            str(requirements),
+            "--lock",
+            str(tmp_path / "does-not-exist.lock"),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "could not be read" in capsys.readouterr().err
+

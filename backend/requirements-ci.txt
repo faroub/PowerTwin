@@ -8,7 +8,7 @@
 # backend/requirements.txt alone and therefore carries none of them.
 #
 # Every version below is pinned to an exact release. The pipeline installs
-# backend/requirements.txt first and this file second, so the pins in this
+# backend/requirements.lock first and this file second, so the pins in this
 # file are the ones that end up installed, whatever the ranges of the runtime
 # requirements resolve to. A tool upgrade is therefore an explicit, visible
 # change to this file rather than a silent consequence of a new release of
@@ -37,3 +37,9 @@ hypothesis==6.170.17
 
 # Dependency vulnerability auditing.
 pip-audit==2.10.1
+
+# Version and requirement parsing. It is a transitive dependency of the test
+# runner, but scripts/check_dependency_lock.py imports it directly to compare
+# the pinned versions against the declared ranges, so it is declared here
+# rather than relied upon transitively.
+packaging==26.4
