@@ -35,7 +35,7 @@ available. The companion documents are
 | **Historian & Telemetry** | `IMPLEMENTED_AND_TESTED` | Non-blocking in-memory ring buffer (10,000 max capacity), zero-silent-loss disk overflow fallback, live telemetry extraction in `/api/v1/overview`, historical query API. |
 | **SCADA Web HMI** | `IMPLEMENTED_AND_TESTED` | 19-view React + TypeScript SCADA frontend, interactive Single-Line Diagram, real-time telemetry display with **"SIMULATED DATA ONLY"** labelling on every view, login-gated platform session and per-view telemetry wiring from the backend `/api/v1/overview` endpoint. **A component suite of 151 tests in 11 files covers the entry point, the shared components, the login flow, the telemetry hook, the API client and every SCADA view (98.28 % line, 98.82 % function, 98.29 % statement and 85.92 % branch coverage), and the enforced Vitest floors are 75 % globally with tighter per-directory floors.** |
 | **Security & API RBAC** | `IMPLEMENTED_AND_TESTED` | JWT HTTP Bearer token authentication, deny-by-default `require_permission(...)` middleware, restrictive CORS rules, startup safety-invariant validation (simulation-only, loopback binding, secret strength, database password strength, login rate limiting), in-memory platform session bridge (token never persisted to client storage). |
-| **CI/CD & Release Pipeline** | `IMPLEMENTED_AND_TESTED` | Six GitHub Actions workflows with pinned action commit SHAs, explicit job permissions, `timeout-minutes` on every job, an **enforced** coverage policy with global and per-domain floors, an offline migration-graph validation, release-version format validation, a reproducible SPDX-2.3 SBOM shipped with its dependency inventories and checksums, a nightly determinism and drift campaign, a **hash-pinned Python runtime lock** installed with `--require-hashes` everywhere, a **pinned CI toolchain** in `backend/requirements-ci.txt`, and every tool configuration — Ruff, pytest, coverage — pinned inside the repository **at the level the tool is invoked from**, so that a local run and a pipeline run cannot disagree. The deployed container images are **multi-stage**, **digest-pinned**, carry no build toolchain and no package installer in their runtime layer, are proven in the build to contain exactly the hash-verified packages of the lock and nothing else, apply the newest published distribution patches, and are scanned under two policies that separate the advisories this project controls from the ones only the distribution can fix. |
+| **CI/CD & Release Pipeline** | `IMPLEMENTED_AND_TESTED` | Six GitHub Actions workflows with pinned action commit SHAs, explicit job permissions, `timeout-minutes` on every job, an **enforced** coverage policy with global and per-domain floors, an offline migration-graph validation, release-version format validation, a reproducible SPDX-2.3 SBOM shipped with its dependency inventories and checksums, a nightly determinism and drift campaign, a **hash-pinned Python runtime lock** installed with `--require-hashes` everywhere, a **pinned CI toolchain** in `backend/requirements-ci.txt`, an **ORM-versus-migration drift gate** that builds the schema in an ephemeral TimescaleDB service container and compares it with the ORM metadata, and every tool configuration — Ruff, pytest, coverage — pinned inside the repository **at the level the tool is invoked from**, so that a local run and a pipeline run cannot disagree. The deployed container images are **multi-stage**, **digest-pinned**, carry no build toolchain and no package installer in their runtime layer, are proven in the build to contain exactly the hash-verified packages of the lock and nothing else, apply the newest published distribution patches, and are scanned under two policies that separate the advisories this project controls from the ones only the distribution can fix. |
 | **Grid Services Framework** | `IMPLEMENTED_AND_TESTED` | Seven plugins in `plugins/grid_services/` — FCR, aFRR, MFRR, energy arbitrage, peak shaving, renewable smoothing and volt-var support — behind the `grid_service` interface, with a status model, SoC-based unavailability and a performance score. |
 | **Scenario & Fault-Injection Framework** | `IMPLEMENTED_AND_TESTED` | `backend/app/simulation/scenario.py`, `scenario_runner.py` and `fault_injection.py`: scenario definitions, timed fault-event sequences, acceptance criteria, and a runner that drives the plant through them. |
 | **Energy-Market Clearing & Optimisation** | `NOT_IMPLEMENTED` | Market clearing, price formation and dispatch optimisation. The platform has an energy-arbitrage plugin and an EMS scheduled-profile mode, but no market model. |
@@ -65,6 +65,7 @@ the pipeline** and is backed by a test, not only by a document.
 | Interpreter compatibility | Matrix on Python 3.13 and 3.14, `fail-fast: false` | The suite itself | Job fails |
 | Release version format | `scripts/validate_release_version.py` | `tests/test_ci_scripts.py` | Job fails before anything is built |
 | Migration graph | `scripts/validate_migrations.py` (offline) | `tests/test_ci_scripts.py` | Job fails before the archive is assembled |
+| ORM-versus-migration drift | `alembic upgrade head` and `alembic check` against an ephemeral TimescaleDB service container in the release job | `tests/test_deployment_images.py` | Job fails before the archive is assembled |
 | SBOM validity and reproducibility | `scripts/generate_sbom.py` | `tests/test_ci_scripts.py` | Job fails before the archive is assembled |
 | Determinism and drift | `scripts/endurance_campaign.py` — two runs, one seed, compared fingerprints | `tests/test_ci_scripts.py` | Nightly job fails |
 | Dependency audit | `pip-audit` and `npm audit --audit-level=high` | — | Job fails |
@@ -92,10 +93,19 @@ the pipeline** and is backed by a test, not only by a document.
 
 | # | Item | Severity |
 | :--- | :--- | :--- |
-| 1 | Add `target_metadata` to the migrations and restore the ORM-versus-migration comparison | Medium |
-| 2 | Apply the documented branch protection to `main` (administrator action) | Medium |
-| 3 | Implement the energy-market, calibration and warranty roadmap items | Medium |
-| 4 | Close the low-severity items: the module-level simulation entry point, the dedicated operator-action journal, and the line-length unification | Low |
+| 1 | Apply the documented branch protection to `main` (administrator action) | Medium |
+| 2 | Implement the energy-market, calibration and warranty roadmap items | Medium |
+| 3 | Close the low-severity items: the module-level simulation entry point, the dedicated operator-action journal, and the line-length unification | Low |
+
+**Item 1 of an earlier revision — "Add `target_metadata` to the migrations and
+restore the ORM-versus-migration comparison" — is closed.** The Alembic
+environment declares the ORM metadata and excludes the index that TimescaleDB
+owns, the release job builds the schema and compares it with the ORM against
+an ephemeral TimescaleDB service container, and the ORM now declares exactly
+the index set the migrations create. A model that is changed without a
+migration fails the release. Two limits remain and are recorded in
+`docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.4: Alembic does not compare primary
+keys, and the gate runs at release time rather than on every pull request.
 
 **The `illustrative` schema marker of that list is closed.** Every topology
 configuration model now carries an `illustrative: bool` field that defaults to

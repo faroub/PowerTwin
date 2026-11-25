@@ -42,14 +42,21 @@ class CommandRecordModel(Base):
     __tablename__ = "command_records"
 
     command_id: Mapped[str] = mapped_column(String(64), primary_key=True, nullable=False)
-    timestamp_ns: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    timestamp_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
     requestor: Mapped[str] = mapped_column(String(64), nullable=False)
-    target_equipment_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    target_equipment_id: Mapped[str] = mapped_column(String(64), nullable=False)
     requested_value: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     accepted_status: Mapped[str] = mapped_column(String(32), nullable=False)
     rejection_reason: Mapped[str] = mapped_column(Text, nullable=False, default="SUCCESS")
     resulting_response: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    simulation_run_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    simulation_run_id: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # The index is declared exactly as migration `001_initial_schema` creates it.
+    # The historian query filters on `target_equipment_id` and orders by
+    # `timestamp_ns`, so this composite index serves both, and the ORM must
+    # not claim individual column indexes that the deployed schema does not
+    # have: `alembic check` compares the two and would report the difference.
+    __table_args__ = (Index("idx_cmd_target", "target_equipment_id", "timestamp_ns"),)
 
 
 class AlarmsAndEventsModel(Base):
@@ -58,9 +65,9 @@ class AlarmsAndEventsModel(Base):
     __tablename__ = "alarms_and_events"
 
     event_id: Mapped[str] = mapped_column(String(64), primary_key=True, nullable=False)
-    timestamp_ns: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    simulation_run_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    equipment_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    timestamp_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    simulation_run_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    equipment_id: Mapped[str] = mapped_column(String(64), nullable=False)
     severity: Mapped[str] = mapped_column(String(16), nullable=False)
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -136,6 +143,11 @@ class UserAccountModel(Base):
     locked_until: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    # Migration `002_user_accounts` creates this index alongside the unique
+    # constraint. The ORM declares it so that `alembic check` sees the same
+    # index set as the deployed schema.
+    __table_args__ = (Index("idx_users_username", "username"),)
 
 
 class BatteryWarrantyMetricsModel(Base):
