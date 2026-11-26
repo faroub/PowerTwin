@@ -51,9 +51,7 @@ class TopologyEquipment(BaseModel):
     plugin_id: str | None = Field(
         default=None, description="The plugin that implements this equipment"
     )
-    illustrative: bool = Field(
-        description="True when the parameters of this item are illustrative"
-    )
+    illustrative: bool = Field(description="True when the parameters of this item are illustrative")
     capacity_wh: float | None = Field(default=None, description="Nominal energy capacity in Wh")
     rated_power_w: float | None = Field(default=None, description="Rated active power in W")
     rated_apparent_power_va: float | None = Field(
