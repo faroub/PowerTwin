@@ -240,6 +240,43 @@ that was documented — a missing check, a missing approval, an administrator
 who can bypass the rule, a permitted force push or a permitted deletion all
 count as a failure.
 
+#### A partial application is reported, not raised
+
+The rule set is applied in **two** requests, and the two can succeed
+independently:
+
+| Request | Carries | Fails when |
+| :--- | :--- | :--- |
+| `PUT .../protection` | The status checks, the review requirement, the linear-history requirement, the push restrictions | The token lacks `administration` permission — **nothing** is applied |
+| `POST .../protection/required_signatures` | The signed-commit requirement | GitHub answers **HTTP 422** while *Commit signature verification* is off in the repository settings |
+
+GitHub refuses the signed-commit request until **Settings → General →
+Commit signature verification** is enabled. That is a repository setting
+rather than a defect in the script, and the main rule is already in force by
+then, so the script **captures** that failure and still performs the
+verification. It reports:
+
+- every property that **is** in force, read back from GitHub;
+- a `WARNING:` line naming the setting to enable;
+- a non-zero exit code, because a signed-commit requirement that could not be
+  confirmed is not a rule that can be called verified.
+
+The failure of the main `PUT` is still raised, because in that case nothing
+was applied and there is nothing to report.
+
+```text
+Required status checks: 8
+Missing status checks: none
+Approving reviews required: 1
+Rule enforced for administrators: True
+Linear history required: True
+Force pushes allowed: False
+Branch deletion allowed: False
+Signed commits required: False
+WARNING: The signed-commit requirement could not be applied: POST ... failed with HTTP 422: ...
+        Enable 'Commit signature verification' in the repository settings and run this script again.
+```
+
 Three tests in `tests/test_ci_scripts.py` hold the three sources together:
 the check names in this table, the declaration in the script, and the `name:`
 of every job in `.github/workflows/`. A check that is renamed in a workflow,

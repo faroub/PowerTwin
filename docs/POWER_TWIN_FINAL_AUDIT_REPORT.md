@@ -558,6 +558,27 @@ or a row added to the table without a matching job, fails the suite instead
 of silently blocking every merge on the branch. Each of the three was probed
 by breaking the source it guards, so a test that cannot fail proves nothing.
 
+**A partial application is now reported instead of raising.** The rule set is
+applied in two requests — the main `PUT` that carries the status checks, the
+review requirement and the push restrictions, and the `POST` that carries the
+signed-commit requirement. GitHub answers the second one with **HTTP 422**
+while *Commit signature verification* is off in the repository settings. The
+script used to raise on that response **before** its verification, so an
+administrator was left with an exception and no way to tell whether the eight
+required checks, the approving-review requirement and the linear-history
+requirement were now in force. They usually were: the `PUT` had already
+succeeded.
+
+The script now captures that failure, still performs the read-back, and
+reports both halves — every property that **is** in force, and a `WARNING:`
+line naming the repository setting to enable. The exit code stays non-zero,
+because a signed-commit requirement that could not be confirmed is not a rule
+that can be called verified. The failure of the main `PUT` is still raised,
+because in that case nothing was applied and there is nothing to report.
+Four further tests in `tests/test_ci_scripts.py` cover the four paths: a
+failed signed-commit request, a failed signed-commit read-back, a failed main
+request, and the command-line exit status.
+
 **The finding remains open.** The rule is still not applied, and applying it
 requires a token with `administration` permission on the repository, which
 this work has no way to obtain. What could be verified from outside the
