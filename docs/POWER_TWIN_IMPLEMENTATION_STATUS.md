@@ -177,6 +177,21 @@ migration fails the release. Two limits remain and are recorded in
 `docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.4: Alembic does not compare primary
 keys, and the gate runs at release time rather than on every pull request.
 
+**The drift gate has now been executed, and its negative case verified.** The
+release job's TimescaleDB service container and its two Alembic commands had
+never run on a GitHub runner, because publishing a release requires pushing a
+`v*` tag. The commands were therefore rehearsed locally against the **same
+digest-pinned image** the workflow uses, with the same environment variables:
+`alembic upgrade head` applied `001_initial_schema` and `002_user_accounts`,
+and `alembic check` reported *"No new upgrade operations detected."* and
+exited zero. The gate was then probed with an undeclared table added to the
+migrated schema: `alembic check` detected it and **failed with exit code
+255**, so the gate refuses a release whose models and migrations disagree
+rather than passing silently. The rest of that job — the artifact upload, the
+SBOM, the checksums and the image builds — has still not been executed on a
+runner, and that remains recorded in
+`docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.4.
+
 **The `illustrative` schema marker of that list is closed.** Every topology
 configuration model now carries an `illustrative: bool` field that defaults to
 `True`, the plant-level marker is derived from the items and refuses an
