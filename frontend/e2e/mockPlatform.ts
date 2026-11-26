@@ -43,6 +43,8 @@ export interface MockPlatform {
   readonly blockedHosts: string[];
   /** The engine state the mock reports. A control action changes it. */
   engineState: string;
+  /** The wall-clock pacing factor in force. SET_SPEED changes it. */
+  speedFactor: number;
 }
 
 /** The token the mock issues. It is a fixture, not a credential. */
@@ -50,7 +52,11 @@ export const MOCK_TOKEN = 'e2e-mock-access-token';
 
 const PERMISSIONS = ['READ_TELEMETRY', 'READ_CONFIG', 'MODIFY_SIMULATION'];
 
-function systemInfo(engineState: string) {
+/** The pacing bounds the backend enforces. The mock refuses the same ones. */
+export const MIN_SPEED_FACTOR = 0;
+export const MAX_SPEED_FACTOR = 100;
+
+function systemInfo(engineState: string, speedFactor: number) {
   return {
     project_name: 'PowerTwin BESS Platform',
     version: '1.0.0',
@@ -68,6 +74,7 @@ function systemInfo(engineState: string) {
       mode: 'REALTIME',
       current_tick: 4242,
       is_running: engineState === 'RUNNING',
+      speed_factor: speedFactor,
       message: 'The simulation engine is running.',
     },
   };
@@ -145,7 +152,7 @@ function replyTo(
   }
 
   if (method === 'GET' && path === '/api/v1/info') {
-    return { status: 200, body: systemInfo(state.engineState) };
+    return { status: 200, body: systemInfo(state.engineState, state.speedFactor) };
   }
 
   if (method === 'GET' && path === '/api/v1/overview') {
@@ -162,6 +169,24 @@ function replyTo(
       state.engineState = 'STOPPED';
     } else if (action === 'RESET') {
       state.engineState = 'RUNNING';
+    } else if (action === 'SET_SPEED') {
+      const factor = (body as { speed_factor?: number } | null)?.speed_factor;
+      // The mock refuses the same factors the backend refuses, so a spec
+      // cannot pass against a mock that accepts what the platform rejects.
+      if (
+        typeof factor !== 'number' ||
+        !Number.isFinite(factor) ||
+        factor < MIN_SPEED_FACTOR ||
+        factor > MAX_SPEED_FACTOR
+      ) {
+        return {
+          status: 400,
+          body: {
+            detail: `SET_SPEED action requires a 'speed_factor' between ${MIN_SPEED_FACTOR} and ${MAX_SPEED_FACTOR}; ${factor} was received.`,
+          },
+        };
+      }
+      state.speedFactor = factor;
     }
     return {
       status: 200,
@@ -191,6 +216,7 @@ export async function installMockPlatform(
     unknownPaths: [],
     blockedHosts: [],
     engineState: 'RUNNING',
+    speedFactor: 1.0,
   };
   const overrides = options.overrides ?? {};
 

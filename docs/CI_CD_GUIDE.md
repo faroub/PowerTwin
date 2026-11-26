@@ -314,9 +314,9 @@ The frontend policy lives in `frontend/vite.config.ts` and is enforced by the
 | `src/components/*.tsx` | 95 % | 95 % | 95 % | 90 % |
 | `src/views/*.tsx` | 90 % | 90 % | 90 % | 70 % |
 
-The frontend test suite contains **152 tests in 11 files**, and the measured
-coverage of the HMI is **98.29 % lines, 98.85 % functions, 98.29 %
-statements and 85.92 % branches**. Every one of the 19 SCADA view
+The frontend test suite contains **155 tests in 11 files**, and the measured
+coverage of the HMI is **97.45 % lines, 98.87 % functions, 97.46 %
+statements and 85.08 % branches**. Every one of the 19 SCADA view
 components, the shared components, the React hooks and the entry point are
 covered.
 
@@ -328,7 +328,7 @@ the report and the figure would look far better than the reality.
 > published was aspirational and was never implemented.** The Vitest
 > configuration declared a 75 % threshold against a measured 4.15 %, and the
 > coverage provider was not even installed, so the check could not run. The
-> component suite now measures 98.29 % lines, and **75 % is the enforced
+> component suite now measures 97.45 % lines, and **75 % is the enforced
 > floor** for every metric, with tighter floors on the modules that carry the
 > session, the telemetry polling, the shared components and the views. The
 > binding of the directory-scoped floors was verified by deliberately raising
@@ -358,7 +358,10 @@ a spec cannot quietly depend on an endpoint nobody modelled or on a network
 that should not exist.
 
 The specs cover the operator path — log in, read the overview, pause or start and stop the
-engine behind its confirmation, observe the result, log out — and the safety
+engine behind its confirmation, observe the result, log out — the wall-clock
+speed factor, which the screen displays as the factor in force and sets
+through the `SET_SPEED` control with the requested factor named in the
+confirmation — and the safety
 posture: the session token travels in memory and in the `Authorization`
 header only, never in `localStorage`, `sessionStorage` or a cookie; a backend
 that is not ready is reported as disconnected rather than replaced by
@@ -685,10 +688,10 @@ still has to supply its own secret.
   oversights, and both are stated so that a reviewer knows what the gate does
   not cover.
 - **The frontend coverage floors are a regression guard, not a quality
-  claim.** The suite measures 98.29 % lines, so the 75 % global floor has a
+  claim.** The suite measures 97.45 % lines, so the 75 % global floor has a
   wide margin, and the directory-scoped floors are the ones that actually
   bite: a view or a shared component that loses its tests fails the gate
-  even when the global figure barely moves. The branch coverage of 85.92 % is
+  even when the global figure barely moves. The branch coverage of 85.08 % is
   the weakest metric, and the 75 % branch floor is the binding global
   constraint.
 - **The end-to-end suite runs against a mock platform, not against the real

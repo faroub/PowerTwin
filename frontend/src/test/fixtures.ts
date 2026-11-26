@@ -28,6 +28,7 @@ export const HEALTHY_SYSTEM_INFO: SystemInfo = {
     mode: 'REALTIME',
     current_tick: 12345,
     is_running: true,
+    speed_factor: 1.0,
     message: 'The simulation engine is running.',
   },
 };

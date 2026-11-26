@@ -29,6 +29,7 @@ from backend.app.core.operator_journal import (
 )
 from backend.app.core.rbac import Permission, require_permission
 from backend.app.core.safety import get_safety_report
+from backend.app.simulation.config import MAX_SPEED_FACTOR, MIN_SPEED_FACTOR
 from backend.app.simulation.runtime import (
     get_simulation_runtime,
 )
@@ -163,20 +164,32 @@ async def dispatch_simulation_control(
     elif act == SimulationActionEnum.RESET:
         runtime.reset()
     elif act == SimulationActionEnum.SET_SPEED:
-        if payload.speed_factor is None or payload.speed_factor < 0.0:
+        speed_factor = payload.speed_factor
+        if speed_factor is None or not (MIN_SPEED_FACTOR <= speed_factor <= MAX_SPEED_FACTOR):
+            # A speed factor outside the permitted range is refused, not
+            # corrected: the command asks for a pacing the platform will not
+            # execute, and silently substituting a different one would leave
+            # the operator believing the clock is paced the way they asked.
             _record_operator_action(
                 request=request,
                 actor=actor,
                 action=act,
                 outcome="REJECTED",
                 reason="INVALID_SPEED_FACTOR",
-                details={"speed_factor": payload.speed_factor},
+                details={
+                    "speed_factor": speed_factor,
+                    "minimum": MIN_SPEED_FACTOR,
+                    "maximum": MAX_SPEED_FACTOR,
+                },
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="SET_SPEED action requires a non-negative 'speed_factor' parameter.",
+                detail=(
+                    f"SET_SPEED action requires a 'speed_factor' between {MIN_SPEED_FACTOR} "
+                    f"and {MAX_SPEED_FACTOR}; {speed_factor} was received."
+                ),
             )
-        runtime.set_speed_factor(payload.speed_factor)
+        runtime.set_speed_factor(speed_factor)
 
     engine_state_str = engine.state.value if hasattr(engine.state, "value") else str(engine.state)
     msg = f"Action '{act.value}' successfully executed on simulation engine."

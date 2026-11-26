@@ -4,41 +4,104 @@ import { ConfirmationModal } from '../components/ConfirmationModal';
 import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
 import { fetchSystemHealth, dispatchSimulationControl, ControlResponse } from '../services/api';
 
+/**
+ * The wall-clock pacing bounds the backend enforces. The screen refuses a
+ * factor outside them without sending it, and the backend refuses it again
+ * if it is sent: the screen is a convenience, the platform is the authority.
+ */
+export const MIN_SPEED_FACTOR = 0;
+export const MAX_SPEED_FACTOR = 100;
+
+/** A control action the operator has asked for but not yet confirmed. */
+interface PendingAction {
+  /** The name the confirmation dialog shows. */
+  name: string;
+  /** The action the control endpoint understands. */
+  action: string;
+  /** The extra fields the action carries, such as a speed factor. */
+  payload: Record<string, unknown>;
+}
+
 export const SimulationView: React.FC = () => {
   const [engineState, setEngineState] = useState<string>('UNKNOWN');
+  const [speedFactor, setSpeedFactor] = useState<number | null>(null);
+  const [requestedFactor, setRequestedFactor] = useState<string>('1');
+  const [factorError, setFactorError] = useState<string>('');
   const [modalOpen, setModalOpen] = useState<boolean>(false);
-  const [actionName, setActionName] = useState<string>('');
-  const [actionEnum, setActionEnum] = useState<string>('');
+  const [pending, setPending] = useState<PendingAction | null>(null);
   const [feedback, setFeedback] = useState<ControlResponse | null>(null);
-  
+
+  /**
+   * Read the engine state and the pacing factor in force.
+   *
+   * The factor is read from the engine, not from what this screen last
+   * asked for: the factor in force is the one that is pacing the clock.
+   */
+  const refreshEngine = async () => {
+    const health = await fetchSystemHealth();
+    if (health.healthy && health.data?.engine) {
+      setEngineState(health.data.engine.status || 'NOT_CONNECTED');
+      setSpeedFactor(health.data.engine.speed_factor ?? null);
+    } else {
+      setEngineState('NOT_CONNECTED');
+      setSpeedFactor(null);
+    }
+  };
 
   useEffect(() => {
-    const checkEngine = async () => {
-      const health = await fetchSystemHealth();
-      if (health.healthy && health.data?.engine) {
-        setEngineState(health.data.engine.status || 'NOT_CONNECTED');
-      } else {
-        setEngineState('NOT_CONNECTED');
-      }
-    };
-    checkEngine();
-
+    refreshEngine();
   }, []);
 
-  const triggerControl = (name: string, actEnum: string) => {
-    setActionName(name);
-    setActionEnum(actEnum);
+  const triggerControl = (name: string, action: string, payload: Record<string, unknown> = {}) => {
+    setPending({ name, action, payload });
     setModalOpen(true);
+  };
+
+  /**
+   * Validate the requested speed factor before it is dispatched.
+   *
+   * A factor that is not a number, or that lies outside the permitted
+   * range, is refused here with a reason. The backend refuses it as well;
+   * refusing it here means the operator is told why before a request is
+   * made rather than after it is rejected.
+   */
+  const requestSpeedChange = () => {
+    const parsed = Number(requestedFactor);
+    if (requestedFactor.trim() === '' || !Number.isFinite(parsed)) {
+      setFactorError(`'${requestedFactor}' is not a speed factor.`);
+      return;
+    }
+    if (parsed < MIN_SPEED_FACTOR || parsed > MAX_SPEED_FACTOR) {
+      setFactorError(
+        `A speed factor must be between ${MIN_SPEED_FACTOR} and ${MAX_SPEED_FACTOR}; ${parsed} was entered.`,
+      );
+      return;
+    }
+    setFactorError('');
+    triggerControl(`Set Speed Factor (${parsed}x)`, 'SET_SPEED', { speed_factor: parsed });
   };
 
   const handleConfirmAction = async () => {
     setModalOpen(false);
-    const result = await dispatchSimulationControl(actionEnum, {});
+    if (!pending) {
+      return;
+    }
+    const result = await dispatchSimulationControl(pending.action, pending.payload);
     setFeedback(result);
     if (result.engine_state) {
       setEngineState(result.engine_state);
     }
+    // The factor that is now in force is the engine's answer, not the one
+    // that was requested, so the card is read again after every action.
+    await refreshEngine();
   };
+
+  const factorLabel =
+    speedFactor === null
+      ? 'UNKNOWN'
+      : speedFactor === 0
+      ? 'MAX (unpaced)'
+      : `${speedFactor.toFixed(1)} x`;
 
   return (
     <div>
@@ -86,8 +149,12 @@ export const SimulationView: React.FC = () => {
 
         <div className="card">
           <div className="card-title">Wall-Clock Speed Factor</div>
-          <div className="card-value">1.0 x</div>
-          <div className="card-note">Real-Time Pacing</div>
+          <div className="card-value">{factorLabel}</div>
+          <div className="card-note">
+            {speedFactor === null
+              ? 'The engine does not report a pacing factor'
+              : 'Real-Time Pacing in force'}
+          </div>
         </div>
       </div>
 
@@ -167,10 +234,58 @@ export const SimulationView: React.FC = () => {
         </div>
       </div>
 
+      <div className="card">
+        <h3 style={{ marginBottom: '12px', color: '#38bdf8' }}>Wall-Clock Pacing</h3>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <label htmlFor="speed-factor" style={{ color: '#cbd5e1', fontSize: '0.9rem' }}>
+            Speed factor (0 to {MAX_SPEED_FACTOR}, 0 = unpaced)
+          </label>
+          <input
+            id="speed-factor"
+            type="number"
+            min={MIN_SPEED_FACTOR}
+            max={MAX_SPEED_FACTOR}
+            step={0.1}
+            value={requestedFactor}
+            onChange={(event) => {
+              setRequestedFactor(event.target.value);
+              setFactorError('');
+            }}
+            style={{
+              padding: '8px 10px',
+              borderRadius: '6px',
+              border: '1px solid #334155',
+              backgroundColor: '#0f172a',
+              color: '#f8fafc',
+              width: '110px',
+            }}
+          />
+          <button
+            onClick={requestSpeedChange}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '6px',
+              backgroundColor: '#a78bfa',
+              color: '#0f172a',
+              border: 'none',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            SET SPEED
+          </button>
+        </div>
+        {factorError && (
+          <p style={{ marginTop: '12px', marginBottom: 0, color: '#ef4444', fontSize: '0.9rem' }}>
+            {factorError}
+          </p>
+        )}
+      </div>
+
       <ConfirmationModal
         isOpen={modalOpen}
         title="Confirm Engine Control Action"
-        actionDetails={`Are you sure you want to execute: ${actionName}?`}
+        actionDetails={`Are you sure you want to execute: ${pending ? pending.name : ''}?`}
         onConfirm={handleConfirmAction}
         onCancel={() => setModalOpen(false)}
       />

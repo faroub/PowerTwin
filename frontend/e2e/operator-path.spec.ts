@@ -132,6 +132,37 @@ test.describe('Operator path', () => {
     }
   });
 
+  test('sets the wall-clock speed factor from the screen', async ({ page }) => {
+    const platform = await installMockPlatform(page);
+
+    await page.goto('/');
+    await logIn(page);
+
+    // The speed factor was settable through the API but the screen showed a
+    // constant and offered no way to change it.
+    await openView(page, 'Simulation Control');
+    await expect(page.getByText('1.0 x')).toBeVisible();
+
+    await page.getByLabel(/Speed factor/i).fill('4');
+    await page.getByRole('button', { name: 'SET SPEED' }).click();
+
+    // The operator is told what is about to happen.
+    await expect(
+      page.getByText('Are you sure you want to execute: Set Speed Factor (4x)?'),
+    ).toBeVisible();
+    await page.getByRole('button', { name: /CONFIRM & EXECUTE/ }).click();
+
+    await expect(page.getByText('[SUCCESS]', { exact: true })).toBeVisible();
+    // The card shows the factor that is now in force.
+    await expect(page.getByText('4.0 x')).toBeVisible();
+
+    const controlRequest = platform.requests.find(
+      (request) => request.path === '/api/v1/simulation/control',
+    );
+    expect(controlRequest?.body).toEqual({ action: 'SET_SPEED', speed_factor: 4 });
+    expect(controlRequest?.authorization).toBe(`Bearer ${MOCK_TOKEN}`);
+  });
+
   test('sends no authorisation header before the operator logs in', async ({ page }) => {
     const platform = await installMockPlatform(page);
 

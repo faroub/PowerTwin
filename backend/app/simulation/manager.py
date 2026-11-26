@@ -7,7 +7,7 @@ import uuid
 from typing import Any
 
 from backend.app.simulation.clock import NANOSECONDS_PER_SECOND, SimulationClock
-from backend.app.simulation.config import SimulationConfiguration
+from backend.app.simulation.config import SimulationConfiguration, validate_speed_factor
 from backend.app.simulation.context import SimulationContext
 from backend.app.simulation.event import EventDispatcher
 from backend.app.simulation.exceptions import (
@@ -69,10 +69,13 @@ class SimulationRunManager:
         self.scheduler.register_task(task)
 
     def set_speed_factor(self, multiplier: float) -> None:
-        """Update simulation wall-clock speed pacing factor."""
-        if multiplier < 0.0:
-            raise ValueError("Speed factor multiplier must be >= 0.0")
-        self.config.speed_factor = multiplier
+        """Update simulation wall-clock speed pacing factor.
+
+        The multiplier is checked against the same range the configuration
+        model and the control endpoint use, so a factor that is refused at
+        the API cannot reach the engine by another route.
+        """
+        self.config.speed_factor = validate_speed_factor(multiplier)
 
     def start(self) -> None:
         """Start or restart simulation execution."""
