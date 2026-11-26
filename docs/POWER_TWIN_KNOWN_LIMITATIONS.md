@@ -111,8 +111,8 @@ through them.
 
 ### 4.1 Frontend Test Coverage
 
-The frontend test suite contains **151 tests in 11 files**, and the measured
-coverage is **98.28 % of lines, 98.82 % of functions, 98.29 % of statements
+The frontend test suite contains **152 tests in 11 files**, and the measured
+coverage is **98.29 % of lines, 98.85 % of functions, 98.30 % of statements
 and 85.92 % of branches**. Every SCADA view, the shared components, the login
 flow, the telemetry hook, the API client and the application entry point are
 covered.
@@ -138,7 +138,9 @@ backend; that agreement is covered by the backend's own HTTP tests.
 Playwright project now exists (`frontend/playwright.config.ts`, specs in
 `frontend/e2e/`). The operator path — log in, read the overview, act on the
 simulation engine behind its confirmation, observe the result, log out — is
-exercised automatically in a real browser against the built artefact.
+exercised automatically in a real browser against the built artefact, and so
+is the full engine lifecycle: the operator starts the engine, stops it, and
+each action travels with the session token.
 
 The suite is **hermetic by construction**: there is no backend behind the
 preview server. `frontend/e2e/mockPlatform.ts` answers every `/api/v1/**`
@@ -490,9 +492,21 @@ What the repair does **not** change:
   chain that follows it, and the method is never called from anywhere. The
   chain is dead code left over from an earlier design; it was left in place
   to keep the lifecycle repair's diff focused, and it is a cleanup item.
-- **The HMI has no STOP button.** The simulation view offers Pause, Single
-  Step and Reset. The stop path exists and is tested at the API level, but
-  an operator cannot reach it from the screen.
+
+### 4.13 The HMI Reaches Every Engine Lifecycle Action, but Not the Speed Factor
+
+The simulation view now offers **Start**, **Pause**, **Stop**, **Single Step**
+and **Reset**, each behind the same confirmation modal, so the whole engine
+lifecycle is reachable from the operator's screen. The start and the stop
+were missing: the engine comes up in the `STOPPED` state, and without them
+the operator could only pause a run that something else had begun.
+
+What the screen still does **not** offer is the **wall-clock speed factor**.
+The card that reports it shows a fixed `1.0 x` and is not wired to the
+`SET_SPEED` control the API implements. The speed factor is therefore
+readable and settable through the API but not through the HMI. The view's
+subtitle no longer promises "Speed Multipliers" it does not deliver; it
+names the three things the screen does offer.
 
 ---
 

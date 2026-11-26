@@ -180,7 +180,7 @@ no physical system is reachable.
 | React and TypeScript HMI | **COMPLIANT** | `frontend/` (D) |
 | PostgreSQL/TimescaleDB for persistent data | **COMPLIANT** | Alembic migration `002_user_accounts`, `docker-compose.yml` service (D) |
 | Docker Compose for initial deployment | **COMPLIANT** | `docker-compose.yml` with a loopback-published API (D) |
-| pytest backend tests, Playwright frontend end-to-end tests | **COMPLIANT** | Both are used. The frontend has a Vitest component suite (151 tests) and a Playwright end-to-end suite (6 specs) that drives the built HMI against a hermetic mock platform. Recorded as findings **F-01** and **F-05**, both now resolved (D) |
+| pytest backend tests, Playwright frontend end-to-end tests | **COMPLIANT** | Both are used. The frontend has a Vitest component suite (152 tests) and a Playwright end-to-end suite (7 specs) that drives the built HMI against a hermetic mock platform. Recorded as findings **F-01** and **F-05**, both now resolved (D) |
 | Pinned dependencies, reproducible builds | **COMPLIANT** | The frontend lock file is pinned and `npm ci` is used. The **Python** runtime dependencies are pinned in `backend/requirements.lock` and installed with `--require-hashes`, so a build either reproduces the recorded artefact exactly or fails, and the container build asserts in strict mode that the image carries exactly the locked packages and nothing else. Finding **F-02** is resolved (D) |
 | Structured logging | **COMPLIANT** | `logging.getLogger(__name__)` throughout, including the safety invariants (C) |
 | Exceptions handled explicitly, never swallowed | **COMPLIANT** | The CI helper scripts convert every failure into an explicit error and a non-zero exit status (A) |
@@ -238,7 +238,7 @@ gate that cannot be met is not a gate.
 | The SBOM was not valid SPDX 2.3 and had no unique identifiers | The artefact was not a usable SBOM | A valid SPDX-2.3 document with unique `SPDXID`s, concluded and declared licenses, a unique document namespace and a `SOURCE_DATE_EPOCH`-pinned timestamp |
 | The SBOM and the dependency inventories were not shipped with the release | The release had no dependency evidence | The SBOM, the Python inventory and the full transitive npm inventory are in the archive and covered by `SHA256SUMS` |
 | `release_version` and `random_seed` were decorative inputs | An operator could trigger a release with an arbitrary string | Both are consumed: the version is validated before anything is built, and the seed drives the nightly endurance campaign |
-| The frontend declared a 75 % coverage threshold against a measured 4.15 %, and the coverage provider was not installed | The gate could not run at all | The provider is installed, `coverage.all` counts untested files, and the enforced floor is **75 %** — a threshold the suite now actually meets at 98.28 % |
+| The frontend declared a 75 % coverage threshold against a measured 4.15 %, and the coverage provider was not installed | The gate could not run at all | The provider is installed, `coverage.all` counts untested files, and the enforced floor is **75 %** — a threshold the suite now actually meets at 98.29 % |
 | `npm audit --audit-level=high` was permanently red (1 high, 3 critical) | The security job never passed | The toolchain was upgraded to vite 7 / vitest 4, which clears the esbuild → vite → vitest → tinypool advisory chain; the audit reports **0 vulnerabilities** |
 | The lint configuration was resolved from **outside** the repository | The lint result depended on the machine: a developer's run and the CI runner's run could legitimately disagree | A root `ruff.toml` pins the rule set inside the repository |
 | The pytest and the coverage configuration lived in `backend/pyproject.toml`, where neither tool ever read it | Both tools ran with their built-in defaults: `asyncio_mode = "auto"` was never applied and the coverage `source` was never applied, so the declared configuration was inert | `pytest.ini` and `.coveragerc` at the repository root, which is where the tools are actually invoked |
@@ -319,9 +319,9 @@ functions, `npm run build` produced the production bundle, and
 
 **They have since been re-executed against the frontend component suite and
 the Playwright project**: `npm run lint` clean over `src/`, `e2e/` and
-`playwright.config.ts`; `npm test` **151 passed in 11 files**;
-`npm run test:coverage` satisfied the enforced floors at **98.28 % lines,
-98.82 % functions, 98.29 % statements and 85.92 % branches**;
+`playwright.config.ts`; `npm test` **152 passed in 11 files**;
+`npm run test:coverage` satisfied the enforced floors at **98.29 % lines,
+98.85 % functions, 98.30 % statements and 85.92 % branches**;
 `npm run test:e2e` **6 passed** against the built artefact on the loopback
 interface with a hermetic mock platform; `npm run build` produced the
 production bundle.
@@ -397,11 +397,11 @@ versions.
 Findings are ordered by severity. Each states the evidence, the impact and the
 recommended action.
 
-### F-01 — HIGH — RESOLVED — The frontend test suite covers 98.28 % of the HMI
+### F-01 — HIGH — RESOLVED — The frontend test suite covers 98.29 % of the HMI
 
 The HMI contains 19 SCADA view components and the React hooks. The frontend
-suite is now **151 tests in 11 files**, and the measured coverage is **98.28 %
-of lines, 98.82 % of functions, 98.29 % of statements and 85.92 % of
+suite is now **152 tests in 11 files**, and the measured coverage is **98.29 %
+of lines, 98.85 % of functions, 98.30 % of statements and 85.92 % of
 branches**. The entry point, the shared components, the login flow, the
 telemetry hook, the API client, the permission table and every SCADA view are
 covered.
@@ -572,7 +572,7 @@ script and confirm its exit status.**
 ### F-05 — MEDIUM — RESOLVED — The Playwright end-to-end path is configured and runs in the pipeline
 
 `AGENTS.md` §4 names Playwright for frontend end-to-end tests. A Playwright
-project now exists: `frontend/playwright.config.ts` and six specs in
+project now exists: `frontend/playwright.config.ts` and seven specs in
 `frontend/e2e/`, driving the **built** HMI in Chromium against a **hermetic
 mock platform**.
 
@@ -934,7 +934,7 @@ files, was green across every job.
    declares exactly the index set the migrations create.
 2. ~~**Build the frontend test suite** (F-01) and the Playwright end-to-end
    path** (F-05), then raise the enforced floor.~~ **Done.** The component
-   suite measures 151 tests and 98.28 % line coverage with an enforced 75 %
+   suite measures 152 tests and 98.29 % line coverage with an enforced 75 %
    floor, the Playwright project drives the built HMI against a hermetic mock
    platform, and both run as enforced pipeline gates.
 3. **Apply the branch protection** (F-04). An administrator action, using the
