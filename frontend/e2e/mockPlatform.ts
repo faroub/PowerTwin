@@ -154,8 +154,12 @@ function replyTo(
 
   if (method === 'POST' && path === '/api/v1/simulation/control') {
     const action = (body as { action?: string } | null)?.action;
-    if (action === 'PAUSE') {
+    if (action === 'START') {
+      state.engineState = 'RUNNING';
+    } else if (action === 'PAUSE') {
       state.engineState = 'PAUSED';
+    } else if (action === 'STOP') {
+      state.engineState = 'STOPPED';
     } else if (action === 'RESET') {
       state.engineState = 'RUNNING';
     }

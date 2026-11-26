@@ -44,7 +44,7 @@ export const SimulationView: React.FC = () => {
     <div>
       <div className="view-header">
         <h1 className="view-title">Simulation Control</h1>
-        <p className="view-subtitle">Clock Control, Speed Multipliers, and Deterministic Reset</p>
+        <p className="view-subtitle">Engine Lifecycle, Clock Control, and Deterministic Reset</p>
       </div>
 
       <SimulatedDataNotice detail="Engine control actions. They act on the in-memory simulation only." />
@@ -93,7 +93,21 @@ export const SimulationView: React.FC = () => {
 
       <div className="card">
         <h3 style={{ marginBottom: '16px', color: '#38bdf8' }}>Engine Execution Controls</h3>
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => triggerControl('Start Engine', 'START')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '6px',
+              backgroundColor: '#22c55e',
+              color: '#0f172a',
+              border: 'none',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            START
+          </button>
           <button
             onClick={() => triggerControl('Pause Engine', 'PAUSE')}
             style={{
@@ -107,6 +121,20 @@ export const SimulationView: React.FC = () => {
             }}
           >
             PAUSE
+          </button>
+          <button
+            onClick={() => triggerControl('Stop Engine', 'STOP')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '6px',
+              backgroundColor: '#f97316',
+              color: '#0f172a',
+              border: 'none',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            STOP
           </button>
           <button
             onClick={() => triggerControl('Single Step (+10ms)', 'STEP')}
