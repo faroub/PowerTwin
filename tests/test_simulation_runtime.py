@@ -405,16 +405,37 @@ def test_app_scoped_runtime_is_not_a_module_global() -> None:
             pytest.skip(f"existing runtime state leaked: {err}")
 
 
-def test_default_runtime_is_bound_to_app_on_first_use() -> None:
-    """The module fall-back runtime is bound to the app so both resolve the same object."""
+def test_the_app_scoped_runtime_is_not_the_module_fallback() -> None:
+    """Start-up binds a runtime of its own; the module fall-back stays empty.
+
+    The application owns the runtime that holds its plant. The module-level
+    fall-back exists for callers without an application handle, and it is a
+    distinct object: an engine that reached the fall-back would be an engine
+    the application does not own, and the endpoints would report two different
+    plants for the same process.
+    """
     app = FastAPI()
+    # The fall-back may hold an engine of its own, put there by a test that
+    # builds a plant without an application handle. What start-up must not do
+    # is change it.
+    fallback_engine_before = default_runtime.engine
+    fallback_plant_before = default_runtime.active_plant
+
     init_simulation(app)
     try:
         runtime = get_simulation_runtime(app=app)
         assert runtime is not None
         assert runtime.engine is not None
         assert runtime.active_plant is not None
-        assert runtime is default_runtime or runtime is not default_runtime
+
+        # The application's runtime is not the module fall-back, and start-up
+        # did not put the application's plant into the fall-back.
+        assert runtime is not default_runtime
+        assert default_runtime.engine is fallback_engine_before
+        assert default_runtime.active_plant is fallback_plant_before
+
+        # A caller without an application handle gets the fall-back.
+        assert get_simulation_runtime() is default_runtime
     finally:
         close_simulation(app)
 
