@@ -34,6 +34,7 @@ from backend.app.simulation.tasks import (
     PlantControlTask,
     PlantNetworkTask,
 )
+from backend.app.topology.battery_parameters import merge_battery_parameters
 from backend.app.topology.schema import PlantTopologyConfig
 from backend.app.topology.validator import TopologyValidator
 
@@ -170,6 +171,15 @@ class PlantTopologyFactory:
                 model_name=c.plugin_id,
                 is_illustrative=c.illustrative,
             )
+            # A calibrated container runs with its calibrated parameters. The
+            # merge happens here, on the authoritative physical model, and
+            # not through the plugin initialisation payload: the vendor
+            # plugins hand-roll their own validate and initialize over a
+            # fixed set of keys and silently ignore everything else, so a
+            # payload-based approach would leave a vendor container running
+            # on vendor defaults while the topology claimed calibrated
+            # values — a divergence with no error anywhere.
+            bat_model.config = merge_battery_parameters(bat_model.config, c.battery_parameters)
             battery_systems.append(bat_model)
 
             bms_limits = BMSProtectionLimits(

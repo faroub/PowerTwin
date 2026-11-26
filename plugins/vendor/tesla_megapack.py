@@ -11,6 +11,7 @@ from backend.app.equipment.models import (
 from backend.app.models.battery.system import (
     BatterySystemConfigModel,
     GenericBatterySystemModel,
+    battery_capabilities,
 )
 from backend.app.simulation.context import SimulationContext
 from plugins.base import BasePlugin
@@ -148,6 +149,14 @@ class TeslaMegapackBatteryPlugin(BasePlugin, BatterySystemInterface):
         ctx.shared_state[f"{KEY_BATTERY_CMD_P_W_PREFIX}{self.physical_model.equipment_id}"] = (
             self.physical_model.voltage_v
         )
+
+    def get_capabilities(self) -> dict[str, Any]:
+        """Return what this container actually runs with.
+
+        The values are read from the live configuration, so a calibrated
+        container reports its calibrated values.
+        """
+        return battery_capabilities(self.physical_model.config)
 
     def shutdown(self) -> None:
         """Clean up plugin state."""

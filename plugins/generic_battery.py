@@ -11,6 +11,7 @@ from backend.app.equipment.models import UniversalEquipmentState
 from backend.app.models.battery.system import (
     BatterySystemConfigModel,
     GenericBatterySystemModel,
+    battery_capabilities,
 )
 from backend.app.simulation.context import SimulationContext
 from plugins.base import BasePlugin
@@ -99,10 +100,12 @@ class GenericBatteryPlugin(BasePlugin, BatterySystemInterface):
         return self.physical_model.get_state()
 
     def get_capabilities(self) -> dict[str, Any]:
-        return {
-            "capacity_wh": self.physical_model.config.capacity_wh,
-            "nominal_voltage_v": self.physical_model.config.nominal_voltage_v,
-        }
+        """Return what this container actually runs with.
+
+        The values are read from the live configuration, so a calibrated
+        container reports its calibrated values.
+        """
+        return battery_capabilities(self.physical_model.config)
 
     def shutdown(self) -> None:
         self.enabled = False

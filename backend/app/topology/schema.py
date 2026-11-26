@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class IllustrativeConfigModel(BaseModel):
@@ -33,6 +33,65 @@ class IllustrativeConfigModel(BaseModel):
     )
 
 
+class BatteryParameterOverride(IllustrativeConfigModel):
+    """Calibrated parameters for one container's battery physical model.
+
+    A digital-twin calibration fits the parameters that the battery model
+    exposes but the topology does not: the open-circuit-voltage curve, the
+    series internal resistance, the thermal mass, the cooling rate and the
+    auxiliary load. The values are applied to the authoritative physical
+    model by the plant factory, so a calibrated container runs with them
+    whichever plugin it uses.
+
+    Every field is optional: an absent field means "keep the configured
+    value". A field that is present and null is not the same thing, and is
+    refused by the schema.
+
+    The model forbids unknown keys. The rest of the topology schema follows
+    Pydantic's default of ignoring them, which is how a misspelled key
+    disappears without a word; this model is new, so there is no
+    back-compatibility to protect, and a calibration that silently drops a
+    parameter would be worse than one that refuses to load.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ocv_intercept: float | None = Field(
+        default=None,
+        description="Open-circuit voltage at zero SoC, as a fraction of the nominal voltage.",
+    )
+    ocv_slope: float | None = Field(
+        default=None,
+        description=(
+            "Open-circuit voltage rise across the whole SoC range, as a fraction "
+            "of the nominal voltage."
+        ),
+    )
+    internal_resistance_ohm: float | None = Field(
+        default=None, description="Series internal resistance in ohms."
+    )
+    cooling_coefficient_per_s: float | None = Field(
+        default=None, description="Lumped cooling rate toward the ambient reference, per second."
+    )
+    thermal_mass_j_per_c: float | None = Field(
+        default=None, description="Lumped container thermal mass in J/degC."
+    )
+    aux_power_w: float | None = Field(
+        default=None, description="Continuous auxiliary container load in Watts."
+    )
+    calibration_source: str | None = Field(
+        default=None,
+        description=(
+            "What the fitted values came from: a dataset path, a test campaign "
+            "identifier, or a description of the data the fit is based on."
+        ),
+    )
+    calibration_report_sha256: str | None = Field(
+        default=None,
+        description="The SHA-256 of the calibration report the values were taken from.",
+    )
+
+
 class ContainerConfig(IllustrativeConfigModel):
     """Battery Container topology specification."""
 
@@ -43,6 +102,34 @@ class ContainerConfig(IllustrativeConfigModel):
     nominal_voltage_v: float = Field(default=1000.0, description="Nominal DC voltage in V")
     racks_count: int = Field(default=16, description="Racks per container")
     initial_soc_pct: float = Field(default=50.0)
+    battery_parameters: BatteryParameterOverride | None = Field(
+        default=None,
+        description=(
+            "Calibrated parameters for this container's battery physical model. "
+            "Absent means the container runs on the model's configured defaults."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_parameter_label(self) -> "ContainerConfig":
+        """A container cannot claim validation while carrying illustrative parameters.
+
+        `AGENTS.md` §2.14 requires illustrative parameters to be labelled. A
+        container that carries a calibrated parameter set which is itself
+        illustrative has not been validated, whatever the container's own
+        marker says.
+        """
+        if (
+            self.battery_parameters is not None
+            and self.battery_parameters.illustrative
+            and not self.illustrative
+        ):
+            raise ValueError(
+                "The container declares illustrative='false' but its calibrated battery "
+                "parameters are illustrative. A container cannot claim to be validated "
+                "while carrying parameters that are not."
+            )
+        return self
 
 
 class PCSUnitConfig(IllustrativeConfigModel):

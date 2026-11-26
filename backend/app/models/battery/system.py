@@ -17,7 +17,7 @@ import logging
 import math
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.app.equipment.models import (
     AlarmRecord,
@@ -63,6 +63,34 @@ class BatterySystemConfigModel(BaseModel):
     thermal_mass_j_per_c: float = Field(
         default=50_000_000.0, description="Lumped container thermal mass in J/degC"
     )
+    ocv_intercept: float = Field(
+        default=0.85,
+        description=(
+            "Open-circuit voltage at zero state of charge, as a fraction of the nominal voltage."
+        ),
+    )
+    ocv_slope: float = Field(
+        default=0.30,
+        description=(
+            "Open-circuit voltage rise across the whole state-of-charge range, as "
+            "a fraction of the nominal voltage."
+        ),
+    )
+    internal_resistance_ohm: float = Field(
+        default=0.0,
+        description=(
+            "Series internal resistance in ohms. Zero disables the ohmic drop, "
+            "which is the behaviour of the model before the resistance existed."
+        ),
+    )
+    cooling_coefficient_per_s: float = Field(
+        default=0.01,
+        description=("Lumped cooling rate toward the ambient reference temperature, per second."),
+    )
+    ambient_reference_c: float = Field(
+        default=25.0,
+        description="Ambient reference temperature for the lumped cooling term, in deg C",
+    )
 
     @field_validator(
         "capacity_wh", "nominal_voltage_v", "max_charge_power_w", "max_discharge_power_w"
@@ -86,6 +114,72 @@ class BatterySystemConfigModel(BaseModel):
         if v < 0.0 or v > 100.0 or math.isnan(v) or math.isinf(v):
             raise ValueError(f"Percentage value must be between 0.0 and 100.0, got: {v}")
         return v
+
+    @field_validator(
+        "ocv_intercept",
+        "ocv_slope",
+        "internal_resistance_ohm",
+        "cooling_coefficient_per_s",
+        "ambient_reference_c",
+    )
+    @classmethod
+    def validate_finite(cls, v: float) -> float:
+        if math.isnan(v) or math.isinf(v):
+            raise ValueError(f"Value must be finite, got: {v}")
+        return v
+
+    @field_validator("internal_resistance_ohm", "cooling_coefficient_per_s")
+    @classmethod
+    def validate_non_negative(cls, v: float) -> float:
+        if v < 0.0:
+            raise ValueError(f"Value must not be negative, got: {v}")
+        return v
+
+    @model_validator(mode="after")
+    def validate_open_circuit_voltage(self) -> "BatterySystemConfigModel":
+        """The open-circuit voltage must stay positive over the whole SoC range.
+
+        The open-circuit voltage is linear in the state of charge, so the two
+        endpoints bound it. A configuration whose open-circuit voltage would
+        cross zero describes a cell that cannot be modelled, and is refused
+        rather than producing a negative terminal voltage.
+        """
+        for soc_pct in (0.0, 100.0):
+            voltage = self.nominal_voltage_v * (
+                self.ocv_intercept + self.ocv_slope * (soc_pct / 100.0)
+            )
+            if voltage <= 0.0:
+                raise ValueError(
+                    "The open-circuit voltage must stay positive over the state-of-charge "
+                    f"range; at {soc_pct:g}% it would be {voltage:.3f} V."
+                )
+        return self
+
+
+def battery_capabilities(config: BatterySystemConfigModel) -> dict[str, Any]:
+    """Return what a container actually runs with, read from its live configuration.
+
+    The battery plugins expose their capabilities through this shape. Reading
+    the values off the configuration rather than off a hard-coded list means a
+    calibrated container reports the calibrated values, so a screen can say
+    what the plant is running with instead of what it shipped with.
+
+    Args:
+        config: The container's live battery configuration.
+
+    Returns:
+        The capability mapping.
+    """
+    return {
+        "capacity_wh": config.capacity_wh,
+        "nominal_voltage_v": config.nominal_voltage_v,
+        "ocv_intercept": config.ocv_intercept,
+        "ocv_slope": config.ocv_slope,
+        "internal_resistance_ohm": config.internal_resistance_ohm,
+        "cooling_coefficient_per_s": config.cooling_coefficient_per_s,
+        "thermal_mass_j_per_c": config.thermal_mass_j_per_c,
+        "aux_power_w": config.aux_power_w,
+    }
 
 
 class GenericBatterySystemModel:
@@ -143,6 +237,75 @@ class GenericBatterySystemModel:
         """Return current chemical stored energy in Watt-hours."""
         return self.config.capacity_wh * (self.soh_pct / 100.0) * (self.soc_pct / 100.0)
 
+    def open_circuit_voltage_v(self, soc_pct: float | None = None) -> float:
+        """Return the open-circuit voltage at a state of charge, in volts.
+
+        Args:
+            soc_pct: The state of charge to evaluate. Defaults to the current
+                state of charge.
+        """
+        soc = self.soc_pct if soc_pct is None else soc_pct
+        return self.config.nominal_voltage_v * (
+            self.config.ocv_intercept + self.config.ocv_slope * (soc / 100.0)
+        )
+
+    def maximum_discharge_power_w(self) -> float:
+        """Return the largest power the pack can deliver, in Watts.
+
+        A series internal resistance caps the deliverable power. The
+        terminal voltage and the load current are coupled, so the largest
+        deliverable power is reached when the terminal voltage has fallen to
+        half the open-circuit voltage — the maximum-power point of the
+        equivalent Thevenin source. Beyond it no terminal voltage carries
+        the requested power.
+
+        A resistance of zero imposes no limit, so the model behaves exactly
+        as it did before the resistance existed.
+        """
+        resistance = self.config.internal_resistance_ohm
+        if resistance <= 0.0:
+            return self.config.max_discharge_power_w
+        v_oc = self.open_circuit_voltage_v()
+        return (v_oc * v_oc) / (4.0 * resistance)
+
+    def solve_terminal_voltage(self, power_w: float) -> float:
+        """Return the terminal voltage that carries a delivered power.
+
+        The pack is an open-circuit source in series with an internal
+        resistance, so the terminal voltage and the load current are
+        coupled:
+
+            ``v = v_oc - R * i``   and   ``i = p / v``
+
+        Eliminating the current gives ``v**2 - v_oc * v + R * p = 0``. The
+        physical root is the **larger** one: the smaller root is the
+        short-circuit branch, in which the voltage collapses while the
+        current runs away.
+
+        A resistance of zero leaves the open-circuit voltage untouched, so
+        the model behaves exactly as it did before the resistance existed.
+        """
+        v_oc = self.open_circuit_voltage_v()
+        resistance = self.config.internal_resistance_ohm
+        if resistance <= 0.0:
+            return v_oc
+
+        discriminant = v_oc * v_oc - 4.0 * resistance * power_w
+        if discriminant < 0.0:
+            # Beyond the maximum-power point no terminal voltage carries the
+            # requested power. The limit published by
+            # get_available_power_limits() keeps this branch out of normal
+            # operation; the clamp is the last line of defence against a
+            # configuration that asks for the impossible.
+            logger.warning(
+                "The requested power %.1f W exceeds the maximum-power point of the "
+                "container at %.1f V open-circuit; the terminal voltage is limited.",
+                power_w,
+                v_oc,
+            )
+            discriminant = 0.0
+        return (v_oc + math.sqrt(discriminant)) / 2.0
+
     def get_available_power_limits(self, energy_horizon_s: float = 3600.0) -> tuple[float, float]:
         """Calculate dynamic available charge and discharge power limits in Watts.
 
@@ -169,7 +332,11 @@ class GenericBatterySystemModel:
             max_dis_power_from_energy = (
                 usable_energy_wh / horizon_h
             ) * self.config.discharge_efficiency
-            avail_dis_w = min(self.config.max_discharge_power_w, max_dis_power_from_energy)
+            avail_dis_w = min(
+                self.config.max_discharge_power_w,
+                max_dis_power_from_energy,
+                self.maximum_discharge_power_w(),
+            )
 
         # Charge power limits (-W magnitude)
         if self.soc_pct >= self.config.max_soc_pct:
@@ -209,7 +376,7 @@ class GenericBatterySystemModel:
             actual_p_w = 0.0
 
         self.active_power_w = actual_p_w
-        self.voltage_v = self.config.nominal_voltage_v * (0.85 + 0.30 * (self.soc_pct / 100.0))
+        self.voltage_v = self.solve_terminal_voltage(actual_p_w)
         self.current_a = actual_p_w / max(self.voltage_v, 1.0)
 
         # 1. Chemical Energy Delta
@@ -252,7 +419,9 @@ class GenericBatterySystemModel:
         # 3. Lumped Thermal Mass Update
         delta_q_joules = (losses_w + self.config.aux_power_w) * delta_t_s
         temp_rise_c = delta_q_joules / self.config.thermal_mass_j_per_c
-        cooling_c = (self.temperature_c - 25.0) * (0.01 * delta_t_s)
+        cooling_c = (self.temperature_c - self.config.ambient_reference_c) * (
+            self.config.cooling_coefficient_per_s * delta_t_s
+        )
         self.temperature_c += temp_rise_c - cooling_c
 
         if not self.is_available or self.operating_state == OperatingState.FAULTED:
