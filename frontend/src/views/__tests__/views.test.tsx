@@ -438,6 +438,36 @@ describe('Simulation Control View', () => {
     ).toBeInTheDocument();
     expect(mock.callsTo('/api/v1/simulation/control')).toHaveLength(0);
   });
+
+  it('offers the factor in force, so that an unedited request does not reset it', async () => {
+    const mock = installFetchMock({
+      '/api/v1/overview': () => jsonResponse(CONNECTED_TELEMETRY),
+      '/api/v1/info': () =>
+        jsonResponse({
+          ...HEALTHY_SYSTEM_INFO,
+          engine: { ...HEALTHY_SYSTEM_INFO.engine, speed_factor: 4.0 },
+        }),
+      '/api/v1/simulation/control': () => jsonResponse({ status: 'SUCCESS' }),
+    });
+    const user = userEvent.setup();
+    render(<SimulationView />);
+
+    // The field starts on the factor the engine is actually pacing with.
+    // Were it left on a constant, an operator who opened the screen and
+    // pressed SET SPEED without editing it would silently reset the clock
+    // to a pacing they never asked for.
+    const input = screen.getByLabelText(/Speed factor/i) as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('4'));
+
+    await user.click(screen.getByRole('button', { name: 'SET SPEED' }));
+    await user.click(screen.getByRole('button', { name: /CONFIRM & EXECUTE/ }));
+
+    await waitFor(() => expect(mock.callsTo('/api/v1/simulation/control')).toHaveLength(1));
+    expect(bodyOf(mock.callsTo('/api/v1/simulation/control')[0])).toEqual({
+      action: 'SET_SPEED',
+      speed_factor: 4,
+    });
+  });
 });
 
 describe('Equipment Controller View', () => {
