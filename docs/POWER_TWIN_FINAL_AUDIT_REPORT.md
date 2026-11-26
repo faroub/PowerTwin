@@ -180,7 +180,7 @@ no physical system is reachable.
 | React and TypeScript HMI | **COMPLIANT** | `frontend/` (D) |
 | PostgreSQL/TimescaleDB for persistent data | **COMPLIANT** | Alembic migration `002_user_accounts`, `docker-compose.yml` service (D) |
 | Docker Compose for initial deployment | **COMPLIANT** | `docker-compose.yml` with a loopback-published API (D) |
-| pytest backend tests, Playwright frontend end-to-end tests | **COMPLIANT** | Both are used. The frontend has a Vitest component suite (156 tests) and a Playwright end-to-end suite (8 specs) that drives the built HMI against a hermetic mock platform. Recorded as findings **F-01** and **F-05**, both now resolved (D) |
+| pytest backend tests, Playwright frontend end-to-end tests | **COMPLIANT** | Both are used. The frontend has a Vitest component suite (176 tests) and a Playwright end-to-end suite (8 specs) that drives the built HMI against a hermetic mock platform. Recorded as findings **F-01** and **F-05**, both now resolved (D) |
 | Pinned dependencies, reproducible builds | **COMPLIANT** | The frontend lock file is pinned and `npm ci` is used. The **Python** runtime dependencies are pinned in `backend/requirements.lock` and installed with `--require-hashes`, so a build either reproduces the recorded artefact exactly or fails, and the container build asserts in strict mode that the image carries exactly the locked packages and nothing else. Finding **F-02** is resolved (D) |
 | Structured logging | **COMPLIANT** | `logging.getLogger(__name__)` throughout, including the safety invariants (C) |
 | Exceptions handled explicitly, never swallowed | **COMPLIANT** | The CI helper scripts convert every failure into an explicit error and a non-zero exit status (A) |
@@ -238,7 +238,7 @@ gate that cannot be met is not a gate.
 | The SBOM was not valid SPDX 2.3 and had no unique identifiers | The artefact was not a usable SBOM | A valid SPDX-2.3 document with unique `SPDXID`s, concluded and declared licenses, a unique document namespace and a `SOURCE_DATE_EPOCH`-pinned timestamp |
 | The SBOM and the dependency inventories were not shipped with the release | The release had no dependency evidence | The SBOM, the Python inventory and the full transitive npm inventory are in the archive and covered by `SHA256SUMS` |
 | `release_version` and `random_seed` were decorative inputs | An operator could trigger a release with an arbitrary string | Both are consumed: the version is validated before anything is built, and the seed drives the nightly endurance campaign |
-| The frontend declared a 75 % coverage threshold against a measured 4.15 %, and the coverage provider was not installed | The gate could not run at all | The provider is installed, `coverage.all` counts untested files, and the enforced floor is **75 %** — a threshold the suite now actually meets at 97.49 % |
+| The frontend declared a 75 % coverage threshold against a measured 4.15 %, and the coverage provider was not installed | The gate could not run at all | The provider is installed, `coverage.all` counts untested files, and the enforced floor is **75 %** — a threshold the suite now actually meets at 98.02 % |
 | `npm audit --audit-level=high` was permanently red (1 high, 3 critical) | The security job never passed | The toolchain was upgraded to vite 7 / vitest 4, which clears the esbuild → vite → vitest → tinypool advisory chain; the audit reports **0 vulnerabilities** |
 | The lint configuration was resolved from **outside** the repository | The lint result depended on the machine: a developer's run and the CI runner's run could legitimately disagree | A root `ruff.toml` pins the rule set inside the repository |
 | The pytest and the coverage configuration lived in `backend/pyproject.toml`, where neither tool ever read it | Both tools ran with their built-in defaults: `asyncio_mode = "auto"` was never applied and the coverage `source` was never applied, so the declared configuration was inert | `pytest.ini` and `.coveragerc` at the repository root, which is where the tools are actually invoked |
@@ -307,8 +307,8 @@ The two Ruff rows above record the scope and the line length that were in
 force when the matrix was run. Both have since changed: the lint scope was
 widened to include the `deployment/` tree, and the line length was unified at
 100 characters across the whole repository (finding **F-11**). The unified
-gate was re-executed locally afterwards — **172 files already formatted**,
-**all checks passed** — and the current test count is **420 passed** against
+gate was re-executed locally afterwards — **176 files already formatted**,
+**all checks passed** — and the current test count is **501 passed** against
 the 315 recorded above.
 
 The frontend gates were executed as well. At the time of the audit they were
@@ -319,9 +319,9 @@ functions, `npm run build` produced the production bundle, and
 
 **They have since been re-executed against the frontend component suite and
 the Playwright project**: `npm run lint` clean over `src/`, `e2e/` and
-`playwright.config.ts`; `npm test` **156 passed in 11 files**;
-`npm run test:coverage` satisfied the enforced floors at **97.49 % lines,
-98.87 % functions, 97.50 % statements and 85.28 % branches**;
+`playwright.config.ts`; `npm test` **176 passed in 11 files**;
+`npm run test:coverage` satisfied the enforced floors at **98.02 % lines,
+99.21 % functions, 98.03 % statements and 88.02 % branches**;
 `npm run test:e2e` **8 passed** against the built artefact on the loopback
 interface with a hermetic mock platform; `npm run build` produced the
 production bundle.
@@ -397,11 +397,11 @@ versions.
 Findings are ordered by severity. Each states the evidence, the impact and the
 recommended action.
 
-### F-01 — HIGH — RESOLVED — The frontend test suite covers 97.49 % of the HMI
+### F-01 — HIGH — RESOLVED — The frontend test suite covers 98.02 % of the HMI
 
 The HMI contains 19 SCADA view components and the React hooks. The frontend
-suite is now **156 tests in 11 files**, and the measured coverage is **97.49 %
-of lines, 98.87 % of functions, 97.50 % of statements and 85.28 % of
+suite is now **176 tests in 11 files**, and the measured coverage is **98.02 %
+of lines, 99.21 % of functions, 98.03 % of statements and 88.02 % of
 branches**. The entry point, the shared components, the login flow, the
 telemetry hook, the API client, the permission table and every SCADA view are
 covered.
@@ -422,7 +422,7 @@ label that `AGENTS.md` rule 14 requires, which the shared
 
 *Residual limitation.* The suite exercises the HMI against a mocked backend,
 so it proves the HMI's own behaviour and not the agreement with the live
-FastAPI backend. Branch coverage at 85.28 % is the weakest metric.
+FastAPI backend. Branch coverage at 88.02 % is the weakest metric.
 
 ### F-02 — HIGH — RESOLVED — The Python runtime dependencies are pinned and hash-verified
 
@@ -963,6 +963,169 @@ the documented "run as fast as the host allows" setting. The screen labels it
 
 ---
 
+### F-15 — HIGH — OPEN — The historian is never written to by the running platform
+
+`AGENTS.md` §1 requires a local web HMI **and a historian**. The historian
+subsystem is implemented: `backend/app/historian/service.py` provides a
+`HistorianService` with a ring buffer, a zero-silent-loss disk overflow, a
+database flush and a replay path, and `backend/app/historian/query.py` reads
+the tables it writes. The subsystem is also well tested — `tests/test_historian_db.py`
+covers the buffering, the overflow and the flush.
+
+**The running platform never instantiates it.** `HistorianService` is
+constructed only in the test suite; no module in `backend/app/` calls
+`record_telemetry`, `record_command` or `record_alarm`, and nothing calls
+`flush_buffer_to_db` or `flush_all_to_db`. The tables `telemetry_data`,
+`command_records` and `alarms_and_events` therefore stay empty in a
+deployment, and the three read-only query endpoints answer with zero rows
+against a store that was never fed.
+
+Two places made this harder to see than it should have been. The HMI's
+Historian screen printed *"Sampling: 100ms | Range: Last 1 Hour | Database:
+PostgreSQL / TimescaleDB"* without issuing a single query, so the screen
+asserted a working time-series store. And `backend/app/services/stubs.py`
+contained a `get_service_health_stub()` that reported
+`"historian_service": "READY"` for a service that was never created — a
+placeholder that appeared operational, which `AGENTS.md` §4 forbids. The stub
+was referenced by nothing and has been removed.
+
+*Action.* Connect the historian to the running simulation so that the store
+is fed, and make the screen's claim follow the store rather than precede it.
+
+**Status: OPEN.** The screen side of this finding is closed (see **F-16**):
+the HMI now issues the queries and reports exactly what the store holds,
+including "the store holds no rows". The platform side is not. Connecting the
+recorder is an architecture change — it adds a runtime dependency from the
+application layer to the database — and `AGENTS.md` §7.5 requires approval
+before a change of that kind is made. It has therefore been proposed rather
+than built.
+
+The wiring must not put the database inside the engine: `AGENTS.md` §3
+requires the simulation engine to stay independent of the database. The
+recorder belongs in the application layer, subscribing to what the engine
+publishes and persisting it, with the simulation timestamp carried on every
+row so that the recorded series stays faithful to the run.
+
+### F-16 — MEDIUM — RESOLVED — The HMI displayed values the platform never produced
+
+Three screens showed figures that no backend had produced.
+
+**The Historian screen** named a time-series store it never queried. The
+backend has carried read-only endpoints for telemetry, the command audit log
+and the alarm log since the historian was built; the screen issued none of
+them and showed a fixed line of text instead.
+
+**The Warranty screen** showed *Total Energy Throughput 124.5 MWh*,
+*Equivalent Full Cycles 6.2 EFC* and *Current State of Health 100.0 % SOH*.
+The backend has an endpoint, `/api/v1/historian/warranty/{container_id}`,
+that returns the metrics the historian holds for a container — including
+`total_energy_throughput_wh`, `equivalent_full_cycles`, `current_soh_pct`,
+`max_temperature_recorded_c` and `time_above_45c_seconds`. The screen
+ignored it and printed constants that looked exactly like measurements of a
+battery.
+
+**The System Settings screen** printed four safety invariants — *Application
+Mode: SIMULATION ONLY*, *Hardware Integration: DISABLED*, *External Modbus
+Writes: DISABLED*, *Automatic Device Discovery: DISABLED* — as text on the
+screen, while the platform publishes the same posture under `safety` in
+`/api/v1/info`.
+
+*Action.* Read the platform instead of asserting on its behalf, and make
+every screen distinguish an answer the platform gave from a value the screen
+invented.
+
+**Resolution.** The three screens now read the platform.
+
+The Historian screen runs the three queries the endpoints offer and renders
+the rows they return. It reports the three states apart from one another: the
+store answered with rows, the store answered with none, or the query failed.
+Those are different statements about the platform, and a screen that
+collapsed them would tell an operator that a store which could not be reached
+holds no history.
+
+The Warranty screen asks for a container and shows the recorded metrics. When
+the backend holds no record for that container it says so, and it says *why*:
+the platform computes no degradation or warranty metrics on its own, and a
+container appears only once a recorder has written its metrics. The
+constants are gone; the screen no longer falls back to a plausible figure.
+
+The System Settings screen reads the invariants from `/api/v1/info`. When the
+platform does not answer, the invariants read `UNVERIFIED` rather than
+`DISABLED`: an unreachable platform is not a disabled invariant, and the
+screen has no evidence of the running state in that case. The row for the
+simulation-only mode is labelled *Simulation-Only Mode* so that
+`ENABLED` cannot be misread as "simulation is enabled" or as "the
+simulation-only guardrail is off".
+
+The frontend suite grew from 156 to 176 tests with this work and the
+coverage that followed it, and the frontend coverage rose from 97.49 % to
+**98.02 % of lines**, 99.21 % of functions, 98.03 % of statements and 88.02 %
+of branches.
+
+### F-17 — MEDIUM — RESOLVED — The historian endpoints failed unclearly, and had no API-level tests
+
+The four historian endpoints had no API-level test at all: `tests/` covered
+the historian's *service* and its *storage*, but nothing exercised the
+endpoints that the HMI now depends on.
+
+Their failure behaviour was also wrong. When the store was unreachable the
+operator received a bare `500 Internal Server Error` with no explanation.
+Catching `SQLAlchemyError` alone was not enough: the asyncpg driver lets the
+underlying socket error escape untranslated when the host name cannot be
+resolved, so a store that was simply not there arrived as `socket.gaierror`
+and still produced a bare 500. A screen cannot tell "the store holds no
+rows" from "the store could not be asked" when both arrive as a 500.
+
+*Action.* Report an unreachable store as an explicit, explained failure, and
+test the endpoints at the API level.
+
+**Resolution.** `backend/app/api/v1/historian.py` routes every query through
+a `_run_query` wrapper that catches both `SQLAlchemyError` and `OSError`,
+logs the failure and answers **503** with
+`"The historian store is unavailable; the query could not be answered."`. The
+missing-record case remains a 404 with the container named, because a
+container the store knows nothing about is a true statement and not a
+failure.
+
+`tests/test_historian_api.py` adds eight API-level tests over a stubbed
+session: the endpoints reject an unauthenticated request, an observer can
+read them, an empty store answers with no rows, an unreachable store answers
+503, a store whose host cannot be resolved answers 503, a reversed time range
+is refused, and the warranty endpoint answers with the recorded metrics or
+404 for a container it knows nothing about.
+
+The behaviour was confirmed against a running server: with the historian's
+database absent, all four endpoints answer
+`{"detail":"The historian store is unavailable; the query could not be answered."}`
+with status 503.
+
+### F-18 — LOW — RESOLVED — An unreachable HMI view fabricated the active configuration
+
+`frontend/src/views/ConfigurationView.tsx` was a twentieth view component that
+the application could not reach. It was absent from the `ViewId` union in
+`frontend/src/components/Sidebar.tsx`, absent from the navigation entries,
+and absent from the `renderView()` switch in `frontend/src/App.tsx`. No
+operator could open it.
+
+What it displayed was also a fabrication: a card headed **Active
+Configuration** with the value `configs/dev.yaml`. That file is a development
+*template* — project name, environment, safety flags, a database block and
+simulation defaults — and no running plant loads it. The plant that runs is
+built from `configs/reference_10mw_20mwh.yaml` or from the topology named by
+`TOPOLOGY_CONFIG_PATH`, neither of which the view could have named. The
+screen therefore presented a template as the configuration of a live plant.
+
+*Action.* Remove a screen no operator can open, or give it a real source.
+
+**Resolution.** The component and its test entry are removed. The platform
+still has no endpoint that publishes the active topology, so a Plant
+Configuration screen remains a **roadmap item**; it needs a read-only
+endpoint, which is an external-interface change and therefore needs approval
+under `AGENTS.md` §7.5. The count of reachable views is unchanged at 19: the
+application had 19 all along, and the twentieth was never one of them.
+
+---
+
 ## 10. Coverage of the Platform Mission (`AGENTS.md` §1)
 
 | Mission item | Status | Notes |
@@ -983,8 +1146,8 @@ the documented "run as fast as the host allows" setting. The screen labels it
 | Grid services | **IMPLEMENTED** | Seven plugins in `plugins/grid_services/` — FCR, aFRR, MFRR, energy arbitrage, peak shaving, renewable smoothing and volt-var support — behind the `grid_service` interface, with a status model and SoC-based unavailability |
 | Energy-market scenarios | **PARTIAL** | Energy-arbitrage scheduling, the EMS scheduled-profile mode and the scenario framework with fault injection and acceptance criteria are implemented. **Market clearing, price formation and dispatch optimisation are NOT IMPLEMENTED** |
 | Vendor-specific equipment plugins | **IMPLEMENTED** | CATL, Tesla, SMA, Sungrow, behind a registry |
-| Local web HMI | **IMPLEMENTED** | 19-view React + TypeScript SCADA, live telemetry, "SIMULATED DATA ONLY" labelling |
-| Historian | **IMPLEMENTED** | Ring buffer with zero-silent-loss disk overflow, query API |
+| Local web HMI | **PARTIAL** | 19-view React + TypeScript SCADA, live telemetry, "SIMULATED DATA ONLY" labelling. **Nine of the 19 views read the backend; the other ten show the reference plant's illustrative properties and are labelled as such.** See F-16 |
+| Historian | **PARTIAL** | The ring buffer with zero-silent-loss disk overflow, the database flush and the read-only query API are implemented and tested. **The running platform never writes to the store, so the query endpoints answer with no rows. See F-15** |
 | Controller-in-the-loop (CIL) | **IMPLEMENTED** | Real isolated Modbus TCP gateway on loopback, register map, watchdog, setpoint routing |
 | Hardware-in-the-loop (HIL) | **NOT IMPLEMENTED** | A later, separately approved phase, per `AGENTS.md` §2.2 |
 | Digital-twin calibration | **NOT IMPLEMENTED** | See F-06 |
@@ -1024,6 +1187,27 @@ container image whose runtime layer carried a compiler toolchain. Both are
 recorded in §8.5 and F-07, and both are fixed. The next run, on the corrected
 files, was green across every job.
 
+A later pass over the HMI found one functional gap that the earlier passes had
+not looked for, and it is recorded here because it changes the mission
+coverage table in §10. **The historian is never written to by the running
+platform** (F-15). The subsystem is implemented, unit-tested and exposed
+through read-only, permission-guarded endpoints — but nothing in
+`backend/app/` constructs the `HistorianService` or calls its recorder, so in
+a running deployment the store holds no rows and the three query endpoints
+answer against a store that was never fed. This is a **HIGH** finding and it
+is **OPEN**. It is not a safety defect: the failure is a missing write path,
+not a weakened guard, and nothing that reads the store can influence the
+simulation. But it means the platform does not yet deliver the historian that
+`AGENTS.md` §1 asks for, and the mission coverage table says so.
+
+The same pass removed the reasons the gap was hard to see. Three screens
+presented values the platform never produced (F-16); they now read the
+backend and distinguish "the store holds rows", "the store holds none" and
+"the query failed". The historian endpoints failed as an untranslated 500 and
+had no API-level tests at all (F-17); they now fail as an explicit 503 and
+are covered by eight tests. An unreachable view fabricated the active
+configuration file (F-18); it has been removed.
+
 ### 11.2 Recommended actions, in order
 
 1. ~~**Close the migration-metadata gap** (F-03). Add `target_metadata` and an
@@ -1034,7 +1218,7 @@ files, was green across every job.
    declares exactly the index set the migrations create.
 2. ~~**Build the frontend test suite** (F-01) and the Playwright end-to-end
    path** (F-05), then raise the enforced floor.~~ **Done.** The component
-   suite measures 156 tests and 97.49 % line coverage with an enforced 75 %
+   suite measures 176 tests and 98.02 % line coverage with an enforced 75 %
    floor, the Playwright project drives the built HMI against a hermetic mock
    platform, and both run as enforced pipeline gates.
 3. **Apply the branch protection** (F-04). An administrator action, using the
@@ -1043,9 +1227,24 @@ files, was green across every job.
    would be sent, and `GITHUB_TOKEN=<token> python
    scripts/apply_branch_protection.py` applies it and then reads it back,
    exiting non-zero if what is in force is looser than what was documented.
-4. **Schedule the roadmap items** (F-06) explicitly, and keep them marked
-   `NOT_IMPLEMENTED` until they exist.
-5. **Close the low-severity items** (F-08, F-09, F-10, F-11) as part of the
+4. **Wire the historian into the running simulation** (F-15). This is the one
+   **OPEN** finding in this report, and it needs a decision before it can be
+   built, because it changes the architecture (`AGENTS.md` §7.5). The
+   proposal: keep the simulation engine independent of the database
+   (`AGENTS.md` §3), and put the recorder in the application layer, where it
+   subscribes to what the engine publishes and persists it with the
+   simulation timestamp on every row. Until that decision is taken, the
+   historian's mission coverage stays **PARTIAL** and no status document may
+   describe it as working.
+5. **Schedule the roadmap items** (F-06) explicitly, and keep them marked
+   `NOT_IMPLEMENTED` until they exist. The warranty **read** path and its
+   screen now exist, but no recorder writes the metrics, so the digital-twin
+   calibration and warranty analysis of `AGENTS.md` §1 remains unimplemented.
+6. **Decide on the Plant Configuration screen** (F-18 follow-up). The view
+   that fabricated the active configuration file has been removed. A real one
+   needs a read-only topology endpoint, which is an interface change and is
+   likewise approval-gated.
+7. **Close the low-severity items** (F-08, F-09, F-10, F-11) as part of the
    next maintenance pass. ~~F-10 is closed: the illustrative parameters carry
    a schema marker that defaults to labelling, the plant factory carries it
    into the runtime equipment, and a test asserts that every shipped example
