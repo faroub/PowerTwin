@@ -63,6 +63,27 @@ vendor plugins are derived from publicly available datasheet specifications.
 
 ### 2.6 Historian
 
+- **The running platform never writes to the store.** The historian
+  subsystem is implemented and unit-tested: `backend/app/historian/service.py`
+  provides a `HistorianService` with a ring buffer, a zero-silent-loss disk
+  overflow, a database flush and a replay path, and
+  `backend/app/historian/query.py` reads the tables it writes. **Nothing in
+  `backend/app/` constructs that service or calls `record_telemetry`,
+  `record_command`, `record_alarm`, `flush_buffer_to_db` or
+  `flush_all_to_db`** — the service is instantiated only in the test suite.
+  In a running deployment the tables `telemetry_data`, `command_records` and
+  `alarms_and_events` therefore stay empty, and the read-only query
+  endpoints answer with zero rows against a store that was never fed. This
+  is recorded as **F-15** in `docs/POWER_TWIN_FINAL_AUDIT_REPORT.md` and is
+  **OPEN**: connecting the recorder is an architecture change that
+  `AGENTS.md` §7.5 requires approval for. It must not be resolved by putting
+  the database inside the simulation engine (`AGENTS.md` §3).
+- **The warranty metrics are never written either.** The endpoint
+  `GET /api/v1/historian/warranty/{container_id}` reads metrics that no
+  recorder produces, so it answers 404 for every container in a running
+  deployment. The screen reports that honestly: *"No warranty metrics are
+  recorded for container 'X'."* The digital-twin calibration and warranty
+  analysis of `AGENTS.md` §1 remains **NOT IMPLEMENTED** (see §3).
 - **Ring Buffer Before TimescaleDB**: Telemetry is held in a bounded in-memory ring buffer and flushed to the database. The disk-overflow fallback writes append-only JSON files; it protects against silent loss but it is not a queryable time-series store.
 - **The `alarms_and_events` query path has no supporting index.** The
   deployed schema carries indexes on `telemetry_data`
@@ -111,9 +132,9 @@ through them.
 
 ### 4.1 Frontend Test Coverage
 
-The frontend test suite contains **156 tests in 11 files**, and the measured
-coverage is **97.49 % of lines, 98.87 % of functions, 97.50 % of statements
-and 85.28 % of branches**. Every SCADA view, the shared components, the login
+The frontend test suite contains **176 tests in 11 files**, and the measured
+coverage is **98.02 % of lines, 99.21 % of functions, 98.03 % of statements
+and 88.02 % of branches**. Every SCADA view, the shared components, the login
 flow, the telemetry hook, the API client and the application entry point are
 covered.
 
@@ -126,7 +147,7 @@ view that loses its tests is caught by its own directory's floor even when
 the global figure barely moves. The binding of those floors was verified by
 raising them deliberately until the gate failed.
 
-What the suite does **not** prove: the branch coverage of 85.28 % is the
+What the suite does **not** prove: the branch coverage of 88.02 % is the
 weakest metric, and the 75 % branch floor is the binding global constraint.
 The suite exercises the HMI against a mocked backend, so it proves the HMI's
 own behaviour and not the agreement between the HMI and the real FastAPI
@@ -559,6 +580,59 @@ that holds its plant, and two applications never share one. The docstrings
 now describe the actual binding, and the test that asserted the false claim
 with a tautology (`runtime is default_runtime or runtime is not
 default_runtime`) now asserts the truth.
+
+### 4.15 Nine of the Nineteen HMI Views Read the Backend
+
+The HMI carries **19** SCADA views. Nine of them read the platform:
+
+| View | Reads |
+| :--- | :--- |
+| Plant Overview | `GET /api/v1/overview` |
+| Alarms | `GET /api/v1/overview` |
+| PCS | `GET /api/v1/overview` |
+| Battery Systems | `GET /api/v1/overview` |
+| Grid / POI | `GET /api/v1/overview` |
+| Simulation Control | `GET /api/v1/info`, `POST /api/v1/simulation/control` |
+| System Settings | `GET /api/v1/info` |
+| Historian | `GET /api/v1/historian/telemetry`, `…/commands`, `…/alarms` |
+| Warranty Metrics | `GET /api/v1/historian/warranty/{container_id}` |
+
+The **other ten** — the equipment detail views for the BMS, the transformer,
+the switchgear, the auxiliary package, the equipment controller, the PPC, the
+EMS, the equipment library, the plugin manager, the scenario manager and the
+single-line diagram — render the reference plant's **illustrative**
+equipment parameters. They carry the `SimulatedDataNotice` that
+`AGENTS.md` §2.14 requires, so the operator is told the numbers are
+illustrative, but they are not live readings.
+
+(The login screen, `frontend/src/components/LoginView.tsx`, is a shared
+component rather than a view and reads `POST /api/v1/auth/login`.)
+
+The reason is that the backend exposes **no per-equipment telemetry
+endpoint**. `/api/v1/overview` answers at plant level only; there is no
+route that returns the measurements of one piece of equipment. Building one
+is an interface change and is approval-gated under `AGENTS.md` §7.5, so it
+has not been built.
+
+The removed `ConfigurationView` is part of the same story. It was unreachable
+from the navigation and displayed a fabricated `configs/dev.yaml` as *the
+active configuration*. It has been deleted rather than fixed, because a real
+Plant Configuration screen needs a read-only topology endpoint that does not
+exist yet.
+
+### 4.16 The HMI Reads the Historian, and the Historian Is Empty
+
+The Historian screen runs real queries against the real endpoints and
+reports exactly what they answer: rows, no rows, or a failure. What it
+cannot show is **history**, because nothing feeds the store — see §2.6. The
+screen therefore reads correctly and answers nothing, which is an honest
+statement about the platform rather than a defect in the screen.
+
+The distinction matters for anyone reading a screenshot of the screen: *"The
+store holds no rows"* is what a correctly-wired screen shows against an
+unfed store, and it is indistinguishable on screen from *"the store holds no
+rows because the run has not been recorded"*. Only the audit report's F-15
+distinguishes them today.
 
 ---
 

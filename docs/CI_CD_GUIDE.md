@@ -314,9 +314,9 @@ The frontend policy lives in `frontend/vite.config.ts` and is enforced by the
 | `src/components/*.tsx` | 95 % | 95 % | 95 % | 90 % |
 | `src/views/*.tsx` | 90 % | 90 % | 90 % | 70 % |
 
-The frontend test suite contains **156 tests in 11 files**, and the measured
-coverage of the HMI is **97.49 % lines, 98.87 % functions, 97.50 %
-statements and 85.28 % branches**. Every one of the 19 SCADA view
+The frontend test suite contains **176 tests in 11 files**, and the measured
+coverage of the HMI is **98.02 % lines, 99.21 % functions, 98.03 %
+statements and 88.02 % branches**. Every one of the 19 SCADA view
 components, the shared components, the React hooks and the entry point are
 covered.
 
@@ -328,7 +328,7 @@ the report and the figure would look far better than the reality.
 > published was aspirational and was never implemented.** The Vitest
 > configuration declared a 75 % threshold against a measured 4.15 %, and the
 > coverage provider was not even installed, so the check could not run. The
-> component suite now measures 97.49 % lines, and **75 % is the enforced
+> component suite now measures 98.02 % lines, and **75 % is the enforced
 > floor** for every metric, with tighter floors on the modules that carry the
 > session, the telemetry polling, the shared components and the views. The
 > binding of the directory-scoped floors was verified by deliberately raising
@@ -688,10 +688,10 @@ still has to supply its own secret.
   oversights, and both are stated so that a reviewer knows what the gate does
   not cover.
 - **The frontend coverage floors are a regression guard, not a quality
-  claim.** The suite measures 97.49 % lines, so the 75 % global floor has a
+  claim.** The suite measures 98.02 % lines, so the 75 % global floor has a
   wide margin, and the directory-scoped floors are the ones that actually
   bite: a view or a shared component that loses its tests fails the gate
-  even when the global figure barely moves. The branch coverage of 85.28 % is
+  even when the global figure barely moves. The branch coverage of 88.02 % is
   the weakest metric, and the 75 % branch floor is the binding global
   constraint.
 - **The end-to-end suite runs against a mock platform, not against the real

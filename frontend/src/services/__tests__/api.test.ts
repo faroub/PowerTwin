@@ -2,9 +2,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   dispatchSimulationControl,
+  fetchHistorianAlarms,
+  fetchHistorianCommands,
+  fetchHistorianTelemetry,
   fetchPlantOverview,
   fetchSystemHealth,
   fetchUserDetails,
+  fetchWarrantyMetrics,
   login,
   logout,
   platformSession,
@@ -325,5 +329,130 @@ describe('Logout', () => {
     expect(platformSession.isAuthenticated).toBe(false);
     expect(platformSession.token).toBe(null);
     expect(platformSession.user).toBe(null);
+  });
+});
+
+describe('Historian Queries', () => {
+  it('returns the rows the historian holds', async () => {
+    installFetchMock({
+      '/api/v1/historian/telemetry': () =>
+        jsonResponse({
+          count: 1,
+          records: [
+            {
+              timestamp_ns: 1,
+              source_timestamp_ns: 1,
+              tag_id: 'dc_voltage_v',
+              equipment_id: 'CONTAINER_01',
+              value: 812.4,
+              unit: 'V',
+              quality: 'GOOD',
+              source_type: 'SIMULATED',
+              simulation_run_id: 'RUN_01',
+            },
+          ],
+        }),
+    });
+
+    const result = await fetchHistorianTelemetry({ equipment_id: 'CONTAINER_01' });
+
+    expect(result.ok).toBe(true);
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].equipment_id).toBe('CONTAINER_01');
+  });
+
+  it('leaves an empty filter out of the query', async () => {
+    const mock = installFetchMock({
+      '/api/v1/historian/telemetry': () => jsonResponse({ count: 0, records: [] }),
+    });
+
+    await fetchHistorianTelemetry({ equipment_id: '', tag_id: '', limit: 10 });
+
+    // An empty filter sent as a query parameter would narrow the query to
+    // equipment whose identifier is the empty string and return nothing.
+    expect(mock.callsTo('/api/v1/historian/telemetry')[0].url).not.toContain('equipment_id=');
+    expect(mock.callsTo('/api/v1/historian/telemetry')[0].url).toContain('limit=10');
+  });
+
+  it('reports a failed command query', async () => {
+    installFetchMock({
+      '/api/v1/historian/commands': () => jsonResponse({ detail: 'the store is unavailable' }, 503),
+    });
+
+    const result = await fetchHistorianCommands();
+
+    expect(result.ok).toBe(false);
+    expect(result.records).toEqual([]);
+    expect(result.error).toBe('the store is unavailable');
+  });
+
+  it('reports a failed alarm query', async () => {
+    installFetchMock({
+      '/api/v1/historian/alarms': () => jsonResponse({ detail: 'the store is unavailable' }, 503),
+    });
+
+    const result = await fetchHistorianAlarms();
+
+    expect(result.ok).toBe(false);
+    expect(result.records).toEqual([]);
+    expect(result.error).toBe('the store is unavailable');
+  });
+
+  it('reports the status code when the failure carries no explanation', async () => {
+    installFetchMock({
+      '/api/v1/historian/telemetry': () => ({
+        ok: false,
+        status: 500,
+        json: async () => {
+          throw new Error('the body is not JSON');
+        },
+      }),
+    });
+
+    const result = await fetchHistorianTelemetry();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('500');
+  });
+
+  it('reports a network failure as a failed query', async () => {
+    installFetchMock({
+      '/api/v1/historian/telemetry': () => {
+        throw new Error('the connection was refused');
+      },
+    });
+
+    const result = await fetchHistorianTelemetry();
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(0);
+    expect(result.error).toBe('Network error connecting to the backend API.');
+  });
+
+  it('reports a warranty container with no record as not found rather than failed', async () => {
+    installFetchMock({
+      '/api/v1/historian/warranty/CONTAINER_01': () =>
+        jsonResponse({ detail: "No warranty metrics recorded for container 'CONTAINER_01'." }, 404),
+    });
+
+    const result = await fetchWarrantyMetrics('CONTAINER_01');
+
+    // A missing record is a true statement about the platform's state, not
+    // an error the operator has to act on.
+    expect(result.found).toBe(false);
+    expect(result.error).toBeNull();
+    expect(result.status).toBe(404);
+  });
+
+  it('reports a failed warranty query as a failure', async () => {
+    installFetchMock({
+      '/api/v1/historian/warranty/CONTAINER_01': () =>
+        jsonResponse({ detail: 'the store is unavailable' }, 503),
+    });
+
+    const result = await fetchWarrantyMetrics('CONTAINER_01');
+
+    expect(result.found).toBe(false);
+    expect(result.error).toBe('the store is unavailable');
   });
 });
