@@ -56,6 +56,13 @@ class _WorkingSession:
     def add_all(self, rows: Any) -> None:
         self.added.extend(rows)
 
+    def add(self, model: Any) -> None:
+        self.added.append(model)
+
+    async def get(self, _model: Any, _key: Any) -> None:
+        """No existing row: every write in this double is an insert."""
+        return None
+
     async def commit(self) -> None:
         self.commits += 1
 
@@ -70,6 +77,13 @@ class _BrokenSession:
         self.rollbacks = 0
 
     def add_all(self, _rows: Any) -> None:
+        return None
+
+    def add(self, _model: Any) -> None:
+        return None
+
+    async def get(self, _model: Any, _key: Any) -> None:
+        """No existing row: every write in this double is an insert."""
         return None
 
     async def commit(self) -> None:
@@ -270,7 +284,7 @@ async def test_a_failing_flush_is_reported_and_raises_nothing(
 
     written = await flush_historian(app)
 
-    assert written == (0, 0, 0)
+    assert written == (0, 0, 0, 0)
 
 
 @pytest.mark.asyncio
@@ -352,10 +366,10 @@ def test_the_overflow_directory_of_a_failing_flush_is_the_documented_one(
 
     session = _BrokenSession()
 
-    async def _flush() -> tuple[int, int, int]:
+    async def _flush() -> tuple[int, int, int, int]:
         return await recorder.service.flush_buffer_to_db(session)
 
-    assert asyncio.run(_flush()) == (0, 0, 0)
+    assert asyncio.run(_flush()) == (0, 0, 0, 0)
     assert (tmp_path / "telemetry_overflow.json").exists()
 
 

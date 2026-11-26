@@ -129,6 +129,16 @@ async def test_flush_buffer_to_db_rollback_preserves_overflow(
 
     # Simulate a database session that cannot commit
     class FakeSession:
+        def add_all(self, _rows: Any) -> None:
+            return None
+
+        def add(self, _model: Any) -> None:
+            return None
+
+        async def get(self, _model: Any, _key: Any) -> None:
+            """No existing row: every write in this double is an insert."""
+            return None
+
         async def commit(self) -> None:
             raise RuntimeError("Database unreachable")
 
@@ -139,10 +149,12 @@ async def test_flush_buffer_to_db_rollback_preserves_overflow(
         telemetry_written,
         commands_written,
         events_written,
+        warranty_written,
     ) = await historian.flush_buffer_to_db(cast("AsyncSession", FakeSession()))
     assert telemetry_written == 0
     assert commands_written == 0
     assert events_written == 0
+    assert warranty_written == 0
 
     # Buffered items were preserved to disk again (no silent data loss)
     # Read the file on a worker thread: running `open()` inside the event loop
@@ -168,6 +180,13 @@ class _RecordingSession:
 
     def add_all(self, models: list[Any]) -> None:
         self.added.extend(models)
+
+    def add(self, model: Any) -> None:
+        self.added.append(model)
+
+    async def get(self, _model: Any, _key: Any) -> None:
+        """No existing row: every write in this double is an insert."""
+        return None
 
     async def commit(self) -> None:
         if self.fail_commit:
@@ -195,7 +214,7 @@ async def test_overflow_replay_commits_and_truncates_file(
     session = _RecordingSession()
     written = await historian.replay_overflow_to_db(cast("AsyncSession", session))
 
-    assert written == (1, 0, 0)
+    assert written == (1, 0, 0, 0)
     assert session.committed is True
     assert len(session.added) == 1
     assert session.added[0].tag_id == "TAG2"
@@ -220,7 +239,7 @@ async def test_overflow_replay_failure_preserves_file(
     session = _RecordingSession(fail_commit=True)
     written = await historian.replay_overflow_to_db(cast("AsyncSession", session))
 
-    assert written == (0, 0, 0)
+    assert written == (0, 0, 0, 0)
     assert session.rolled_back is True
 
     content = await asyncio.to_thread(_read_overflow_file, overflow_file)
@@ -271,7 +290,7 @@ async def test_overflow_replay_covers_all_three_streams(
     session = _RecordingSession()
     written = await historian.replay_overflow_to_db(cast("AsyncSession", session))
 
-    assert written == (1, 1, 1)
+    assert written == (1, 1, 1, 0)
     assert len(session.added) == 3
 
 
@@ -290,7 +309,7 @@ async def test_flush_all_writes_memory_and_overflow(
     written = await historian.flush_all_to_db(cast("AsyncSession", session))
 
     # TAG1 came from memory, TAG2 from the disk overflow.
-    assert written == (2, 0, 0)
+    assert written == (2, 0, 0, 0)
     assert {m.tag_id for m in session.added} == {"TAG1", "TAG2"}
 
 

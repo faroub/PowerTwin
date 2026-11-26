@@ -226,6 +226,32 @@ class Settings(BaseSettings):
         description="Seconds between flushes of the historian's in-memory buffer to the database",
     )
 
+    # Warranty Analysis
+    #
+    # The warranty analysis reads the running plant and writes its findings
+    # into the historian's buffer. It never influences the simulation: the
+    # degradation is reported, not applied back. It is a switch because a
+    # deployment that must not analyse anything can turn it off, and because
+    # the degradation model behind it is illustrative — its constants have
+    # not been validated against any manufacturer document (`AGENTS.md`
+    # §2.13, §2.14).
+    WARRANTY_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Analyse the running plant's battery warranty state and record the "
+            "findings in the historian"
+        ),
+    )
+    WARRANTY_SAMPLE_INTERVAL_TICKS: int = Field(
+        default=10,
+        ge=1,
+        description=(
+            "Publish one warranty snapshot every N simulation ticks. The operating "
+            "history behind the snapshot is accumulated on every tick regardless, "
+            "so the time above 45 degC is not undercounted"
+        ),
+    )
+
     # Logging
     LOG_LEVEL: str = "INFO"
     JSON_LOGS: bool = False

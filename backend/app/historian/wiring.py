@@ -22,7 +22,7 @@ from typing import Any
 from backend.app.core.config import settings
 from backend.app.historian.db import AsyncSessionLocal
 from backend.app.historian.recorder import HistorianRecorder
-from backend.app.historian.service import HistorianService
+from backend.app.historian.service import FlushCounts, HistorianService
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ def stop_historian_recorder(app: Any) -> None:
     logger.info("The historian recorder recorded %s", recorder.status)
 
 
-async def flush_historian(app: Any) -> tuple[int, int, int]:
+async def flush_historian(app: Any) -> FlushCounts:
     """Flush the historian's buffer and its disk overflow to the database.
 
     A database that cannot be reached is reported as an error and the data
@@ -112,17 +112,20 @@ async def flush_historian(app: Any) -> tuple[int, int, int]:
     """
     service = getattr(app.state, HISTORIAN_SERVICE_KEY, None)
     if service is None:
-        return (0, 0, 0)
+        return FlushCounts()
     try:
         async with AsyncSessionLocal() as session:
-            written: tuple[int, int, int] = await service.flush_all_to_db(session)
+            written: FlushCounts = await service.flush_all_to_db(session)
     except Exception as err:  # noqa: BLE001
         logger.error("The historian could not be flushed to the database: %s", err)
-        return (0, 0, 0)
-    if any(written):
+        return FlushCounts()
+    if written.total:
         logger.info(
-            "The historian flushed %d telemetry, %d command and %d event row(s).",
-            *written,
+            "The historian flushed %d telemetry, %d command, %d event and %d warranty row(s).",
+            written.telemetry,
+            written.commands,
+            written.events,
+            written.warranty,
         )
     return written
 

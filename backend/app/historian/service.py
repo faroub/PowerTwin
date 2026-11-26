@@ -23,12 +23,13 @@ import os
 import queue
 import threading
 import time
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.historian.models import (
     AlarmsAndEventsModel,
+    BatteryWarrantyMetricsModel,
     CommandRecordModel,
     TelemetryDataModel,
 )
@@ -56,6 +57,41 @@ OVERFLOW_STREAMS: dict[str, type[Any]] = {
     "event_overflow": AlarmsAndEventsModel,
 }
 
+#: The warranty snapshot overflow file. The warranty stream is **not** in
+#: `OVERFLOW_STREAMS`: its record is a snapshot of one
+#: `(container_id, simulation_run_id)` pair with a composite primary key, so
+#: a replay has to go through the upsert rather than through a plain insert.
+#: Two rows with the same key would collide.
+WARRANTY_OVERFLOW_STEM: str = "warranty_overflow"
+
+#: Every overflow file stem the historian maintains, so that the status
+#: report covers all of them.
+OVERFLOW_FILE_STEMS: tuple[str, ...] = (
+    "telemetry_overflow",
+    "command_overflow",
+    "event_overflow",
+    WARRANTY_OVERFLOW_STEM,
+)
+
+
+class FlushCounts(NamedTuple):
+    """The number of rows a flush wrote, one field per stream.
+
+    A named tuple rather than a bare tuple because the counts are read in
+    several places, and a format string that no longer matches the number of
+    values is a defect that only shows up at run time.
+    """
+
+    telemetry: int = 0
+    commands: int = 0
+    events: int = 0
+    warranty: int = 0
+
+    @property
+    def total(self) -> int:
+        """Return the number of rows written across every stream."""
+        return self.telemetry + self.commands + self.events + self.warranty
+
 
 class HistorianService:
     """Thread-safe, non-blocking Historian ingestion service."""
@@ -66,6 +102,19 @@ class HistorianService:
         self._command_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=max_buffer_size)
         self._event_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=max_buffer_size)
         self._lock = threading.Lock()
+
+        # The warranty snapshots are a dictionary rather than a fourth FIFO:
+        # the table holds one row per (container_id, simulation_run_id), so a
+        # newer snapshot for a container *supersedes* the older one rather
+        # than queueing behind it.
+        #
+        # The dictionary has its own lock, and it must stay a different one
+        # from `self._lock`. `self._lock` is held across the file write in
+        # `_write_overflow_to_disk`, which the flush calls when a commit
+        # fails; a lock that is held across that call and then re-entered
+        # would deadlock, because `threading.Lock` is not reentrant.
+        self._warranty_snapshots: dict[tuple[str, str], dict[str, Any]] = {}
+        self._warranty_lock = threading.Lock()
 
         self._ensure_overflow_dir()
 
@@ -165,6 +214,111 @@ class HistorianService:
             self._write_overflow_to_disk("event_overflow.json", payload)
             return False
 
+    def record_warranty_metrics(
+        self,
+        container_id: str,
+        simulation_run_id: str,
+        updated_at_ns: int,
+        total_energy_throughput_wh: float,
+        equivalent_full_cycles: float,
+        max_temperature_recorded_c: float,
+        time_above_45c_seconds: float,
+        current_soh_pct: float,
+    ) -> bool:
+        """Record a warranty snapshot into the buffer.
+
+        The table holds one row per `(container_id, simulation_run_id)`, so a
+        snapshot **supersedes** the previous one for the same container. That
+        is not data loss: the older row describes a state the container has
+        already left behind, and the table has no room for both.
+
+        The call never blocks the simulation. It takes a short lock, replaces
+        one dictionary entry and releases it; no file or database work
+        happens here.
+
+        Args:
+            container_id: The container the snapshot describes.
+            simulation_run_id: The simulation run the snapshot belongs to.
+            updated_at_ns: The simulation time the snapshot was taken at.
+            total_energy_throughput_wh: The energy the container has moved.
+            equivalent_full_cycles: The equivalent full cycles it has been
+                through.
+            max_temperature_recorded_c: The highest temperature it reached.
+            time_above_45c_seconds: The time it spent above 45 degrees.
+            current_soh_pct: The observed state of health, in percent.
+
+        Returns:
+            True. The snapshot is always accepted; it is replaced in place.
+        """
+        payload = {
+            "container_id": container_id,
+            "simulation_run_id": simulation_run_id,
+            "updated_at_ns": int(updated_at_ns),
+            "total_energy_throughput_wh": float(total_energy_throughput_wh),
+            "equivalent_full_cycles": float(equivalent_full_cycles),
+            "max_temperature_recorded_c": float(max_temperature_recorded_c),
+            "time_above_45c_seconds": float(time_above_45c_seconds),
+            "current_soh_pct": float(current_soh_pct),
+        }
+        with self._warranty_lock:
+            self._warranty_snapshots[(container_id, simulation_run_id)] = payload
+        return True
+
+    def _drain_warranty_snapshots(self) -> dict[tuple[str, str], dict[str, Any]]:
+        """Take the pending warranty snapshots out of the buffer.
+
+        The snapshots are removed under the lock and the lock is released
+        before any database work, so a slow database cannot stall the
+        simulation thread that is recording the next snapshot.
+        """
+        with self._warranty_lock:
+            pending = dict(self._warranty_snapshots)
+            self._warranty_snapshots.clear()
+        return pending
+
+    async def _upsert_warranty_snapshot(
+        self, session: AsyncSession, payload: dict[str, Any]
+    ) -> bool:
+        """Write one warranty snapshot, updating an existing row if there is one.
+
+        The write is a read-then-write rather than a dialect-specific
+        upsert, so the PostgreSQL/TimescaleDB deployment and the SQLite-backed
+        tests behave the same way.
+
+        An existing row is only overwritten by a **newer** snapshot. A stale
+        snapshot that arrives late — after a flush that already wrote a newer
+        one — must not walk the recorded history backwards.
+
+        Args:
+            session: The database session.
+            payload: The snapshot to write.
+
+        Returns:
+            True when the snapshot was written, False when it was skipped
+            because a newer one is already stored.
+        """
+        container_id = payload["container_id"]
+        simulation_run_id = payload["simulation_run_id"]
+
+        existing = await session.get(BatteryWarrantyMetricsModel, (container_id, simulation_run_id))
+        if existing is None:
+            session.add(BatteryWarrantyMetricsModel(**payload))
+            return True
+
+        if int(payload["updated_at_ns"]) < int(existing.updated_at_ns):
+            logger.warning(
+                "A warranty snapshot for container '%s' at %d ns is older than the "
+                "stored one at %d ns and was not written.",
+                container_id,
+                int(payload["updated_at_ns"]),
+                int(existing.updated_at_ns),
+            )
+            return False
+
+        for field, value in payload.items():
+            setattr(existing, field, value)
+        return True
+
     def _write_overflow_to_disk(
         self,
         filename: str,
@@ -262,7 +416,7 @@ class HistorianService:
     def get_overflow_status(self) -> dict[str, Any]:
         """Report pending disk-overflow record counts per stream."""
         status: dict[str, Any] = {}
-        for stem in OVERFLOW_STREAMS:
+        for stem in OVERFLOW_FILE_STEMS:
             files = self._overflow_files(stem)
             record_count = 0
             total_bytes = 0
@@ -284,13 +438,13 @@ class HistorianService:
         )
         return status
 
-    async def replay_overflow_to_db(self, session: AsyncSession) -> tuple[int, int, int]:
+    async def replay_overflow_to_db(self, session: AsyncSession) -> FlushCounts:
         """Replay disk-overflow records into the database.
 
         The overflow file is only truncated after a successful commit. A failed
         commit leaves every record on disk so nothing is silently discarded.
         """
-        replayed = {"telemetry_overflow": 0, "command_overflow": 0, "event_overflow": 0}
+        replayed = {stem: 0 for stem in OVERFLOW_STREAMS}
         pending: dict[str, list[dict[str, Any]]] = {}
         files_by_stream: dict[str, list[str]] = {}
 
@@ -303,9 +457,16 @@ class HistorianService:
             pending[stem] = records
             replayed[stem] = len(records)
 
-        if not any(replayed.values()):
-            return (0, 0, 0)
+        warranty_files = self._overflow_files(WARRANTY_OVERFLOW_STEM)
+        files_by_stream[WARRANTY_OVERFLOW_STEM] = warranty_files
+        warranty_snapshots = self._collapse_warranty_snapshots(
+            [record for path in warranty_files for record in self._read_overflow_file(path)]
+        )
 
+        if not any(replayed.values()) and not warranty_snapshots:
+            return FlushCounts()
+
+        warranty_written = 0
         try:
             for stem, model in OVERFLOW_STREAMS.items():
                 records = pending[stem]
@@ -313,11 +474,15 @@ class HistorianService:
                     continue
                 session.add_all([model(**record) for record in records])
 
+            for payload in warranty_snapshots:
+                if await self._upsert_warranty_snapshot(session, payload):
+                    warranty_written += 1
+
             await session.commit()
         except Exception as err:
             logger.error("Overflow replay commit failed (%s). Overflow files preserved.", err)
             await session.rollback()
-            return (0, 0, 0)
+            return FlushCounts()
 
         # Only now that the rows are committed is it safe to clear the files.
         for files in files_by_stream.values():
@@ -331,18 +496,44 @@ class HistorianService:
                     logger.error("Could not truncate historian overflow file %s: %s", path, err)
 
         logger.info(
-            "Historian overflow replay committed: %d telemetry, %d commands, %d events.",
+            "Historian overflow replay committed: %d telemetry, %d commands, %d events, "
+            "%d warranty snapshot(s).",
             replayed["telemetry_overflow"],
             replayed["command_overflow"],
             replayed["event_overflow"],
+            warranty_written,
         )
-        return (
-            replayed["telemetry_overflow"],
-            replayed["command_overflow"],
-            replayed["event_overflow"],
+        return FlushCounts(
+            telemetry=replayed["telemetry_overflow"],
+            commands=replayed["command_overflow"],
+            events=replayed["event_overflow"],
+            warranty=warranty_written,
         )
 
-    async def flush_all_to_db(self, session: AsyncSession) -> tuple[int, int, int]:
+    @staticmethod
+    def _collapse_warranty_snapshots(
+        records: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Collapse the warranty overflow records to one per container and run.
+
+        The table holds one row per `(container_id, simulation_run_id)`, so
+        several snapshots for the same key cannot all be written. The newest
+        one wins, and the others are dropped — they describe a state the
+        container has already left behind.
+        """
+        newest: dict[tuple[str, str], dict[str, Any]] = {}
+        for record in records:
+            container_id = str(record.get("container_id", ""))
+            run_id = str(record.get("simulation_run_id", ""))
+            key = (container_id, run_id)
+            current = newest.get(key)
+            if current is None or int(record.get("updated_at_ns", 0)) >= int(
+                current.get("updated_at_ns", 0)
+            ):
+                newest[key] = record
+        return list(newest.values())
+
+    async def flush_all_to_db(self, session: AsyncSession) -> FlushCounts:
         """Flush the memory buffer and then replay the disk overflow.
 
         The memory flush drains the in-memory queues first. If its commit fails
@@ -350,18 +541,25 @@ class HistorianService:
         flush_buffer_to_db(), and the subsequent disk replay picks them up, so a
         record is never written twice and never lost.
         """
-        telemetry, commands, events = await self.flush_buffer_to_db(session)
+        buffered = await self.flush_buffer_to_db(session)
         replayed = await self.replay_overflow_to_db(session)
-        return (
-            telemetry + replayed[0],
-            commands + replayed[1],
-            events + replayed[2],
+        return FlushCounts(
+            telemetry=buffered.telemetry + replayed.telemetry,
+            commands=buffered.commands + replayed.commands,
+            events=buffered.events + replayed.events,
+            warranty=buffered.warranty + replayed.warranty,
         )
 
-    async def flush_buffer_to_db(self, session: AsyncSession) -> tuple[int, int, int]:
-        """Flush in-memory buffered telemetry, commands, and alarms to TimescaleDB.
+    async def flush_buffer_to_db(self, session: AsyncSession) -> FlushCounts:
+        """Flush in-memory buffered telemetry, commands, alarms and warranty
+        snapshots to TimescaleDB.
 
         Rolls back and preserves data on disk overflow if database commit fails.
+
+        The warranty snapshots are written in the **same transaction** as the
+        FIFO streams, so a commit either lands every stream or lands none of
+        them. A reader never sees a telemetry row without the matching
+        warranty snapshot.
         """
         raw_telemetry: list[dict[str, Any]] = []
         while not self._telemetry_queue.empty():
@@ -384,6 +582,8 @@ class HistorianService:
             except queue.Empty:
                 break
 
+        raw_warranty = self._drain_warranty_snapshots()
+
         telemetry_models = [TelemetryDataModel(**item) for item in raw_telemetry]
         command_models = [CommandRecordModel(**item) for item in raw_commands]
         event_models = [AlarmsAndEventsModel(**item) for item in raw_events]
@@ -396,8 +596,18 @@ class HistorianService:
             if event_models:
                 session.add_all(event_models)
 
+            warranty_written = 0
+            for payload in raw_warranty.values():
+                if await self._upsert_warranty_snapshot(session, payload):
+                    warranty_written += 1
+
             await session.commit()
-            return (len(telemetry_models), len(command_models), len(event_models))
+            return FlushCounts(
+                telemetry=len(telemetry_models),
+                commands=len(command_models),
+                events=len(event_models),
+                warranty=warranty_written,
+            )
         except Exception as err:
             logger.error("Database commit failed (%s). Preserving data in overflow.", err)
             await session.rollback()
@@ -414,14 +624,21 @@ class HistorianService:
                 self._write_overflow_to_disk(
                     "event_overflow.json", item, OVERFLOW_REASON_COMMIT_FAILED
                 )
+            for item in raw_warranty.values():
+                self._write_overflow_to_disk(
+                    f"{WARRANTY_OVERFLOW_STEM}.json", item, OVERFLOW_REASON_COMMIT_FAILED
+                )
 
-            return (0, 0, 0)
+            return FlushCounts()
 
     def get_buffer_status(self) -> dict[str, Any]:
         """Return current buffer usage metrics."""
+        with self._warranty_lock:
+            warranty_snapshots = len(self._warranty_snapshots)
         return {
             "telemetry_buffer_size": self._telemetry_queue.qsize(),
             "command_buffer_size": self._command_queue.qsize(),
             "event_buffer_size": self._event_queue.qsize(),
+            "warranty_snapshot_count": warranty_snapshots,
             "max_buffer_capacity": self.max_buffer_size,
         }

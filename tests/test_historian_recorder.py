@@ -528,6 +528,13 @@ async def test_a_failing_flush_keeps_the_data_in_the_overflow_file(
         def add_all(self, _rows: Any) -> None:
             return None
 
+        def add(self, _model: Any) -> None:
+            return None
+
+        async def get(self, _model: Any, _key: Any) -> None:
+            """No existing row: every write in this double is an insert."""
+            return None
+
         async def commit(self) -> None:
             raise RuntimeError("the database is unreachable")
 
@@ -536,7 +543,7 @@ async def test_a_failing_flush_keeps_the_data_in_the_overflow_file(
 
     written = await service.flush_buffer_to_db(_FailingSession())
 
-    assert written == (0, 0, 0)
+    assert written == (0, 0, 0, 0)
     overflow_file = tmp_path / "telemetry_overflow.json"
     assert overflow_file.exists()
     assert "CONTAINER_01" in overflow_file.read_text()

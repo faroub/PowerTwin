@@ -19,6 +19,7 @@ from backend.app.historian.wiring import (
     stop_historian_recorder,
 )
 from backend.app.simulation.application import close_simulation, init_simulation
+from backend.app.warranty.wiring import start_warranty_recorder, stop_warranty_recorder
 
 
 @asynccontextmanager
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print("===========================================================")
     init_simulation(app)
     start_historian_recorder(app)
+    start_warranty_recorder(app)
     flush_task = asyncio.create_task(
         run_historian_flush_loop(app, settings.HISTORIAN_FLUSH_INTERVAL_S)
     )
@@ -46,6 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await flush_task
         except asyncio.CancelledError:
             pass
+        stop_warranty_recorder(app)
         stop_historian_recorder(app)
         await flush_historian(app)
         close_simulation(app)
