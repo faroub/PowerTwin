@@ -381,6 +381,63 @@ describe('Simulation Control View', () => {
 
     await waitFor(() => expect(screen.getByText('NOT_CONNECTED')).toBeInTheDocument());
   });
+
+  it('shows the wall-clock speed factor the engine reports', async () => {
+    render(<SimulationView />);
+
+    // The card shows the factor in force, not a fixed value: the speed
+    // factor was readable and settable through the API but the screen
+    // displayed a constant that said nothing about the clock.
+    await waitFor(() => expect(screen.getByText('1.0 x')).toBeInTheDocument());
+  });
+
+  it('dispatches a speed factor the operator asks for', async () => {
+    const mock = installFetchMock({
+      '/api/v1/overview': () => jsonResponse(CONNECTED_TELEMETRY),
+      '/api/v1/info': () => jsonResponse(HEALTHY_SYSTEM_INFO),
+      '/api/v1/simulation/control': () => jsonResponse({ status: 'SUCCESS' }),
+    });
+    const user = userEvent.setup();
+    render(<SimulationView />);
+
+    const input = screen.getByLabelText(/Speed factor/i);
+    await user.clear(input);
+    await user.type(input, '4');
+    await user.click(screen.getByRole('button', { name: 'SET SPEED' }));
+
+    expect(
+      screen.getByText('Are you sure you want to execute: Set Speed Factor (4x)?'),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /CONFIRM & EXECUTE/ }));
+
+    await waitFor(() => expect(mock.callsTo('/api/v1/simulation/control')).toHaveLength(1));
+    expect(bodyOf(mock.callsTo('/api/v1/simulation/control')[0])).toEqual({
+      action: 'SET_SPEED',
+      speed_factor: 4,
+    });
+  });
+
+  it('refuses a speed factor outside the permitted range without sending it', async () => {
+    const mock = installFetchMock({
+      '/api/v1/overview': () => jsonResponse(CONNECTED_TELEMETRY),
+      '/api/v1/info': () => jsonResponse(HEALTHY_SYSTEM_INFO),
+      '/api/v1/simulation/control': () => jsonResponse({ status: 'SUCCESS' }),
+    });
+    const user = userEvent.setup();
+    render(<SimulationView />);
+
+    const input = screen.getByLabelText(/Speed factor/i);
+    await user.clear(input);
+    await user.type(input, '500');
+    await user.click(screen.getByRole('button', { name: 'SET SPEED' }));
+
+    // The operator is told why, and no request is made.
+    expect(
+      screen.getByText(/A speed factor must be between 0 and 100; 500 was entered\./),
+    ).toBeInTheDocument();
+    expect(mock.callsTo('/api/v1/simulation/control')).toHaveLength(0);
+  });
 });
 
 describe('Equipment Controller View', () => {

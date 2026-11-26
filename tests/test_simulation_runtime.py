@@ -25,6 +25,13 @@ from backend.app.api.v1.simulation_ctrl import MAX_STEP_TICKS
 from backend.app.core.config import settings
 from backend.app.core.rbac import Permission, UserRole, create_user_session
 from backend.app.simulation.application import close_simulation, init_simulation
+from backend.app.simulation.config import (
+    DEFAULT_SPEED_FACTOR,
+    MAX_SPEED_FACTOR,
+    SimulationConfiguration,
+)
+from backend.app.simulation.manager import SimulationRunManager
+from backend.app.simulation.runner import SimulationRunner
 from backend.app.simulation.runtime import (
     SimulationRuntime,
     default_runtime,
@@ -550,3 +557,68 @@ def test_model_permissions_for_roles(dev_test_password: str) -> None:
 
     session = create_user_session("test", UserRole.ADMINISTRATOR)
     assert Permission.INJECT_FAULT in session.permissions
+
+
+def test_a_speed_factor_outside_the_permitted_range_is_refused(
+    client: TestClient,
+    password: str,
+) -> None:
+    """A speed factor the platform will not execute is refused, not corrected.
+
+    The engine specification documents the permitted range. A factor above it
+    would ask for a pacing the clock cannot deliver — the target duration
+    becomes shorter than the time a tick takes — and the operator would
+    believe the simulation was still paced.
+    """
+    token = _login(client, password)
+
+    for refused in (-0.1, MAX_SPEED_FACTOR + 0.1, 1e9):
+        response = client.post(
+            "/api/v1/simulation/control",
+            json={"action": "SET_SPEED", "speed_factor": refused},
+            headers=_header(token),
+        )
+        assert response.status_code == 400, response.text
+        assert "speed_factor" in response.json()["detail"]
+
+    # The refused commands changed nothing: the factor in force is the one
+    # the engine was built with.
+    assert _status(client, token)["speed_factor"] == DEFAULT_SPEED_FACTOR
+
+
+def test_a_speed_factor_inside_the_permitted_range_is_accepted(
+    client: TestClient,
+    password: str,
+) -> None:
+    """A valid speed factor is applied and is then visible in the status."""
+    token = _login(client, password)
+
+    _control(client, token, action="SET_SPEED", speed_factor=4.0)
+    assert _status(client, token)["speed_factor"] == 4.0
+
+    # The boundary values are accepted: 0.0 is the documented "as fast as the
+    # host allows" setting and is a request, not a missing value.
+    _control(client, token, action="SET_SPEED", speed_factor=0.0)
+    assert _status(client, token)["speed_factor"] == 0.0
+
+    _control(client, token, action="SET_SPEED", speed_factor=MAX_SPEED_FACTOR)
+    assert _status(client, token)["speed_factor"] == MAX_SPEED_FACTOR
+
+
+def test_the_engine_and_the_runner_refuse_a_factor_the_api_refuses() -> None:
+    """The bound is applied at every boundary that accepts a speed factor.
+
+    A limit that exists at the control endpoint only is a limit a caller can
+    walk around: the engine, the runner and the configuration model each
+    refuse the same values.
+    """
+    engine = SimulationRunManager(SimulationConfiguration())
+    runner = SimulationRunner(engine, None)
+
+    for refused in (-0.1, MAX_SPEED_FACTOR + 0.1):
+        with pytest.raises(ValueError, match="speed_factor"):
+            engine.set_speed_factor(refused)
+        with pytest.raises(ValueError, match="speed_factor"):
+            runner.set_speed_factor(refused)
+        with pytest.raises(ValueError, match="speed_factor"):
+            SimulationConfiguration(speed_factor=refused)

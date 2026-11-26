@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import Request
 
+from backend.app.simulation.config import DEFAULT_SPEED_FACTOR
 from backend.app.simulation.exceptions import SimulationError
 from backend.app.simulation.runner import SimulationRunner
 from backend.app.simulation.snapshot import SimulationSnapshot
@@ -258,6 +259,7 @@ class SimulationRuntime:
                 "mode": "SIMULATION_ONLY",
                 "current_tick": 0,
                 "is_running": False,
+                "speed_factor": DEFAULT_SPEED_FACTOR,
                 "message": "No active plant simulation instance attached.",
             }
 
@@ -270,6 +272,9 @@ class SimulationRuntime:
             "mode": "SIMULATION_ONLY",
             "current_tick": engine.clock.total_steps,
             "is_running": runner is not None and runner.is_running,
+            # The factor the clock is actually paced with, so that a screen
+            # shows the value in force rather than the one it was built with.
+            "speed_factor": engine.config.speed_factor,
             "message": f"Simulation engine is in state '{state_str}'.",
         }
 

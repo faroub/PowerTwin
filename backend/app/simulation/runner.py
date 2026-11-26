@@ -29,6 +29,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from backend.app.simulation.config import validate_speed_factor
 from backend.app.simulation.exceptions import SimulationError
 from backend.app.simulation.manager import SimulationRunManager
 from backend.app.simulation.state import SimulationState
@@ -222,10 +223,13 @@ class SimulationRunner:
         return manager.run_headless(max_ticks)
 
     def set_speed_factor(self, multiplier: float) -> None:
-        """Update simulation wall-clock speed pacing factor."""
-        if multiplier < 0.0:
-            raise ValueError("Speed factor multiplier must be >= 0.0")
-        self._speed_factor = multiplier
+        """Update simulation wall-clock speed pacing factor.
+
+        The multiplier is checked against the same range the configuration
+        model and the control endpoint use, so a factor that is refused at
+        the API cannot reach the runner by another route.
+        """
+        self._speed_factor = validate_speed_factor(multiplier)
         manager = self._resolve_manager()
         if manager is not None:
             manager.set_speed_factor(multiplier)

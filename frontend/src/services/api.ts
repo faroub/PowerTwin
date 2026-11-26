@@ -57,6 +57,10 @@ export interface SystemInfo {
     mode: string;
     current_tick: number;
     is_running: boolean;
+    /** The wall-clock pacing factor in force. Optional: an older backend
+     *  does not report it, and the screen then says so rather than
+     *  inventing a value. */
+    speed_factor?: number;
     message: string;
   };
 }
@@ -183,7 +187,13 @@ export async function dispatchSimulationControl(
       return {
         success: false,
         status: 'FAILED',
-        message: data.detail?.message || 'Failed to execute control action.',
+        // A refused command states why it was refused, and the reason is
+        // part of the detail. The backend sends it as a plain string for a
+        // validation refusal and as an object for the rest, and the operator
+        // must see which one they got.
+        message:
+          data.detail?.message ||
+          (typeof data.detail === 'string' ? data.detail : 'Failed to execute control action.'),
       };
     }
   } catch {
