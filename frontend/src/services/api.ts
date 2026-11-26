@@ -65,6 +65,94 @@ export interface SystemInfo {
   };
 }
 
+/** A row of the historian's time-series telemetry table. */
+export interface HistorianTelemetryRecord {
+  timestamp_ns: number;
+  source_timestamp_ns: number;
+  tag_id: string;
+  equipment_id: string;
+  value: number;
+  unit: string;
+  quality: string;
+  source_type: string;
+  simulation_run_id: string;
+}
+
+/** A row of the historian's traceable command audit log. */
+export interface HistorianCommandRecord {
+  command_id: string;
+  timestamp_ns: number;
+  requestor: string;
+  target_equipment_id: string;
+  requested_value: Record<string, unknown>;
+  accepted_status: string;
+  rejection_reason: string;
+  resulting_response: Record<string, unknown> | null;
+  simulation_run_id: string;
+}
+
+/** A row of the historian's alarm and event log. */
+export interface HistorianAlarmRecord {
+  event_id: string;
+  timestamp_ns: number;
+  equipment_id: string;
+  severity: string;
+  code: string;
+  description: string;
+  acknowledged: boolean;
+  cleared: boolean;
+  simulation_run_id: string;
+}
+
+/**
+ * The degradation and warranty metrics recorded for one battery container.
+ *
+ * Every field is nullable because the historian stores whatever the recorder
+ * produced: a container that has not been measured yet has no throughput, no
+ * cycles and no temperature. `null` therefore means "not recorded", and the
+ * screen has to say so rather than print a zero that reads like a measurement.
+ */
+export interface WarrantyMetrics {
+  container_id: string;
+  simulation_run_id: string;
+  updated_at_ns: number;
+  total_energy_throughput_wh: number | null;
+  equivalent_full_cycles: number | null;
+  max_temperature_recorded_c: number | null;
+  time_above_45c_seconds: number | null;
+  current_soh_pct: number | null;
+}
+
+/** The outcome of a read-only historian query that returns rows. */
+export interface HistorianQueryResult<T> {
+  /** True only when the backend answered with a success status. */
+  ok: boolean;
+  /** The HTTP status the backend answered with, or 0 for a transport failure. */
+  status: number;
+  /** The rows the backend returned; empty when the query failed. */
+  records: T[];
+  /** Why the query failed, in words an operator can act on. */
+  error: string | null;
+}
+
+/** The outcome of a read-only warranty query. */
+export interface WarrantyQueryResult {
+  /**
+   * True when the backend holds a warranty record for the container.
+   *
+   * A missing record is not a failure: the backend answers 404 when it holds
+   * no metrics for a container, and that is a true statement about the
+   * platform's state rather than an error the operator has to act on.
+   */
+  found: boolean;
+  /** The record, when the backend holds one. */
+  metrics: WarrantyMetrics | null;
+  /** The HTTP status the backend answered with, or 0 for a transport failure. */
+  status: number;
+  /** Why the query failed, in words an operator can act on. */
+  error: string | null;
+}
+
 export interface LoginRequest {
   username: string;
   password: string;
@@ -149,6 +237,160 @@ export async function fetchPlantOverview(): Promise<PlantOverviewData | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Build a query string from the parameters that were actually filled in.
+ *
+ * An empty filter is left out of the URL rather than sent as an empty
+ * string: the backend reads an empty string as a filter value, which would
+ * narrow the query to equipment whose identifier is the empty string and
+ * return nothing.
+ */
+function buildQuery(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') {
+      search.set(key, String(value));
+    }
+  });
+  const text = search.toString();
+  return text ? `?${text}` : '';
+}
+
+/** A JSON response, with the reason it was not usable when it was not. */
+interface RawJson<T> {
+  ok: boolean;
+  status: number;
+  data: T | null;
+  error: string | null;
+}
+
+/**
+ * Perform a read-only GET and decode its JSON body.
+ *
+ * A non-success status is reported with the backend's own explanation when it
+ * sends one: the operator is told what the platform refused and why, not
+ * only that a number appeared on the screen.
+ */
+async function getJson<T>(url: string): Promise<RawJson<T>> {
+  try {
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) {
+      let detail = `The backend answered with status ${res.status}.`;
+      try {
+        const body = (await res.json()) as { detail?: unknown };
+        if (typeof body.detail === 'string') {
+          detail = body.detail;
+        }
+      } catch {
+        // The body is not JSON. The status code is what the operator needs.
+      }
+      return { ok: false, status: res.status, data: null, error: detail };
+    }
+    return { ok: true, status: res.status, data: (await res.json()) as T, error: null };
+  } catch {
+    return {
+      ok: false,
+      status: 0,
+      data: null,
+      error: 'Network error connecting to the backend API.',
+    };
+  }
+}
+
+/** The filters the historian's telemetry query accepts. */
+export interface TelemetryQuery {
+  equipment_id?: string;
+  tag_id?: string;
+  simulation_run_id?: string;
+  start_time_ns?: number;
+  end_time_ns?: number;
+  sampling_step_ns?: number;
+  limit?: number;
+}
+
+/**
+ * Read historical telemetry rows from the historian.
+ *
+ * The historian is a read-only store from the screen's point of view: the
+ * query asks for rows and the backend answers with the rows it holds.
+ */
+export async function fetchHistorianTelemetry(
+  params: TelemetryQuery = {},
+): Promise<HistorianQueryResult<HistorianTelemetryRecord>> {
+  const query = buildQuery({ ...params });
+  const res = await getJson<{ count: number; records: HistorianTelemetryRecord[] }>(
+    `${BASE_URL}/historian/telemetry${query}`,
+  );
+  if (!res.ok || res.data === null) {
+    return { ok: false, status: res.status, records: [], error: res.error };
+  }
+  return { ok: true, status: res.status, records: res.data.records, error: null };
+}
+
+/** The filters the historian's command audit query accepts. */
+export interface CommandQuery {
+  target_equipment_id?: string;
+  simulation_run_id?: string;
+  limit?: number;
+}
+
+/** Read the traceable command audit log from the historian. */
+export async function fetchHistorianCommands(
+  params: CommandQuery = {},
+): Promise<HistorianQueryResult<HistorianCommandRecord>> {
+  const query = buildQuery({ ...params });
+  const res = await getJson<{ count: number; records: HistorianCommandRecord[] }>(
+    `${BASE_URL}/historian/commands${query}`,
+  );
+  if (!res.ok || res.data === null) {
+    return { ok: false, status: res.status, records: [], error: res.error };
+  }
+  return { ok: true, status: res.status, records: res.data.records, error: null };
+}
+
+/** The filters the historian's alarm and event query accepts. */
+export interface AlarmQuery {
+  equipment_id?: string;
+  severity?: string;
+  limit?: number;
+}
+
+/** Read the alarm and event log from the historian. */
+export async function fetchHistorianAlarms(
+  params: AlarmQuery = {},
+): Promise<HistorianQueryResult<HistorianAlarmRecord>> {
+  const query = buildQuery({ ...params });
+  const res = await getJson<{ count: number; records: HistorianAlarmRecord[] }>(
+    `${BASE_URL}/historian/alarms${query}`,
+  );
+  if (!res.ok || res.data === null) {
+    return { ok: false, status: res.status, records: [], error: res.error };
+  }
+  return { ok: true, status: res.status, records: res.data.records, error: null };
+}
+
+/**
+ * Read the warranty and degradation metrics of one battery container.
+ *
+ * The backend answers 404 when it holds no metrics for the container. That is
+ * reported as "not found" rather than as an error, because the screen has to
+ * be able to say that no warranty record exists — which is a different
+ * statement from "the query failed".
+ */
+export async function fetchWarrantyMetrics(
+  containerId: string,
+): Promise<WarrantyQueryResult> {
+  const encoded = encodeURIComponent(containerId);
+  const res = await getJson<WarrantyMetrics>(`${BASE_URL}/historian/warranty/${encoded}`);
+  if (res.ok && res.data !== null) {
+    return { found: true, metrics: res.data, status: res.status, error: null };
+  }
+  if (res.status === 404) {
+    return { found: false, metrics: null, status: 404, error: null };
+  }
+  return { found: false, metrics: null, status: res.status, error: res.error };
 }
 
 export async function dispatchSimulationControl(

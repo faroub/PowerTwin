@@ -5,9 +5,11 @@ OBSERVER account can browse history without gaining any control capability.
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.rbac import Permission, require_permission
@@ -23,6 +25,32 @@ router = APIRouter(tags=["Historian"])
 MAX_TELEMETRY_ROWS = 10_000
 MAX_COMMAND_ROWS = 5_000
 MAX_ALARM_ROWS = 5_000
+
+
+async def _run_query[T](operation: Callable[[], Awaitable[T]]) -> T:
+    """Run a historian query and turn a store failure into an explicit answer.
+
+    The historian is backed by a database. When that database is unreachable
+    the query cannot be answered, and an unhandled exception would reach the
+    operator as a bare 500 with no explanation of what went wrong. The
+    failure is caught, logged and reported as 503 with a detail the screen
+    can show: "the store is unavailable" and "the query returned no rows"
+    are different statements, and the operator has to be able to tell them
+    apart.
+
+    Both a SQLAlchemy error and an OS error are caught. The asyncpg driver
+    lets the underlying socket error escape untranslated when the host name
+    cannot be resolved, so a store that is simply not there arrives as
+    ``socket.gaierror`` rather than as a ``SQLAlchemyError``.
+    """
+    try:
+        return await operation()
+    except (SQLAlchemyError, OSError) as err:
+        logger.error("The historian query could not be answered: %s", err)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The historian store is unavailable; the query could not be answered.",
+        ) from err
 
 
 @router.get("/historian/telemetry")
@@ -49,14 +77,16 @@ async def query_telemetry(
         )
 
     engine = HistorianQueryEngine(session)
-    records = await engine.query_telemetry(
-        equipment_id=equipment_id,
-        tag_id=tag_id,
-        simulation_run_id=simulation_run_id,
-        start_time_ns=start_time_ns,
-        end_time_ns=end_time_ns,
-        sampling_step_ns=sampling_step_ns,
-        limit=limit,
+    records = await _run_query(
+        lambda: engine.query_telemetry(
+            equipment_id=equipment_id,
+            tag_id=tag_id,
+            simulation_run_id=simulation_run_id,
+            start_time_ns=start_time_ns,
+            end_time_ns=end_time_ns,
+            sampling_step_ns=sampling_step_ns,
+            limit=limit,
+        )
     )
     return {"count": len(records), "records": records}
 
@@ -73,10 +103,12 @@ async def query_commands(
 ) -> dict[str, Any]:
     """Return the traceable command audit log."""
     engine = HistorianQueryEngine(session)
-    records = await engine.query_commands(
-        target_equipment_id=target_equipment_id,
-        simulation_run_id=simulation_run_id,
-        limit=limit,
+    records = await _run_query(
+        lambda: engine.query_commands(
+            target_equipment_id=target_equipment_id,
+            simulation_run_id=simulation_run_id,
+            limit=limit,
+        )
     )
     return {"count": len(records), "records": records}
 
@@ -91,10 +123,12 @@ async def query_alarms(
 ) -> dict[str, Any]:
     """Return the alarms and events log."""
     engine = HistorianQueryEngine(session)
-    records = await engine.query_alarms(
-        equipment_id=equipment_id,
-        severity=severity,
-        limit=limit,
+    records = await _run_query(
+        lambda: engine.query_alarms(
+            equipment_id=equipment_id,
+            severity=severity,
+            limit=limit,
+        )
     )
     return {"count": len(records), "records": records}
 
@@ -107,7 +141,7 @@ async def query_warranty_metrics(
 ) -> dict[str, Any]:
     """Return the warranty and degradation metrics for a battery container."""
     engine = HistorianQueryEngine(session)
-    metrics = await engine.query_warranty_metrics(container_id)
+    metrics = await _run_query(lambda: engine.query_warranty_metrics(container_id))
     if metrics is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

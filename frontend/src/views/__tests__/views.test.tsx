@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { AlarmsView } from '../AlarmsView';
 import { BMSView } from '../BMSView';
 import { BatterySystemsView } from '../BatterySystemsView';
-import { ConfigurationView } from '../ConfigurationView';
 import { EMSView } from '../EMSView';
 import { EquipmentControllerView } from '../EquipmentControllerView';
 import { EquipmentLibraryView } from '../EquipmentLibraryView';
@@ -58,7 +57,6 @@ const VIEWS: { heading: string; Component: ComponentType }[] = [
   { heading: 'Equipment Library', Component: EquipmentLibraryView },
   { heading: 'Plugin Manager', Component: PluginManagerView },
   { heading: 'System Settings', Component: SystemSettingsView },
-  { heading: 'Plant Configuration', Component: ConfigurationView },
 ];
 
 /**
@@ -528,16 +526,187 @@ describe('Equipment Controller View', () => {
 });
 
 describe('System Settings View', () => {
-  it('states the safety invariants the platform runs under', () => {
+  it('states the safety invariants the platform runs under', async () => {
     render(<SystemSettingsView />);
 
     const invariants = screen
       .getByText('Non-Negotiable Safety Invariants')
       .closest('.card') as HTMLElement;
 
-    expect(invariants).toHaveTextContent('Application Mode: SIMULATION ONLY');
+    // The invariants are read from the running platform, so the screen has
+    // to wait for the platform's answer before it can state them.
+    await waitFor(() => expect(invariants).toHaveTextContent('Application Mode: SIMULATION ONLY'));
+    expect(invariants).toHaveTextContent('Simulation-Only Mode: ENABLED');
     expect(invariants).toHaveTextContent('Hardware Integration: DISABLED');
     expect(invariants).toHaveTextContent('External Modbus Writes: DISABLED');
     expect(invariants).toHaveTextContent('Automatic Device Discovery: DISABLED');
+  });
+
+  it('reports the invariants as unverified when the platform does not answer', async () => {
+    installFetchMock({
+      '/api/v1/info': () => jsonResponse({ detail: 'the platform is not reachable' }, 503),
+    });
+
+    render(<SystemSettingsView />);
+
+    const invariants = screen
+      .getByText('Non-Negotiable Safety Invariants')
+      .closest('.card') as HTMLElement;
+
+    // An unreachable platform is not a disabled invariant: the screen has no
+    // evidence of the running state, and says so rather than guessing.
+    await waitFor(() => expect(invariants).toHaveTextContent('Hardware Integration: UNVERIFIED'));
+    expect(invariants).not.toHaveTextContent('Hardware Integration: DISABLED');
+  });
+});
+
+describe('Historian View', () => {
+  const TELEMETRY_ROWS = {
+    count: 1,
+    records: [
+      {
+        timestamp_ns: 1_000_000_000,
+        source_timestamp_ns: 1_000_000_000,
+        tag_id: 'dc_voltage_v',
+        equipment_id: 'CONTAINER_01',
+        value: 812.4,
+        unit: 'V',
+        quality: 'GOOD',
+        source_type: 'SIMULATED',
+        simulation_run_id: 'RUN_01',
+      },
+    ],
+  };
+
+  it('queries the historian and shows the rows it returned', async () => {
+    const mock = installFetchMock({
+      '/api/v1/historian/telemetry': () => jsonResponse(TELEMETRY_ROWS),
+      '/api/v1/historian/commands': () => jsonResponse({ count: 0, records: [] }),
+      '/api/v1/historian/alarms': () => jsonResponse({ count: 0, records: [] }),
+    });
+    const user = userEvent.setup();
+    render(<HistorianView />);
+
+    await user.click(screen.getByRole('button', { name: 'RUN QUERY' }));
+
+    await waitFor(() => expect(screen.getByText('CONTAINER_01')).toBeInTheDocument());
+    expect(screen.getByText('dc_voltage_v')).toBeInTheDocument();
+    expect(screen.getByText('812.4 V')).toBeInTheDocument();
+    expect(mock.callsTo('/api/v1/historian/telemetry')).toHaveLength(1);
+  });
+
+  it('passes the filters the operator typed to the historian', async () => {
+    const mock = installFetchMock({
+      '/api/v1/historian/telemetry': () => jsonResponse(TELEMETRY_ROWS),
+      '/api/v1/historian/commands': () => jsonResponse({ count: 0, records: [] }),
+      '/api/v1/historian/alarms': () => jsonResponse({ count: 0, records: [] }),
+    });
+    const user = userEvent.setup();
+    render(<HistorianView />);
+
+    await user.type(screen.getByLabelText(/Equipment ID/i), 'CONTAINER_02');
+    await user.click(screen.getByRole('button', { name: 'RUN QUERY' }));
+
+    await waitFor(() => expect(mock.callsTo('/api/v1/historian/telemetry')).toHaveLength(1));
+    expect(mock.callsTo('/api/v1/historian/telemetry')[0].url).toContain('equipment_id=CONTAINER_02');
+  });
+
+  it('says that the historian holds no rows rather than showing an empty table', async () => {
+    installFetchMock({
+      '/api/v1/historian/telemetry': () => jsonResponse({ count: 0, records: [] }),
+      '/api/v1/historian/commands': () => jsonResponse({ count: 0, records: [] }),
+      '/api/v1/historian/alarms': () => jsonResponse({ count: 0, records: [] }),
+    });
+    const user = userEvent.setup();
+    render(<HistorianView />);
+
+    await user.click(screen.getByRole('button', { name: 'RUN QUERY' }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('The historian holds no telemetry rows for this filter.'),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it('reports a failed query instead of showing nothing', async () => {
+    installFetchMock({
+      '/api/v1/historian/telemetry': () =>
+        jsonResponse({ detail: 'the historian database is unavailable' }, 503),
+      '/api/v1/historian/commands': () => jsonResponse({ count: 0, records: [] }),
+      '/api/v1/historian/alarms': () => jsonResponse({ count: 0, records: [] }),
+    });
+    const user = userEvent.setup();
+    render(<HistorianView />);
+
+    await user.click(screen.getByRole('button', { name: 'RUN QUERY' }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('The query failed: the historian database is unavailable'),
+      ).toBeInTheDocument(),
+    );
+  });
+});
+
+describe('Warranty Metrics View', () => {
+  const WARRANTY_RECORD = {
+    container_id: 'CONTAINER_01',
+    simulation_run_id: 'RUN_01',
+    updated_at_ns: 3_600_000_000_000,
+    total_energy_throughput_wh: 124_500_000,
+    equivalent_full_cycles: 6.2,
+    max_temperature_recorded_c: 41.5,
+    time_above_45c_seconds: 12.5,
+    current_soh_pct: 98.4,
+  };
+
+  it('shows the warranty metrics the historian holds', async () => {
+    installFetchMock({
+      '/api/v1/historian/warranty/CONTAINER_01': () => jsonResponse(WARRANTY_RECORD),
+    });
+    const user = userEvent.setup();
+    render(<WarrantyMetricsView />);
+
+    await user.click(screen.getByRole('button', { name: 'QUERY METRICS' }));
+
+    await waitFor(() => expect(screen.getByText('124.50 MWh')).toBeInTheDocument());
+    expect(screen.getByText('6.20 EFC')).toBeInTheDocument();
+    expect(screen.getByText('98.4 % SOH')).toBeInTheDocument();
+    expect(screen.getByText('41.5 °C')).toBeInTheDocument();
+  });
+
+  it('says that no warranty record exists rather than showing a figure', async () => {
+    installFetchMock({
+      '/api/v1/historian/warranty/CONTAINER_01': () =>
+        jsonResponse({ detail: "No warranty metrics recorded for container 'CONTAINER_01'." }, 404),
+    });
+    const user = userEvent.setup();
+    render(<WarrantyMetricsView />);
+
+    await user.click(screen.getByRole('button', { name: 'QUERY METRICS' }));
+
+    // A container with no recorded metrics is reported as such. The screen
+    // does not fall back to a plausible-looking degradation figure.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/No warranty metrics are recorded for container 'CONTAINER_01'/),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText('100.0 % SOH')).not.toBeInTheDocument();
+  });
+
+  it('refuses to query without a container identifier', async () => {
+    const mock = installFetchMock({
+      '/api/v1/historian/warranty/': () => jsonResponse(WARRANTY_RECORD),
+    });
+    const user = userEvent.setup();
+    render(<WarrantyMetricsView />);
+
+    await user.clear(screen.getByLabelText(/Container ID/i));
+    await user.click(screen.getByRole('button', { name: 'QUERY METRICS' }));
+
+    expect(screen.getByText('A container identifier is required.')).toBeInTheDocument();
+    expect(mock.callsTo('/api/v1/historian/warranty')).toHaveLength(0);
   });
 });
