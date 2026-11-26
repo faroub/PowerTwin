@@ -379,3 +379,36 @@ async def test_historian_query_api_rejects_out_of_range_limit(
 
     res = client.get("/api/v1/historian/telemetry", params={"limit": 10_000_000}, headers=headers)
     assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_the_overflow_log_names_the_real_cause(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test the overflow log distinguishes a full buffer from a failed commit.
+
+    The two conditions call for different responses — one is an application
+    capacity problem, the other an infrastructure problem — so the log line
+    has to name the cause rather than always blaming the buffer.
+    """
+    monkeypatch.setattr(historian_service, "OVERFLOW_DIR", str(tmp_path))
+
+    # A full in-memory buffer: the application produced more than it could hold.
+    full = HistorianService(max_buffer_size=1)
+    with caplog.at_level("WARNING", logger="backend.app.historian.service"):
+        full.record_telemetry("TAG1", "EQ1", 10.0, "V", 100)
+        full.record_telemetry("TAG2", "EQ1", 12.0, "V", 200)
+
+    assert "memory buffer full" in caplog.text
+
+    # A failed commit: the application held the data, the database refused it.
+    caplog.clear()
+    unreachable = HistorianService(max_buffer_size=100)
+    with caplog.at_level("WARNING", logger="backend.app.historian.service"):
+        unreachable.record_telemetry("TAG3", "EQ1", 14.0, "V", 300)
+        await unreachable.flush_buffer_to_db(
+            cast("AsyncSession", _RecordingSession(fail_commit=True))
+        )
+
+    assert "database commit failed" in caplog.text
+    assert "memory buffer full" not in caplog.text
