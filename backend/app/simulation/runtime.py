@@ -17,9 +17,11 @@ snapshot is resolved from that runtime so that:
   models).
 
 A module-level fall-back runtime is used when no application handle is
-available (unit and scenario tests build their own engine instances: the
-app-scoped value is bound by this module on start-up, so both callers resolve
-the same instance).
+available (unit and scenario tests build their own engine instances). The
+fall-back is a **distinct** object from every application-scoped runtime: an
+application owns the runtime that holds its plant, and two applications never
+share one. A caller that needs the runtime of a running application must
+therefore pass the application or the request.
 
 """
 
@@ -69,8 +71,12 @@ class SimulationRuntime:
     def bind_to_app(self, app: Any) -> SimulationRuntime:
         """Bind this runtime as the application-scoped instance.
 
-        Any handle resolved subsequently (request, app instance or the module
-        fall-back) returns this same object.
+        Any handle that resolves the runtime **of this application** — a
+        request or the application instance itself — returns this same
+        object. The module-level fall-back runtime is not affected: it is a
+        separate object that exists for callers without an application
+        handle, and binding an application must not make two applications
+        share a plant.
         """
         setattr(app.state, SIMULATION_RUNTIME_KEY, self)
         return self
@@ -284,8 +290,8 @@ def get_simulation_runtime(
     asks for it, so two applications never share a runtime, a plant or an engine.
     The module fall-back instance is returned when no app handle is available
     (unit and scenario tests build their own engine instances). Application
-    start-up binds its runtime the same way, so both callers resolve the same
-    object.
+    start-up binds its runtime the same way, so the request handle and the
+    application handle of one application resolve the same object.
     """
     base_app = request.app if request is not None else app
     if base_app is not None:

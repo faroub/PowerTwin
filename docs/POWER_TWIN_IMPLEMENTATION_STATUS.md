@@ -243,3 +243,18 @@ journal as `REJECTED` / `INVALID_STEP_COUNT`; it is not corrected into a
 different command. The bound keeps a synchronous control command within a
 duration an operator can wait for, and the reasons it exists are recorded in
 `docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.12.
+
+**The engine state the HMI shows the operator now comes from the engine that
+owns the plant.** `GET /api/v1/info` is where the Simulation Control screen
+takes the engine state from, and it used to resolve that state through the
+module-level fall-back runtime — the instance for callers without an
+application handle — instead of the application-scoped runtime that holds the
+plant. The endpoint therefore answered `NOT_CONNECTED` while the Plant
+Overview reported the running plant. It now resolves the runtime from the
+request, exactly as the Plant Overview does, and the divergent second
+implementation of the engine status is removed. The regression test
+`tests/test_startup.py::test_system_info_reports_the_engine_that_owns_the_plant`
+asserts that both endpoints describe the same engine and fails against the
+unrepaired code with `assert 'NOT_CONNECTED' == 'RUNNING'`. The reasons are
+recorded in `docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.14 and in
+`docs/POWER_TWIN_FINAL_AUDIT_REPORT.md` F-13.

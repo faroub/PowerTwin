@@ -503,6 +503,43 @@ readable and settable through the API but not through the HMI. The view's
 subtitle no longer promises "Speed Multipliers" it does not deliver; it
 names the three things the screen does offer.
 
+### 4.14 The Engine Status Is Read From the Application That Owns the Plant
+
+`GET /api/v1/info` is where the HMI takes the engine state it shows the
+operator. It used to resolve that state through the module-level fall-back
+runtime — the instance that exists for callers without an application
+handle — and never through the runtime that actually owns the plant. The
+consequence was that the endpoint answered `NOT_CONNECTED` while the Plant
+Overview reported the running plant: two reads of the same plant disagreed,
+and the Simulation Control screen displayed a plant that was running as one
+that was not connected.
+
+The endpoint now resolves the **application-scoped** runtime from the request,
+exactly as the Plant Overview does, and reports `runtime.status()`. The
+second, divergent implementation of the engine status — the one that computed
+`is_running` from the engine state rather than from the runner — has been
+removed, so the two endpoints can no longer drift apart.
+`tests/test_startup.py::test_system_info_reports_the_engine_that_owns_the_plant`
+asserts that both endpoints describe the same engine, and it fails against
+the unrepaired code with `assert 'NOT_CONNECTED' == 'RUNNING'`.
+
+Two things about the endpoint are worth knowing and are **not** changed:
+
+- It is **read-only and unauthenticated**. It exposes the project metadata,
+  the safety report and the engine state; it exposes no control surface and
+  no credential. The telemetry and control endpoints remain behind the
+  bearer-token guard.
+- The **wall-clock speed factor** is still not part of the engine status.
+  The backend implements `SET_SPEED`, and §4.13 records that the screen is
+  not wired to it.
+
+The runtime docstrings claimed that start-up binds the module fall-back to
+the application. It does not, and never did — an application owns the runtime
+that holds its plant, and two applications never share one. The docstrings
+now describe the actual binding, and the test that asserted the false claim
+with a tautology (`runtime is default_runtime or runtime is not
+default_runtime`) now asserts the truth.
+
 ---
 
 ## 5. Reproducibility and Determinism Limitations

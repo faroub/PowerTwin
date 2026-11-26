@@ -861,6 +861,47 @@ Modbus TCP server implements it. No OPC UA or MQTT adapter exists.
 
 *Action.* Keep them listed as `NOT IMPLEMENTED` until they are built.
 
+### F-13 — LOW — RESOLVED — The system info endpoint reported an engine the application did not own
+
+`GET /api/v1/info` is where the HMI takes the engine state it shows the
+operator. It read that state through `backend/app/simulation/engine_stub.py`,
+which called `get_active_simulation_engine()` **without an application
+handle**. That call resolves the module-level fall-back runtime — the
+instance that exists for callers without an application handle — and not the
+application-scoped runtime that holds the plant. The application and the
+fall-back are distinct objects: `init_simulation(app)` constructs a runtime
+for the application and binds it to `app.state`.
+
+*Action.* Resolve the engine status from the application-scoped runtime, the
+same source the Plant Overview reads.
+
+**Resolution.** The endpoint resolves the runtime from the request
+(`get_simulation_runtime(request=request)`) and reports `runtime.status()`,
+exactly as `GET /api/v1/overview` does. The second implementation of the
+engine status — which also computed `is_running` from the engine state
+rather than from the runner — is removed with `engine_stub.py`, so the two
+endpoints can no longer drift apart.
+
+The defect was reproduced before it was fixed: with a plant attached and the
+engine running, `/api/v1/info` answered `NOT_CONNECTED` while the runtime
+reported `RUNNING`. The regression test
+`tests/test_startup.py::test_system_info_reports_the_engine_that_owns_the_plant`
+asserts that both endpoints describe the same engine and fails against the
+unrepaired code with `assert 'NOT_CONNECTED' == 'RUNNING'`.
+
+Two supporting defects disappeared with it. The runtime docstrings claimed
+that start-up binds the module fall-back to the application — it does not,
+and never did — and the test that asserted that claim did so with a
+tautology (`runtime is default_runtime or runtime is not default_runtime`),
+which could never fail. The docstrings now describe the actual binding, and
+the test now asserts that the application's runtime is a distinct object
+from the fall-back and that start-up leaves the fall-back untouched.
+
+The endpoint remains **read-only and unauthenticated**: it exposes the
+project metadata, the safety report and the engine state, and no control
+surface and no credential. The telemetry and control endpoints remain behind
+the bearer-token guard.
+
 ---
 
 ## 10. Coverage of the Platform Mission (`AGENTS.md` §1)
@@ -958,7 +999,10 @@ files, was green across every job.
    closed: the platform has one dedicated, append-only, hash-chained
    operator-action journal that every command, setpoint change, configuration
    change, fault and operator action flows through, and the migration
-   environment no longer silences the application's loggers.~~
+   environment no longer silences the application's loggers.~~ ~~F-13 is
+   closed: the system info endpoint reads the engine status from the
+   application-scoped runtime, the same source the Plant Overview reads, and
+   the divergent second implementation of that status is removed.~~
 
 ---
 
