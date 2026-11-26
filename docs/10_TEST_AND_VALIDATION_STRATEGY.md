@@ -57,7 +57,7 @@ the runtime equipment metadata.
 
 **Current state.** A Playwright project exists (`frontend/playwright.config.ts`, specs in `frontend/e2e/`) and runs in the `Frontend Lint, Test & Build` pipeline job. It drives the **built** HMI in Chromium against a **hermetic mock platform** that answers every `/api/v1/**` request inside the browser, aborts any path it does not model, and blocks every host but the local preview server on `127.0.0.1`. The suite covers the operator path — log in, read the overview, act on the simulation engine behind its confirmation, observe the result, log out — and the safety posture: the session token stays in memory, a backend that is not ready is reported as disconnected, and a refused control action is reported as a failure. The scenarios listed above that are not yet covered — alarm acknowledgement, chart rendering, switchgear toggling — remain future work.
 
-The frontend also has a **component suite** (`Vitest`, 151 tests in 11 files, 98.28 % line coverage with an enforced 75 % floor) that covers the entry point, the shared components, the login flow, the telemetry hook, the API client and every SCADA view. The two suites are complementary: the component suite proves the HMI's units, the end-to-end suite proves the shipped artefact's operator path.
+The frontend also has a **component suite** (`Vitest`, 152 tests in 11 files, 98.29 % line coverage with an enforced 75 % floor) that covers the entry point, the shared components, the login flow, the telemetry hook, the API client and every SCADA view. The two suites are complementary: the component suite proves the HMI's units, the end-to-end suite proves the shipped artefact's operator path.
 
 ---
 

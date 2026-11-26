@@ -340,6 +340,36 @@ describe('Simulation Control View', () => {
     expect(bodyOf(mock.callsTo('/api/v1/simulation/control')[0])).toEqual({ action: 'RESET' });
   });
 
+  it('offers a start and a stop for the engine lifecycle', async () => {
+    const mock = installFetchMock({
+      '/api/v1/overview': () => jsonResponse(CONNECTED_TELEMETRY),
+      '/api/v1/info': () => jsonResponse(HEALTHY_SYSTEM_INFO),
+      '/api/v1/simulation/control': () => jsonResponse({ status: 'SUCCESS' }),
+    });
+    const user = userEvent.setup();
+    render(<SimulationView />);
+
+    // Without a start and a stop the operator cannot begin or end a
+    // continuous run from the screen at all.
+    await user.click(screen.getByRole('button', { name: 'START' }));
+    expect(
+      screen.getByText('Are you sure you want to execute: Start Engine?'),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /CONFIRM & EXECUTE/ }));
+    await waitFor(() => expect(mock.callsTo('/api/v1/simulation/control')).toHaveLength(1));
+    expect(bodyOf(mock.callsTo('/api/v1/simulation/control')[0])).toEqual({ action: 'START' });
+
+    await user.click(screen.getByRole('button', { name: 'STOP' }));
+    expect(
+      screen.getByText('Are you sure you want to execute: Stop Engine?'),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /CONFIRM & EXECUTE/ }));
+    await waitFor(() => expect(mock.callsTo('/api/v1/simulation/control')).toHaveLength(2));
+    expect(bodyOf(mock.callsTo('/api/v1/simulation/control')[1])).toEqual({ action: 'STOP' });
+  });
+
   it('reports that the engine is not connected when the health check fails', async () => {
     installFetchMock({
       '/api/v1/overview': () => jsonResponse(CONNECTED_TELEMETRY),

@@ -92,6 +92,46 @@ test.describe('Operator path', () => {
     expect(platform.blockedHosts).toEqual([]);
   });
 
+  test('starts and stops the engine from the screen', async ({ page }) => {
+    const platform = await installMockPlatform(page);
+
+    await page.goto('/');
+    await logIn(page);
+
+    // The engine lifecycle must be reachable from the operator's screen:
+    // without a start and a stop the operator can only pause a run that
+    // something else began.
+    await openView(page, 'Simulation Control');
+    await expect(page.getByRole('heading', { level: 1, name: 'Simulation Control' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'START' }).click();
+    await expect(
+      page.getByText('Are you sure you want to execute: Start Engine?'),
+    ).toBeVisible();
+    await page.getByRole('button', { name: /CONFIRM & EXECUTE/ }).click();
+    await expect(page.getByText('[SUCCESS]', { exact: true })).toBeVisible();
+    await expect(page.getByText('RUNNING', { exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: 'STOP' }).click();
+    await expect(
+      page.getByText('Are you sure you want to execute: Stop Engine?'),
+    ).toBeVisible();
+    await page.getByRole('button', { name: /CONFIRM & EXECUTE/ }).click();
+    await expect(page.getByText('STOPPED', { exact: true })).toBeVisible();
+
+    const controlRequests = platform.requests.filter(
+      (request) => request.path === '/api/v1/simulation/control',
+    );
+    expect(controlRequests.map((request) => request.body)).toEqual([
+      { action: 'START' },
+      { action: 'STOP' },
+    ]);
+    // Every control action travels with the session token.
+    for (const request of controlRequests) {
+      expect(request.authorization).toBe(`Bearer ${MOCK_TOKEN}`);
+    }
+  });
+
   test('sends no authorisation header before the operator logs in', async ({ page }) => {
     const platform = await installMockPlatform(page);
 
