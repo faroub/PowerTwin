@@ -8,6 +8,7 @@ import { platformSession } from './services/api';
 import {
   CONNECTED_TELEMETRY,
   HEALTHY_SYSTEM_INFO,
+  REFERENCE_PLANT_TOPOLOGY,
   TOKEN_RESPONSE,
   USER_DETAILS,
 } from './test/fixtures';
@@ -21,6 +22,7 @@ function installPlatformMock() {
     '/api/v1/auth/me': () => jsonResponse(USER_DETAILS),
     '/api/v1/info': () => jsonResponse(HEALTHY_SYSTEM_INFO),
     '/api/v1/overview': () => jsonResponse(CONNECTED_TELEMETRY),
+    '/api/v1/topology': () => jsonResponse(REFERENCE_PLANT_TOPOLOGY),
     '/api/v1/simulation/control': () => jsonResponse({ status: 'SUCCESS' }),
   });
 }
@@ -71,7 +73,7 @@ describe('HMI Application', () => {
     await logIn(user);
 
     const sidebar = container.querySelector('.sidebar') as HTMLElement;
-    await user.click(sidebar.querySelector('.nav-item:nth-child(12)') as HTMLElement);
+    await user.click(sidebar.querySelector('.nav-item:nth-child(13)') as HTMLElement);
 
     expect(screen.getByRole('heading', { level: 1, name: 'Alarms & Events' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 1, name: 'Plant Overview' })).not.toBeInTheDocument();
@@ -84,7 +86,7 @@ describe('HMI Application', () => {
 
     const sidebar = container.querySelector('.sidebar') as HTMLElement;
     const items = Array.from(sidebar.querySelectorAll('.nav-item'));
-    expect(items).toHaveLength(19);
+    expect(items).toHaveLength(20);
 
     for (const item of items) {
       await user.click(item);
@@ -112,7 +114,7 @@ describe('HMI Application', () => {
     await logIn(user);
 
     const sidebar = container.querySelector('.sidebar') as HTMLElement;
-    await user.click(sidebar.querySelector('.nav-item:nth-child(15)') as HTMLElement);
+    await user.click(sidebar.querySelector('.nav-item:nth-child(16)') as HTMLElement);
     expect(screen.getByRole('heading', { level: 1, name: 'Simulation Control' })).toBeInTheDocument();
 
     await user.click(screen.getByText('LOGOUT'));

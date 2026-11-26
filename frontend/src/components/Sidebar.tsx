@@ -2,6 +2,7 @@ import React from 'react';
 
 export type ViewId =
   | 'overview'
+  | 'plant_config'
   | 'sld'
   | 'battery'
   | 'bms'
@@ -28,6 +29,7 @@ interface SidebarProps {
 
 const navItems: { id: ViewId; label: string; icon: string }[] = [
   { id: 'overview', label: 'Plant Overview', icon: '📊' },
+  { id: 'plant_config', label: 'Plant Configuration', icon: '🏗️' },
   { id: 'sld', label: 'Single-Line Diagram', icon: '⚡' },
   { id: 'battery', label: 'Battery Systems', icon: '🔋' },
   { id: 'bms', label: 'BMS', icon: '🛡️' },

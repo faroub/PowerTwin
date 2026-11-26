@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -15,6 +15,7 @@ import { HistorianView } from '../HistorianView';
 import { PCSView } from '../PCSView';
 import { PPCView } from '../PPCView';
 import { PlantOverviewView } from '../PlantOverviewView';
+import { PlantConfigurationView } from '../PlantConfigurationView';
 import { PluginManagerView } from '../PluginManagerView';
 import { ScenarioManagerView } from '../ScenarioManagerView';
 import { SimulationView } from '../SimulationView';
@@ -27,8 +28,9 @@ import {
   CONNECTED_TELEMETRY,
   DISCONNECTED_TELEMETRY,
   HEALTHY_SYSTEM_INFO,
+  REFERENCE_PLANT_TOPOLOGY,
 } from '../../test/fixtures';
-import { bodyOf, installFetchMock, jsonResponse } from '../../test/fetchMock';
+import { bodyOf, installFetchMock, jsonResponse, networkFailure } from '../../test/fetchMock';
 
 /**
  * Every view of the HMI, with the heading it has to present.
@@ -39,6 +41,7 @@ import { bodyOf, installFetchMock, jsonResponse } from '../../test/fetchMock';
  */
 const VIEWS: { heading: string; Component: ComponentType }[] = [
   { heading: 'Plant Overview', Component: PlantOverviewView },
+  { heading: 'Plant Configuration', Component: PlantConfigurationView },
   { heading: 'Electrical Single-Line Diagram (SLD)', Component: SingleLineDiagramView },
   { heading: 'Battery Systems', Component: BatterySystemsView },
   { heading: 'Master BMS Controller', Component: BMSView },
@@ -71,6 +74,7 @@ beforeEach(() => {
   installFetchMock({
     '/api/v1/overview': () => jsonResponse(CONNECTED_TELEMETRY),
     '/api/v1/info': () => jsonResponse(HEALTHY_SYSTEM_INFO),
+    '/api/v1/topology': () => jsonResponse(REFERENCE_PLANT_TOPOLOGY),
     '/api/v1/simulation/control': () =>
       jsonResponse({
         status: 'SUCCESS',
@@ -857,5 +861,236 @@ describe('Warranty Metrics View', () => {
         screen.getByText('The query failed: the historian store is unavailable'),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+describe('Plant Configuration View', () => {
+  /** The row of the inventory table that carries an identifier. */
+  function rowOf(equipmentId: string): HTMLElement {
+    const row = screen.getByText(equipmentId).closest('tr');
+    expect(row).not.toBeNull();
+    return row as HTMLElement;
+  }
+
+  it('shows the plant the platform is running', async () => {
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('REF_PLANT_10MW_20MWH')).toBeInTheDocument());
+    expect(
+      screen.getByText('PowerTwin Reference 10 MW / 20 MWh BESS Plant'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('10.00 MW')).toBeInTheDocument();
+    expect(screen.getByText('20.00 MWh')).toBeInTheDocument();
+    expect(screen.getByText('configs/reference_10mw_20mwh.yaml')).toBeInTheDocument();
+  });
+
+  it('labels the plant parameters as illustrative', async () => {
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('REF_PLANT_10MW_20MWH')).toBeInTheDocument());
+    expect(
+      screen.getByText('ILLUSTRATIVE — NOT VALIDATED AGAINST AUTHORITATIVE DATA'),
+    ).toBeInTheDocument();
+  });
+
+  it('lists the equipment inventory the plant holds', async () => {
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('CONTAINER_01')).toBeInTheDocument());
+    expect(screen.getByText('Equipment Inventory (4)')).toBeInTheDocument();
+    expect(screen.getByText('PCS_01')).toBeInTheDocument();
+    expect(screen.getByText('XFRM_MAIN_01')).toBeInTheDocument();
+    expect(screen.getByText('AUX_SYS_01')).toBeInTheDocument();
+  });
+
+  it('summarises each item by the rating its type carries', async () => {
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('CONTAINER_01')).toBeInTheDocument());
+    // A container is summarised by its energy capacity...
+    expect(within(rowOf('CONTAINER_01')).getByText('5.00 MWh')).toBeInTheDocument();
+    // ...a PCS by its active power...
+    expect(within(rowOf('PCS_01')).getByText('2.50 MW')).toBeInTheDocument();
+    // ...and a transformer by its apparent power.
+    expect(within(rowOf('XFRM_MAIN_01')).getByText('12.00 MVA')).toBeInTheDocument();
+  });
+
+  it('names the vendor the topology declares', async () => {
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('CONTAINER_01')).toBeInTheDocument());
+    expect(within(rowOf('CONTAINER_01')).getByText('Reference Cell Co')).toBeInTheDocument();
+    expect(within(rowOf('PCS_01')).getByText('Reference Inverter Co')).toBeInTheDocument();
+  });
+
+  it('says that a vendor the topology does not declare is not specified', async () => {
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('XFRM_MAIN_01')).toBeInTheDocument());
+    // The transformer carries no declared vendor. The screen must not print a
+    // placeholder that would read as a configured vendor.
+    expect(within(rowOf('XFRM_MAIN_01')).getByText('NOT SPECIFIED')).toBeInTheDocument();
+  });
+
+  it('labels every illustrative item of the inventory', async () => {
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('CONTAINER_01')).toBeInTheDocument());
+    expect(within(rowOf('CONTAINER_01')).getByText('ILLUSTRATIVE')).toBeInTheDocument();
+  });
+
+  it('reports a plant whose parameters are declared as validated', async () => {
+    installFetchMock({
+      '/api/v1/topology': () =>
+        jsonResponse({
+          ...REFERENCE_PLANT_TOPOLOGY,
+          illustrative: false,
+          equipment: REFERENCE_PLANT_TOPOLOGY.equipment.map((item) => ({
+            ...item,
+            illustrative: false,
+          })),
+        }),
+    });
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('DECLARED AS VALIDATED')).toBeInTheDocument());
+    expect(within(rowOf('CONTAINER_01')).getByText('VALIDATED')).toBeInTheDocument();
+  });
+
+  it('reports a rating the topology does not declare as not specified', async () => {
+    installFetchMock({
+      '/api/v1/topology': () =>
+        jsonResponse({
+          ...REFERENCE_PLANT_TOPOLOGY,
+          rated_power_w: null,
+          rated_energy_wh: null,
+        }),
+    });
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('REF_PLANT_10MW_20MWH')).toBeInTheDocument());
+    // An undeclared rating is reported as absent, not as a zero: "0.00 MW"
+    // reads as a measurement of a plant that cannot discharge.
+    expect(screen.getAllByText('NOT SPECIFIED').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('reports an identity the platform did not publish as unavailable', async () => {
+    installFetchMock({
+      '/api/v1/topology': () =>
+        jsonResponse({
+          ...REFERENCE_PLANT_TOPOLOGY,
+          plant_id: null,
+          plant_name: null,
+          source_path: null,
+        }),
+    });
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getAllByText('UNAVAILABLE')).toHaveLength(2));
+    expect(screen.getByText('BUILT IN CODE')).toBeInTheDocument();
+  });
+
+  it('reports a rating too small for the larger units in watts and watt-hours', async () => {
+    installFetchMock({
+      '/api/v1/topology': () =>
+        jsonResponse({
+          ...REFERENCE_PLANT_TOPOLOGY,
+          equipment: [
+            {
+              ...REFERENCE_PLANT_TOPOLOGY.equipment[0],
+              equipment_id: 'CONTAINER_09',
+              capacity_wh: 500_000,
+              rated_power_w: null,
+              rated_apparent_power_va: null,
+            },
+            {
+              ...REFERENCE_PLANT_TOPOLOGY.equipment[0],
+              equipment_id: 'AUX_SYS_09',
+              capacity_wh: null,
+              rated_power_w: 250,
+              rated_apparent_power_va: null,
+            },
+          ],
+        }),
+    });
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('CONTAINER_09')).toBeInTheDocument());
+    expect(within(rowOf('CONTAINER_09')).getByText('500000 Wh')).toBeInTheDocument();
+    expect(within(rowOf('AUX_SYS_09')).getByText('250 W')).toBeInTheDocument();
+  });
+
+  it('says that no plant is attached rather than showing an empty plant', async () => {
+    installFetchMock({
+      '/api/v1/topology': () =>
+        jsonResponse({
+          plant_configured: false,
+          plant_id: null,
+          plant_name: null,
+          illustrative: null,
+          rated_power_w: null,
+          rated_energy_wh: null,
+          source_path: null,
+          equipment: [],
+          counts: {},
+          message: 'No plant is attached to the running platform.',
+          safety: HEALTHY_SYSTEM_INFO.safety,
+        }),
+    });
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('No plant is attached')).toBeInTheDocument());
+    expect(
+      screen.getByText('No plant is attached to the running platform.'),
+    ).toBeInTheDocument();
+    // No substitute plant is invented for the missing one.
+    expect(screen.queryByText('REF_PLANT_10MW_20MWH')).not.toBeInTheDocument();
+  });
+
+  it('reports an empty inventory rather than hiding it', async () => {
+    installFetchMock({
+      '/api/v1/topology': () =>
+        jsonResponse({ ...REFERENCE_PLANT_TOPOLOGY, equipment: [], counts: {} }),
+    });
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('Equipment Inventory (0)')).toBeInTheDocument());
+    expect(screen.getByText(/The plant reports no equipment/)).toBeInTheDocument();
+  });
+
+  it('reports that the platform did not answer instead of showing a plant', async () => {
+    installFetchMock({
+      '/api/v1/topology': () => networkFailure(),
+    });
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('The platform did not answer')).toBeInTheDocument());
+    expect(
+      screen.getByText(/Network error connecting to the backend API/),
+    ).toBeInTheDocument();
+    // The screen shows no plant rather than a substitute one.
+    expect(screen.queryByText('REF_PLANT_10MW_20MWH')).not.toBeInTheDocument();
+  });
+
+  it('reports the reason the platform refused the read', async () => {
+    installFetchMock({
+      '/api/v1/topology': () => jsonResponse({ detail: 'The topology could not be read.' }, 503),
+    });
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('The platform did not answer')).toBeInTheDocument());
+    expect(screen.getByText(/The topology could not be read\./)).toBeInTheDocument();
+  });
+
+  it('reads the topology and changes nothing', async () => {
+    const mock = installFetchMock({
+      '/api/v1/topology': () => jsonResponse(REFERENCE_PLANT_TOPOLOGY),
+    });
+    render(<PlantConfigurationView />);
+
+    await waitFor(() => expect(screen.getByText('REF_PLANT_10MW_20MWH')).toBeInTheDocument());
+    const calls = mock.callsTo('/api/v1/topology');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe('GET');
   });
 });

@@ -153,11 +153,61 @@ export interface WarrantyQueryResult {
   error: string | null;
 }
 
+/**
+ * One piece of equipment of the running plant.
+ *
+ * A field the topology does not declare is `null`. The screen has to be able
+ * to say "not specified" rather than print a placeholder that reads like a
+ * configured value.
+ */
+export interface TopologyEquipment {
+  equipment_id: string;
+  equipment_type: string;
+  manufacturer: string | null;
+  plugin_id: string | null;
+  illustrative: boolean;
+  capacity_wh: number | null;
+  rated_power_w: number | null;
+  rated_apparent_power_va: number | null;
+  nominal_voltage_v: number | null;
+  specifications: Record<string, number>;
+}
+
+/** The topology of the plant the platform is running. */
+export interface PlantTopology {
+  /** False when no plant is attached to the running platform. */
+  plant_configured: boolean;
+  plant_id: string | null;
+  plant_name: string | null;
+  /** True when the plant's parameters are illustrative. */
+  illustrative: boolean | null;
+  rated_power_w: number | null;
+  rated_energy_wh: number | null;
+  /** The configuration file the plant was built from. */
+  source_path: string | null;
+  equipment: TopologyEquipment[];
+  counts: Record<string, number>;
+  /** Why the plant is not configured, when it is not. */
+  message: string | null;
+  safety: SafetyReport;
+}
+
+/** The outcome of a read-only topology query. */
+export interface TopologyQueryResult {
+  /** True only when the backend answered with a success status. */
+  ok: boolean;
+  /** The HTTP status the backend answered with, or 0 for a transport failure. */
+  status: number;
+  /** The topology the backend reported; null when the query failed. */
+  topology: PlantTopology | null;
+  /** Why the query failed, in words an operator can act on. */
+  error: string | null;
+}
+
 export interface LoginRequest {
   username: string;
   password: string;
 }
-
 export interface TokenResponse {
   access_token: string;
   token_type: string;
@@ -393,8 +443,23 @@ export async function fetchWarrantyMetrics(
   return { found: false, metrics: null, status: res.status, error: res.error };
 }
 
-export async function dispatchSimulationControl(
-  action: string,
+/**
+ * Read the topology of the plant the platform is running.
+ *
+ * The endpoint is read-only: it publishes the plant that owns the engine and
+ * cannot change it. A platform with no plant attached answers with a
+ * topology whose `plant_configured` is false, which is a true statement
+ * about the platform rather than an error.
+ */
+export async function fetchPlantTopology(): Promise<TopologyQueryResult> {
+  const res = await getJson<PlantTopology>(`${BASE_URL}/topology`);
+  if (!res.ok || res.data === null) {
+    return { ok: false, status: res.status, topology: null, error: res.error };
+  }
+  return { ok: true, status: res.status, topology: res.data, error: null };
+}
+
+export async function dispatchSimulationControl(  action: string,
   payload: Record<string, unknown> = {},
 ): Promise<ControlResponse> {
   try {
