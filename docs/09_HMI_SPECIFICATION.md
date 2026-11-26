@@ -54,6 +54,13 @@ The HMI provides operators and test engineers with real-time plant visibility, i
 - Controls for central simulation engine: `Play`, `Pause`, `Single Step (+10ms)`, `Reset`, `Speed Slider (0.1x - 100x)`.
 - Scenario file picker and progress timeline display.
 
+### 2.7 Plant Configuration View
+- Read-only screen that publishes the plant the platform is **actually running**: its identity, its rated power and energy, the topology configuration file it was built from, and the inventory of its equipment.
+- Reads `GET /api/v1/topology`, which is served from the application-scoped runtime — the same source the Plant Overview reads — and requires the `READ_CONFIG` permission.
+- A value the topology does not declare is published as **absent** and rendered as `NOT SPECIFIED`, never as a placeholder: the equipment models fall back on a placeholder manufacturer, and a placeholder on a configuration screen reads as a configured vendor.
+- Every illustrative parameter is labelled as illustrative, per `AGENTS.md` §2.14.
+- A platform with no plant attached reports *No plant is attached*; a platform that does not answer reports *The platform did not answer*. Neither case shows a substitute plant.
+
 ---
 
 ## 3. Communication & Decoupling

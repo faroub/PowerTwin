@@ -63,22 +63,33 @@ vendor plugins are derived from publicly available datasheet specifications.
 
 ### 2.6 Historian
 
-- **The running platform never writes to the store.** The historian
-  subsystem is implemented and unit-tested: `backend/app/historian/service.py`
-  provides a `HistorianService` with a ring buffer, a zero-silent-loss disk
-  overflow, a database flush and a replay path, and
-  `backend/app/historian/query.py` reads the tables it writes. **Nothing in
-  `backend/app/` constructs that service or calls `record_telemetry`,
-  `record_command`, `record_alarm`, `flush_buffer_to_db` or
-  `flush_all_to_db`** — the service is instantiated only in the test suite.
-  In a running deployment the tables `telemetry_data`, `command_records` and
-  `alarms_and_events` therefore stay empty, and the read-only query
-  endpoints answer with zero rows against a store that was never fed. This
-  is recorded as **F-15** in `docs/POWER_TWIN_FINAL_AUDIT_REPORT.md` and is
-  **OPEN**: connecting the recorder is an architecture change that
-  `AGENTS.md` §7.5 requires approval for. It must not be resolved by putting
-  the database inside the simulation engine (`AGENTS.md` §3).
-- **The warranty metrics are never written either.** The endpoint
+- **The running platform writes to the store, through an application-layer
+  recorder.** The historian subsystem is implemented and unit-tested:
+  `backend/app/historian/service.py` provides a `HistorianService` with a
+  ring buffer, a zero-silent-loss disk overflow, a database flush and a
+  replay path, and `backend/app/historian/query.py` reads the tables it
+  writes. `backend/app/historian/recorder.py` now feeds it:
+  `HistorianRecorder` is a `SimulationTask` that lives in the **application
+  layer**, samples the running plant at a decimated interval, and writes into
+  the historian's queues; the database flush runs on the event loop.
+  **The simulation engine holds no database dependency** — a test asserts by
+  AST scan that the `backend/app/simulation` package imports neither
+  `backend.app.historian`, nor `sqlalchemy`, nor `asyncpg` — so `AGENTS.md`
+  §3 is intact. This was recorded as **F-15** in
+  `docs/POWER_TWIN_FINAL_AUDIT_REPORT.md` and is now **RESOLVED**.
+- **The recorder observes; it does not participate.** Sampling is
+  decimated, but the recorded series stays faithful: the same run produces
+  the same engine state with and without the recorder attached, and every row
+  carries the simulation timestamp, the run identifier, the quality flag and
+  `source_type="SIMULATED"`.
+- **The write path never blocks a tick.** `record_telemetry`,
+  `record_command` and `record_alarm` use `queue.put_nowait` and spill to
+  the documented disk overflow file when the buffer is full. A failed commit
+  rolls back and writes every row to that overflow file rather than dropping
+  it, so no row is silently lost. The overflow log names the real cause:
+  *"memory buffer full"* is an application capacity problem and *"database
+  commit failed"* is an infrastructure problem.
+- **The warranty metrics are still never written.** The endpoint
   `GET /api/v1/historian/warranty/{container_id}` reads metrics that no
   recorder produces, so it answers 404 for every container in a running
   deployment. The screen reports that honestly: *"No warranty metrics are
@@ -581,9 +592,9 @@ now describe the actual binding, and the test that asserted the false claim
 with a tautology (`runtime is default_runtime or runtime is not
 default_runtime`) now asserts the truth.
 
-### 4.15 Nine of the Nineteen HMI Views Read the Backend
+### 4.15 Ten of the Twenty HMI Views Read the Backend
 
-The HMI carries **19** SCADA views. Nine of them read the platform:
+The HMI carries **20** SCADA views. Ten of them read the platform:
 
 | View | Reads |
 | :--- | :--- |
@@ -596,6 +607,7 @@ The HMI carries **19** SCADA views. Nine of them read the platform:
 | System Settings | `GET /api/v1/info` |
 | Historian | `GET /api/v1/historian/telemetry`, `…/commands`, `…/alarms` |
 | Warranty Metrics | `GET /api/v1/historian/warranty/{container_id}` |
+| Plant Configuration | `GET /api/v1/topology` |
 
 The **other ten** — the equipment detail views for the BMS, the transformer,
 the switchgear, the auxiliary package, the equipment controller, the PPC, the
@@ -614,25 +626,35 @@ route that returns the measurements of one piece of equipment. Building one
 is an interface change and is approval-gated under `AGENTS.md` §7.5, so it
 has not been built.
 
-The removed `ConfigurationView` is part of the same story. It was unreachable
-from the navigation and displayed a fabricated `configs/dev.yaml` as *the
-active configuration*. It has been deleted rather than fixed, because a real
-Plant Configuration screen needs a read-only topology endpoint that does not
-exist yet.
+The removed `ConfigurationView` was part of the same story. It was
+unreachable from the navigation and displayed a fabricated `configs/dev.yaml`
+as *the active configuration*. It has been deleted, and a real Plant
+Configuration screen has replaced it: `GET /api/v1/topology` publishes the
+plant the platform is actually running — its identity, its ratings, the
+configuration file it was built from and its equipment inventory — and the
+screen reads that endpoint. A value the topology does not declare is
+published as absent rather than as a placeholder, so a vendor the topology
+does not name reads `NOT SPECIFIED` instead of a default that would look
+configured.
 
-### 4.16 The HMI Reads the Historian, and the Historian Is Empty
+### 4.16 The HMI Reads the Historian, and the Recorder Now Feeds It
 
 The Historian screen runs real queries against the real endpoints and
-reports exactly what they answer: rows, no rows, or a failure. What it
-cannot show is **history**, because nothing feeds the store — see §2.6. The
-screen therefore reads correctly and answers nothing, which is an honest
-statement about the platform rather than a defect in the screen.
+reports exactly what they answer: rows, no rows, or a failure. The store is
+now fed by the application-layer recorder — see §2.6 — so a run that has
+been recorded produces rows.
 
-The distinction matters for anyone reading a screenshot of the screen: *"The
-store holds no rows"* is what a correctly-wired screen shows against an
-unfed store, and it is indistinguishable on screen from *"the store holds no
-rows because the run has not been recorded"*. Only the audit report's F-15
-distinguishes them today.
+Two qualifications remain. First, the rows are the ones the **recorder**
+wrote: the recorder samples the plant's published states at a decimated
+interval, so the series is a faithful but decimated record of the run, not a
+capture of every internal value. Second, the warranty screen is the
+exception: the read path exists, but no recorder writes degradation or
+warranty metrics, so it still answers *"No warranty metrics are recorded for
+container 'X'."* until a warranty recorder is built (§3).
+
+A screenshot of the Historian screen therefore now distinguishes *"the store
+holds no rows"* (the run has not been recorded, or the database is
+unreachable) from *"the store holds rows"* (the run has been recorded).
 
 ---
 

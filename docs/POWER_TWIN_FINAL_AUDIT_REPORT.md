@@ -963,7 +963,7 @@ the documented "run as fast as the host allows" setting. The screen labels it
 
 ---
 
-### F-15 — HIGH — OPEN — The historian is never written to by the running platform
+### F-15 — HIGH — RESOLVED — The historian is never written to by the running platform
 
 `AGENTS.md` §1 requires a local web HMI **and a historian**. The historian
 subsystem is implemented: `backend/app/historian/service.py` provides a
@@ -992,19 +992,59 @@ was referenced by nothing and has been removed.
 *Action.* Connect the historian to the running simulation so that the store
 is fed, and make the screen's claim follow the store rather than precede it.
 
-**Status: OPEN.** The screen side of this finding is closed (see **F-16**):
-the HMI now issues the queries and reports exactly what the store holds,
-including "the store holds no rows". The platform side is not. Connecting the
-recorder is an architecture change — it adds a runtime dependency from the
-application layer to the database — and `AGENTS.md` §7.5 requires approval
-before a change of that kind is made. It has therefore been proposed rather
-than built.
+**Resolution.** The screen side of this finding was closed with F-16: the
+HMI issues the queries and reports exactly what the store holds, including
+"the store holds no rows". The platform side is now closed as well. The
+change was approved under `AGENTS.md` §7.5 as **"recorder in the app
+layer"**, and it was built on that footing.
 
-The wiring must not put the database inside the engine: `AGENTS.md` §3
-requires the simulation engine to stay independent of the database. The
-recorder belongs in the application layer, subscribing to what the engine
-publishes and persisting it, with the simulation timestamp carried on every
-row so that the recorded series stays faithful to the run.
+The write path is `backend/app/historian/recorder.py`. `HistorianRecorder`
+is a `SimulationTask` that lives in the **application layer** and registers
+itself on the scheduler at phase 6 with a decimation interval
+(`HISTORIAN_SAMPLE_INTERVAL_TICKS`, default 10 ticks). It samples the plant's
+published states and writes only into the historian's in-memory queues. The
+**simulation engine holds no database dependency**: a test asserts by AST scan
+that the `backend/app/simulation` package imports neither `backend.app.historian`
+nor `sqlalchemy` nor `asyncpg`, which keeps `AGENTS.md` §3 intact.
+
+Every row carries the simulation timestamp, the run identifier, the quality
+flag and `source_type="SIMULATED"`, so the recorded series stays faithful to
+the run it belongs to. The recorder is **decimated but deterministic**: the
+same run with and without the recorder attached produces the same engine
+state, because the recorder observes and never participates in the physics.
+
+Commands reach the historian through the platform's **single write path**.
+The recorder does not wrap or re-implement `ControlCommandLog.log_entry`;
+the command log gained a `add_sink` / `remove_sink` mechanism, and the
+recorder subscribes to it. A command is therefore written to the hash-chained
+operator journal and to the historian by the same call, and a rejected
+command keeps its rejection reason in both.
+
+The failure mode is safe by construction. `record_telemetry`,
+`record_command` and `record_alarm` never block: they use
+`queue.put_nowait` and spill to the documented disk overflow file when the
+buffer is full. A database outage therefore cannot stall a tick. When the
+commit fails, `flush_buffer_to_db` rolls back and writes every row to the
+overflow file rather than dropping it, so no row is silently lost. The
+overflow log names the real cause: *"memory buffer full"* is an application
+capacity problem, *"database commit failed"* is an infrastructure problem,
+and the two are distinguishable in the log.
+
+The wiring is idempotent. Re-attaching the recorder — after a plant rebuild,
+say — detaches the previous one first, so two recorders never write to the
+same store and the scheduler never sees a duplicate task name. The recorder
+can be switched off with `HISTORIAN_ENABLED=false`, and the application
+still starts and serves.
+
+`tests/test_historian_recorder.py` (22 tests) and
+`tests/test_historian_wiring.py` (16 tests) cover the write path, including
+the determinism property, the command subscription, the disk overflow, the
+failed flush and the "one broken model does not cost the plant its sample"
+rule. The backend suite grew from 540 to 552 tests.
+
+The historian's mission coverage is therefore **IMPLEMENTED**. The store is
+fed by the running platform, the read path is live, and a query returns what
+the run recorded.
 
 ### F-16 — MEDIUM — RESOLVED — The HMI displayed values the platform never produced
 
@@ -1124,6 +1164,58 @@ endpoint, which is an external-interface change and therefore needs approval
 under `AGENTS.md` §7.5. The count of reachable views is unchanged at 19: the
 application had 19 all along, and the twentieth was never one of them.
 
+### F-18 follow-up — LOW — RESOLVED — The Plant Configuration screen has a real source
+
+The roadmap item left open above has been taken up, under the approval
+*"endpoint and screen"*.
+
+**The endpoint** is `backend/app/api/v1/topology.py`, mounted at
+`/api/v1/topology`. It is **read-only**: the OpenAPI schema publishes `get`
+on that path and nothing else, and a test asserts it. It reads the plant
+from the application-scoped runtime — the same source the Plant Overview
+reads — so a load-balanced request always sees the plant that owns the
+engine. It requires `Permission.READ_CONFIG`, so an unauthenticated read is
+refused with a 401.
+
+The response publishes the plant's identity, its ratings, the configuration
+file it was built from, and the inventory of its equipment. Two honesty rules
+govern it:
+
+- a value the topology does not declare is published as **absent**, not as a
+  placeholder. The equipment models fall back on a placeholder manufacturer
+  (`"Generic BESS"`) and on a placeholder plugin identifier, and a
+  placeholder on a configuration screen reads as a configured vendor. The
+  transformer of the reference plant therefore reports
+  `manufacturer: null`, because the topology names no vendor for it.
+- every illustrative parameter is labelled as illustrative, per
+  `AGENTS.md` §2.14.
+
+A platform with no plant attached answers with `plant_configured: false` and
+a message. It does not answer with the inventory of some other plant, and it
+does not answer with an error, because "no plant is configured" is a true
+statement about the platform rather than a failure.
+
+**The screen** is `frontend/src/views/PlantConfigurationView.tsx`, reachable
+from the sidebar as *Plant Configuration*. It renders what the endpoint
+reports and nothing else:
+
+- a plant that is attached is shown with its identity, its ratings and its
+  inventory, each item summarized by the rating its type carries;
+- a rating the topology does not declare reads `NOT SPECIFIED`, never `0` —
+  a "0.00 MW" rating reads as a measurement of a plant that cannot
+  discharge, which is a different statement;
+- a vendor the topology does not declare reads `NOT SPECIFIED`, never a
+  placeholder;
+- a platform with no plant says *No plant is attached* and shows no
+  substitute;
+- a platform that does not answer says *The platform did not answer* and
+  shows no plant at all — the screen that this one replaces is exactly what
+  it refuses to be.
+
+The reachable view count is now 20. `tests/test_topology_api.py` (12 tests)
+covers the endpoint; the view is covered by 15 component tests and 5 service
+tests. The frontend suite grew from 176 to 199 tests.
+
 ---
 
 ## 10. Coverage of the Platform Mission (`AGENTS.md` §1)
@@ -1146,8 +1238,8 @@ application had 19 all along, and the twentieth was never one of them.
 | Grid services | **IMPLEMENTED** | Seven plugins in `plugins/grid_services/` — FCR, aFRR, MFRR, energy arbitrage, peak shaving, renewable smoothing and volt-var support — behind the `grid_service` interface, with a status model and SoC-based unavailability |
 | Energy-market scenarios | **PARTIAL** | Energy-arbitrage scheduling, the EMS scheduled-profile mode and the scenario framework with fault injection and acceptance criteria are implemented. **Market clearing, price formation and dispatch optimisation are NOT IMPLEMENTED** |
 | Vendor-specific equipment plugins | **IMPLEMENTED** | CATL, Tesla, SMA, Sungrow, behind a registry |
-| Local web HMI | **PARTIAL** | 19-view React + TypeScript SCADA, live telemetry, "SIMULATED DATA ONLY" labelling. **Nine of the 19 views read the backend; the other ten show the reference plant's illustrative properties and are labelled as such.** See F-16 |
-| Historian | **PARTIAL** | The ring buffer with zero-silent-loss disk overflow, the database flush and the read-only query API are implemented and tested. **The running platform never writes to the store, so the query endpoints answer with no rows. See F-15** |
+| Local web HMI | **PARTIAL** | 20-view React + TypeScript SCADA, live telemetry, "SIMULATED DATA ONLY" labelling. **Ten of the 20 views read the backend; the other ten show the reference plant's illustrative properties and are labelled as such.** See F-16 |
+| Historian | **IMPLEMENTED** | The ring buffer with zero-silent-loss disk overflow, the database flush and the read-only query API are implemented and tested. **The running platform now writes to the store: an application-layer recorder samples the running plant, subscribes to the command log, and flushes on the event loop, with the engine holding no database dependency.** See F-15 |
 | Controller-in-the-loop (CIL) | **IMPLEMENTED** | Real isolated Modbus TCP gateway on loopback, register map, watchdog, setpoint routing |
 | Hardware-in-the-loop (HIL) | **NOT IMPLEMENTED** | A later, separately approved phase, per `AGENTS.md` §2.2 |
 | Digital-twin calibration | **NOT IMPLEMENTED** | See F-06 |
@@ -1189,16 +1281,18 @@ files, was green across every job.
 
 A later pass over the HMI found one functional gap that the earlier passes had
 not looked for, and it is recorded here because it changes the mission
-coverage table in §10. **The historian is never written to by the running
-platform** (F-15). The subsystem is implemented, unit-tested and exposed
+coverage table in §10. **The historian was never written to by the running
+platform** (F-15). The subsystem was implemented, unit-tested and exposed
 through read-only, permission-guarded endpoints — but nothing in
-`backend/app/` constructs the `HistorianService` or calls its recorder, so in
-a running deployment the store holds no rows and the three query endpoints
-answer against a store that was never fed. This is a **HIGH** finding and it
-is **OPEN**. It is not a safety defect: the failure is a missing write path,
-not a weakened guard, and nothing that reads the store can influence the
-simulation. But it means the platform does not yet deliver the historian that
-`AGENTS.md` §1 asks for, and the mission coverage table says so.
+`backend/app/` constructed the `HistorianService` or called its recorder, so
+in a running deployment the store held no rows and the three query endpoints
+answered against a store that was never fed. This was a **HIGH** finding. It
+was not a safety defect: the failure was a missing write path, not a
+weakened guard, and nothing that reads the store could influence the
+simulation. It is now **RESOLVED**: an application-layer recorder samples the
+running plant, subscribes to the platform's single command write path, and
+flushes to the database on the event loop, while the simulation engine keeps
+no database dependency at all.
 
 The same pass removed the reasons the gap was hard to see. Three screens
 presented values the platform never produced (F-16); they now read the
@@ -1206,7 +1300,8 @@ backend and distinguish "the store holds rows", "the store holds none" and
 "the query failed". The historian endpoints failed as an untranslated 500 and
 had no API-level tests at all (F-17); they now fail as an explicit 503 and
 are covered by eight tests. An unreachable view fabricated the active
-configuration file (F-18); it has been removed.
+configuration file (F-18); it was removed, and the Plant Configuration
+screen that replaced it now reads a real, read-only topology endpoint.
 
 ### 11.2 Recommended actions, in order
 
@@ -1227,23 +1322,26 @@ configuration file (F-18); it has been removed.
    would be sent, and `GITHUB_TOKEN=<token> python
    scripts/apply_branch_protection.py` applies it and then reads it back,
    exiting non-zero if what is in force is looser than what was documented.
-4. **Wire the historian into the running simulation** (F-15). This is the one
-   **OPEN** finding in this report, and it needs a decision before it can be
-   built, because it changes the architecture (`AGENTS.md` §7.5). The
-   proposal: keep the simulation engine independent of the database
-   (`AGENTS.md` §3), and put the recorder in the application layer, where it
-   subscribes to what the engine publishes and persists it with the
-   simulation timestamp on every row. Until that decision is taken, the
-   historian's mission coverage stays **PARTIAL** and no status document may
-   describe it as working.
+4. ~~**Wire the historian into the running simulation** (F-15).~~ **Done.**
+   The decision was taken under the approval *"recorder in the app layer"*,
+   and the proposal was built as proposed: the simulation engine keeps its
+   independence from the database (`AGENTS.md` §3, asserted by an AST scan of
+   the `backend/app/simulation` package), and the recorder lives in the
+   application layer, subscribing to what the engine publishes and persisting
+   it with the simulation timestamp on every row. The write path never blocks
+   a tick, and a failed commit rolls back to the disk overflow file rather
+   than losing a row. The historian's mission coverage is **IMPLEMENTED**.
 5. **Schedule the roadmap items** (F-06) explicitly, and keep them marked
    `NOT_IMPLEMENTED` until they exist. The warranty **read** path and its
    screen now exist, but no recorder writes the metrics, so the digital-twin
    calibration and warranty analysis of `AGENTS.md` §1 remains unimplemented.
-6. **Decide on the Plant Configuration screen** (F-18 follow-up). The view
-   that fabricated the active configuration file has been removed. A real one
-   needs a read-only topology endpoint, which is an interface change and is
-   likewise approval-gated.
+6. ~~**Decide on the Plant Configuration screen** (F-18 follow-up).~~ **Done.**
+   The decision was taken under the approval *"endpoint and screen"*. The
+   read-only topology endpoint `/api/v1/topology` publishes the plant the
+   platform is actually running, with the illustrative parameters labelled
+   and the undeclared ones reported as absent; the Plant Configuration screen
+   reads it and shows no substitute plant when the platform is silent or has
+   none attached. The reachable view count is now 20.
 7. **Close the low-severity items** (F-08, F-09, F-10, F-11) as part of the
    next maintenance pass. ~~F-10 is closed: the illustrative parameters carry
    a schema marker that defaults to labelling, the plant factory carries it
