@@ -57,6 +57,7 @@ __all__ = [
     "DEFAULT_REPOSITORY",
     "REQUIRED_APPROVALS",
     "REQUIRED_STATUS_CHECKS",
+    "SIGNATURE_VERIFICATION_SETTING",
     "ProtectionReport",
     "apply_protection",
     "build_protection_payload",
@@ -70,6 +71,12 @@ __all__ = [
 DEFAULT_REPOSITORY = "faroub/PowerTwin"
 DEFAULT_BRANCH = "main"
 DEFAULT_API_URL = "https://api.github.com"
+
+#: The repository setting GitHub requires before it will accept a request
+#: against the required-signatures resource. GitHub answers such a request
+#: with HTTP 422 while the setting is off, which is a configuration state
+#: rather than a defect in this script.
+SIGNATURE_VERIFICATION_SETTING = "Commit signature verification"
 
 #: The status checks that must pass before a commit can land on ``main``.
 #: These are the names the workflows produce. ``docs/CI_CD_GUIDE.md`` section 3
@@ -108,6 +115,13 @@ class ProtectionReport:
         force_pushes_allowed: Whether a force push is still permitted.
         deletions_allowed: Whether the branch can still be deleted.
         signed_commits_required: Whether a commit must carry a signature.
+        warnings: The parts of the rule set that could not be applied or
+            confirmed. A warning never means "nothing happened": the rule is
+            applied in two requests, and the first one can succeed while the
+            second one fails.
+        signatures_request_failed: Whether a request against the
+            required-signatures resource failed. The rule's state is then
+            unknown rather than known to be absent.
     """
 
     required_checks: tuple[str, ...]
@@ -118,6 +132,8 @@ class ProtectionReport:
     force_pushes_allowed: bool
     deletions_allowed: bool
     signed_commits_required: bool
+    warnings: tuple[str, ...] = ()
+    signatures_request_failed: bool = False
 
     @property
     def ok(self) -> bool:
@@ -126,6 +142,11 @@ class ProtectionReport:
         The rule is only satisfied when nothing is missing and nothing is
         looser than specified: a rule that requires the checks but lets an
         administrator skip them is not the rule that was documented.
+
+        A rule that could not be *confirmed* is not satisfied either. An
+        unverifiable signed-commit requirement is reported as not satisfied,
+        because the administrator cannot tell from the report that the
+        requirement holds.
         """
         return (
             not self.missing_checks
@@ -139,7 +160,7 @@ class ProtectionReport:
 
     def describe(self) -> list[str]:
         """Return one line per property, for the operator to read."""
-        return [
+        lines = [
             f"Required status checks: {len(self.required_checks)}",
             f"Missing status checks: {', '.join(self.missing_checks) or 'none'}",
             f"Approving reviews required: {self.approving_reviews_required}",
@@ -149,6 +170,8 @@ class ProtectionReport:
             f"Branch deletion allowed: {self.deletions_allowed}",
             f"Signed commits required: {self.signed_commits_required}",
         ]
+        lines.extend(f"WARNING: {warning}" for warning in self.warnings)
+        return lines
 
 
 def protection_url(owner: str, repo: str, branch: str, api_url: str = DEFAULT_API_URL) -> str:
@@ -331,12 +354,24 @@ def _read_signatures(
     )
 
 
-def build_report(applied: dict[str, Any], signatures: dict[str, Any]) -> ProtectionReport:
+def build_report(
+    applied: dict[str, Any],
+    signatures: dict[str, Any],
+    *,
+    warnings: Sequence[str] = (),
+    signatures_request_failed: bool = False,
+) -> ProtectionReport:
     """Compare what GitHub reports with what the documented rule set demands.
 
     Args:
         applied: The branch-protection resource as GitHub reports it.
         signatures: The required-signatures resource as GitHub reports it.
+            An empty mapping means the resource could not be read, and the
+            signed-commit requirement is then reported as not in force.
+        warnings: The parts of the rule set that could not be applied or
+            confirmed.
+        signatures_request_failed: Whether a request against the
+            required-signatures resource failed.
 
     Returns:
         The report.
@@ -360,6 +395,8 @@ def build_report(applied: dict[str, Any], signatures: dict[str, Any]) -> Protect
         force_pushes_allowed=bool(applied.get("allow_force_pushes")),
         deletions_allowed=bool(applied.get("allow_deletions")),
         signed_commits_required=bool((signatures.get("required_signatures") or {}).get("enabled")),
+        warnings=tuple(warnings),
+        signatures_request_failed=signatures_request_failed,
     )
 
 
@@ -377,6 +414,14 @@ def apply_protection(
     The rule is applied, then read back, so that the report describes what
     GitHub actually enforces rather than what was asked for.
 
+    The rule set is applied in two requests, and the two can succeed
+    independently. The main request carries the status checks, the review
+    requirement and the push restrictions; the second carries the
+    signed-commit requirement, which lives in its own resource. A failure of
+    the second request therefore does **not** mean that nothing was applied,
+    and the verification still runs: the administrator is told exactly which
+    part of the rule is in force and which is not.
+
     Args:
         owner: The repository owner.
         repo: The repository name.
@@ -389,8 +434,12 @@ def apply_protection(
         The report of what is in force.
 
     Raises:
-        BranchProtectionError: If a request fails.
+        BranchProtectionError: If the main request or the verification read
+            fails. A failure of the signed-commit request is reported as a
+            warning instead, because the main rule is already in force.
     """
+    # The main rule. If this request fails, nothing was applied, so there is
+    # nothing to report and the failure is raised.
     _request(
         "PUT",
         protection_url(owner, repo, branch, api_url),
@@ -398,17 +447,46 @@ def apply_protection(
         payload=build_protection_payload(),
         timeout=timeout,
     )
-    _request(
-        "POST",
-        required_signatures_url(owner, repo, branch, api_url),
-        token,
-        payload=build_signatures_payload(),
-        timeout=timeout,
-    )
+
+    warnings: list[str] = []
+    signatures_request_failed = False
+
+    # The signed-commit requirement. GitHub rejects this request with HTTP
+    # 422 while "Commit signature verification" is off in the repository
+    # settings. That is a repository configuration state rather than a
+    # defect in this script, and the main rule is already in force, so the
+    # failure is captured rather than raised.
+    try:
+        _request(
+            "POST",
+            required_signatures_url(owner, repo, branch, api_url),
+            token,
+            payload=build_signatures_payload(),
+            timeout=timeout,
+        )
+    except BranchProtectionError as err:
+        signatures_request_failed = True
+        warnings.append(
+            f"The signed-commit requirement could not be applied: {err} "
+            f"Enable '{SIGNATURE_VERIFICATION_SETTING}' in the repository settings "
+            f"and run this script again."
+        )
 
     applied = _read_protection(owner, repo, branch, token, api_url=api_url, timeout=timeout)
-    signatures = _read_signatures(owner, repo, branch, token, api_url=api_url, timeout=timeout)
-    return build_report(applied, signatures)
+
+    signatures: dict[str, Any] = {}
+    try:
+        signatures = _read_signatures(owner, repo, branch, token, api_url=api_url, timeout=timeout)
+    except BranchProtectionError as err:
+        signatures_request_failed = True
+        warnings.append(f"The signed-commit requirement could not be read back: {err}")
+
+    return build_report(
+        applied,
+        signatures,
+        warnings=tuple(warnings),
+        signatures_request_failed=signatures_request_failed,
+    )
 
 
 def _parse_repository(value: str) -> tuple[str, str]:
@@ -509,6 +587,15 @@ def main(argv: list[str] | None = None) -> int:
 
     for line in report.describe():
         print(line)
+
+    if report.signatures_request_failed:
+        print(
+            f"ERROR: the signed-commit requirement could not be confirmed. Enable "
+            f"'{SIGNATURE_VERIFICATION_SETTING}' in the repository settings and run "
+            f"this script again. The rest of the rule is reported above.",
+            file=sys.stderr,
+        )
+        return 1
 
     if not report.ok:
         print(

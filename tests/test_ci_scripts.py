@@ -1197,6 +1197,170 @@ def test_apply_protection_reports_a_server_that_enforces_less(
     assert len(report.missing_checks) == len(apply_branch_protection.REQUIRED_STATUS_CHECKS)
 
 
+# ----------------------------------------------------------------------------
+# F-04: a partial application must be reported, not raised
+# ----------------------------------------------------------------------------
+
+_FULL_PROTECTION: dict[str, object] = {
+    "required_status_checks": {"contexts": list(apply_branch_protection.REQUIRED_STATUS_CHECKS)},
+    "required_pull_request_reviews": {"required_approving_review_count": 1},
+    "enforce_admins": True,
+    "required_linear_history": True,
+    "allow_force_pushes": False,
+    "allow_deletions": False,
+}
+
+
+def _fake_request_factory(
+    *,
+    fail_post: bool = False,
+    fail_signatures_get: bool = False,
+    calls: list[tuple[str, str]] | None = None,
+) -> object:
+    """Build a stand-in for the script's ``_request`` function.
+
+    The rule set is applied in two requests, and the two can fail
+    independently. The fake lets each one be failed on its own, which is
+    the situation the script has to survive.
+    """
+
+    def fake_request(
+        method: str,
+        url: str,
+        token: str,
+        *,
+        payload: dict[str, object] | None = None,
+        timeout: float = 30.0,
+    ) -> dict[str, object]:
+        if calls is not None:
+            calls.append((method, url))
+        if method == "POST" and fail_post:
+            raise apply_branch_protection.BranchProtectionError(
+                "POST https://api.github.com/.../required_signatures failed with HTTP 422: "
+                "Commit signature verification is disabled."
+            )
+        if method == "GET" and url.endswith("/required_signatures"):
+            if fail_signatures_get:
+                raise apply_branch_protection.BranchProtectionError(
+                    "GET https://api.github.com/.../required_signatures failed with HTTP 404: "
+                    "Not Found"
+                )
+            return {"required_signatures": {"enabled": True}}
+        return dict(_FULL_PROTECTION)
+
+    return fake_request
+
+
+def test_a_failing_signed_commit_request_still_reports_what_landed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that a partial application is reported instead of raising.
+
+    The rule set is applied in two requests. When the signed-commit request
+    fails, the main rule is already in force, so the administrator has to be
+    told what landed rather than handed an exception that hides it.
+    """
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        apply_branch_protection,
+        "_request",
+        _fake_request_factory(fail_post=True, fail_signatures_get=True, calls=calls),
+    )
+
+    report = apply_branch_protection.apply_protection("faroub", "PowerTwin", "main", "token")
+
+    # The verification still ran: the administrator learns what is in force.
+    assert [method for method, _ in calls] == ["PUT", "POST", "GET", "GET"]
+
+    # The main rule landed.
+    assert report.required_checks == tuple(sorted(apply_branch_protection.REQUIRED_STATUS_CHECKS))
+    assert report.missing_checks == ()
+    assert report.approving_reviews_required == apply_branch_protection.REQUIRED_APPROVALS
+    assert report.admins_enforced is True
+    assert report.linear_history_required is True
+    assert report.force_pushes_allowed is False
+    assert report.deletions_allowed is False
+
+    # The signed-commit requirement did not, and that is stated.
+    assert report.signatures_request_failed is True
+    assert report.signed_commits_required is False
+    assert report.ok is False
+    assert len(report.warnings) == 2
+    assert any(
+        apply_branch_protection.SIGNATURE_VERIFICATION_SETTING in warning
+        for warning in report.warnings
+    )
+    assert all("WARNING:" in line for line in report.describe() if line.startswith("WARNING:"))
+    assert len([line for line in report.describe() if line.startswith("WARNING:")]) == 2
+
+
+def test_a_failing_signed_commit_read_back_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that an unverifiable signed-commit requirement is reported as unverified."""
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        apply_branch_protection,
+        "_request",
+        _fake_request_factory(fail_signatures_get=True, calls=calls),
+    )
+
+    report = apply_branch_protection.apply_protection("faroub", "PowerTwin", "main", "token")
+
+    assert report.signatures_request_failed is True
+    assert report.signed_commits_required is False
+    assert report.ok is False
+    assert len(report.warnings) == 1
+    assert "could not be read back" in report.warnings[0]
+
+
+def test_a_failing_main_request_still_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that a failed main request raises, because nothing was applied."""
+
+    def fake_request(
+        method: str,
+        url: str,
+        token: str,
+        *,
+        payload: dict[str, object] | None = None,
+        timeout: float = 30.0,
+    ) -> dict[str, object]:
+        if method == "PUT":
+            raise apply_branch_protection.BranchProtectionError(
+                "PUT https://api.github.com/.../protection failed with HTTP 403: "
+                "Resource not accessible by personal access token"
+            )
+        raise AssertionError(f"no request may follow a failed main request, saw {method}")
+
+    monkeypatch.setattr(apply_branch_protection, "_request", fake_request)
+
+    with pytest.raises(apply_branch_protection.BranchProtectionError):
+        apply_branch_protection.apply_protection("faroub", "PowerTwin", "main", "token")
+
+
+def test_the_cli_names_the_setting_when_the_signed_commit_request_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test that the operator is told which repository setting to enable."""
+    monkeypatch.setattr(
+        apply_branch_protection,
+        "_request",
+        _fake_request_factory(fail_post=True, fail_signatures_get=True),
+    )
+
+    exit_code = apply_branch_protection.main(
+        ["--repository", "faroub/PowerTwin", "--token", "token"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert apply_branch_protection.SIGNATURE_VERIFICATION_SETTING in captured.err
+    # The report still describes what landed.
+    assert "Required status checks: 8" in captured.out
+    assert "Missing status checks: none" in captured.out
+    assert "WARNING:" in captured.out
+
+
 def test_a_malformed_repository_is_rejected(capsys: pytest.CaptureFixture[str]) -> None:
     """Test that a repository that is not in the 'owner/name' form is refused."""
     exit_code = apply_branch_protection.main(["--repository", "PowerTwin", "--dry-run"])
