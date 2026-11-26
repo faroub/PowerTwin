@@ -6,6 +6,7 @@ import { Sidebar } from '../Sidebar';
 
 const EXPECTED_VIEWS = [
   'Plant Overview',
+  'Plant Configuration',
   'Single-Line Diagram',
   'Battery Systems',
   'BMS',
@@ -52,7 +53,7 @@ describe('Sidebar', () => {
     const { container } = render(<Sidebar currentView="overview" onSelectView={onSelectView} />);
     const sidebar = container.querySelector('.sidebar') as HTMLElement;
 
-    await user.click(sidebar.querySelector('.nav-item:nth-child(3)') as HTMLElement);
+    await user.click(sidebar.querySelector('.nav-item:nth-child(4)') as HTMLElement);
 
     expect(onSelectView).toHaveBeenCalledTimes(1);
     expect(onSelectView).toHaveBeenCalledWith('battery');

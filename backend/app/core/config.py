@@ -200,6 +200,32 @@ class Settings(BaseSettings):
         description="Path to the plant topology YAML loaded at application start-up",
     )
 
+    # Historian Recording
+    #
+    # The historian is the platform's time-series store. AGENTS.md §1 asks for
+    # a historian, so the recorder is on by default; it is a switch because a
+    # deployment that must not write anything to a database can turn it off.
+    # Turning it off does not weaken any guardrail: the recorder only ever
+    # reads the plant and writes history, and it never influences the
+    # simulation.
+    HISTORIAN_ENABLED: bool = Field(
+        default=True,
+        description="Record the running plant's telemetry, alarms and commands into the historian",
+    )
+    HISTORIAN_SAMPLE_INTERVAL_TICKS: int = Field(
+        default=10,
+        ge=1,
+        description=(
+            "Record one telemetry sample every N simulation ticks. At the default tick rate "
+            "of 100 Hz this samples at 10 Hz"
+        ),
+    )
+    HISTORIAN_FLUSH_INTERVAL_S: float = Field(
+        default=5.0,
+        gt=0.0,
+        description="Seconds between flushes of the historian's in-memory buffer to the database",
+    )
+
     # Logging
     LOG_LEVEL: str = "INFO"
     JSON_LOGS: bool = False

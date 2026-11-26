@@ -41,6 +41,14 @@ MAX_BUFFER_SIZE: int = 10_000
 # Maximum size of a single overflow file before it is rotated to an archive.
 OVERFLOW_MAX_BYTES: int = 64 * 1024 * 1024
 
+#: The reason a record was sent to the overflow file. The in-memory buffer
+#: was full — an application capacity problem.
+OVERFLOW_REASON_BUFFER_FULL: str = "memory buffer full"
+
+#: The reason a record was sent to the overflow file. The database commit
+#: failed — an infrastructure problem, not a capacity one.
+OVERFLOW_REASON_COMMIT_FAILED: str = "database commit failed"
+
 # Overflow file stem -> (ORM model, attribute name)
 OVERFLOW_STREAMS: dict[str, type[Any]] = {
     "telemetry_overflow": TelemetryDataModel,
@@ -157,10 +165,25 @@ class HistorianService:
             self._write_overflow_to_disk("event_overflow.json", payload)
             return False
 
-    def _write_overflow_to_disk(self, filename: str, payload: dict[str, Any]) -> None:
-        """Write item to append-only disk overflow file when memory buffer is 100% full."""
+    def _write_overflow_to_disk(
+        self,
+        filename: str,
+        payload: dict[str, Any],
+        reason: str = OVERFLOW_REASON_BUFFER_FULL,
+    ) -> None:
+        """Write item to the append-only disk overflow file.
+
+        Two different conditions send data here, and an operator has to be
+        able to tell them apart: the in-memory buffer is full (an application
+        capacity problem) or the database commit failed (an infrastructure
+        problem). The reason is carried into the log line for that reason.
+        """
         filepath = os.path.join(OVERFLOW_DIR, filename)
-        logger.warning("Historian memory buffer full. Writing emergency overflow to %s", filepath)
+        logger.warning(
+            "Historian %s. Writing emergency overflow to %s",
+            reason,
+            filepath,
+        )
         line = json.dumps(payload) + "\n"
         with self._lock:
             self._rotate_if_needed(filepath)
@@ -380,11 +403,17 @@ class HistorianService:
             await session.rollback()
 
             for item in raw_telemetry:
-                self._write_overflow_to_disk("telemetry_overflow.json", item)
+                self._write_overflow_to_disk(
+                    "telemetry_overflow.json", item, OVERFLOW_REASON_COMMIT_FAILED
+                )
             for item in raw_commands:
-                self._write_overflow_to_disk("command_overflow.json", item)
+                self._write_overflow_to_disk(
+                    "command_overflow.json", item, OVERFLOW_REASON_COMMIT_FAILED
+                )
             for item in raw_events:
-                self._write_overflow_to_disk("event_overflow.json", item)
+                self._write_overflow_to_disk(
+                    "event_overflow.json", item, OVERFLOW_REASON_COMMIT_FAILED
+                )
 
             return (0, 0, 0)
 

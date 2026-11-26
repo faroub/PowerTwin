@@ -50,6 +50,7 @@ def init_simulation(app: Any = None) -> dict[str, Any]:
         plant = PlantTopologyFactory().build_plant(
             topology_config,
             sim_config=settings.create_simulation_configuration(),
+            source_path=topology_path,
         )
         if app is not None:
             runtime.bind_to_app(app)

@@ -3,6 +3,7 @@ import { Layout } from './components/Layout';
 import { ViewId } from './components/Sidebar';
 import { LoginView } from './components/LoginView';
 import { PlantOverviewView } from './views/PlantOverviewView';
+import { PlantConfigurationView } from './views/PlantConfigurationView';
 import { SingleLineDiagramView } from './views/SingleLineDiagramView';
 import { BatterySystemsView } from './views/BatterySystemsView';
 import { BMSView } from './views/BMSView';
@@ -42,6 +43,8 @@ export const App: React.FC = () => {
     switch (currentView) {
       case 'overview':
         return <PlantOverviewView />;
+      case 'plant_config':
+        return <PlantConfigurationView />;
       case 'sld':
         return <SingleLineDiagramView />;
       case 'battery':

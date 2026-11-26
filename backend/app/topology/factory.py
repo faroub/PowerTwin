@@ -46,6 +46,7 @@ class BuiltPlantInstance(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     topology_config: PlantTopologyConfig
+    topology_source_path: str | None = None
     plugin_registry: PluginRegistry
     battery_systems: list[GenericBatterySystemModel]
     bms_units: list[GenericBMSModel]
@@ -96,8 +97,14 @@ class PlantTopologyFactory:
         self,
         config: PlantTopologyConfig | dict[str, Any],
         sim_config: SimulationConfiguration | None = None,
+        source_path: str | None = None,
     ) -> BuiltPlantInstance:
-        """Build full plant instance establishing one authoritative equipment instance per asset."""
+        """Build full plant instance establishing one authoritative equipment instance per asset.
+
+        ``source_path`` records the configuration file the plant was built
+        from, so a screen can name the plant's actual configuration rather
+        than a template.
+        """
         if isinstance(config, dict):
             parsed_config = PlantTopologyConfig(**config)
         else:
@@ -340,6 +347,7 @@ class PlantTopologyFactory:
 
         return BuiltPlantInstance(
             topology_config=parsed_config,
+            topology_source_path=source_path,
             plugin_registry=self.plugin_registry,
             battery_systems=battery_systems,
             bms_units=bms_units,

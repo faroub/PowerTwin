@@ -6,6 +6,7 @@ import {
   fetchHistorianCommands,
   fetchHistorianTelemetry,
   fetchPlantOverview,
+  fetchPlantTopology,
   fetchSystemHealth,
   fetchUserDetails,
   fetchWarrantyMetrics,
@@ -18,6 +19,7 @@ import type { UserSession } from '../auth';
 import {
   CONNECTED_TELEMETRY,
   HEALTHY_SYSTEM_INFO,
+  REFERENCE_PLANT_TOPOLOGY,
   TOKEN_RESPONSE,
   USER_DETAILS,
 } from '../../test/fixtures';
@@ -454,5 +456,89 @@ describe('Historian Queries', () => {
 
     expect(result.found).toBe(false);
     expect(result.error).toBe('the store is unavailable');
+  });
+});
+
+describe('Plant Topology Query', () => {
+  it('returns the topology of the running plant', async () => {
+    installFetchMock({
+      '/api/v1/topology': () => jsonResponse(REFERENCE_PLANT_TOPOLOGY),
+    });
+
+    const result = await fetchPlantTopology();
+
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe(200);
+    expect(result.topology?.plant_id).toBe('REF_PLANT_10MW_20MWH');
+    expect(result.topology?.equipment).toHaveLength(4);
+    expect(result.error).toBeNull();
+  });
+
+  it('reports a platform with no plant as a true statement rather than a failure', async () => {
+    installFetchMock({
+      '/api/v1/topology': () =>
+        jsonResponse({
+          plant_configured: false,
+          plant_id: null,
+          plant_name: null,
+          illustrative: null,
+          rated_power_w: null,
+          rated_energy_wh: null,
+          source_path: null,
+          equipment: [],
+          counts: {},
+          message: 'No plant is attached to the running platform.',
+          safety: HEALTHY_SYSTEM_INFO.safety,
+        }),
+    });
+
+    const result = await fetchPlantTopology();
+
+    // A platform with no plant is not an error the operator has to act on.
+    expect(result.ok).toBe(true);
+    expect(result.topology?.plant_configured).toBe(false);
+    expect(result.topology?.equipment).toEqual([]);
+    expect(result.error).toBeNull();
+  });
+
+  it('reads the topology with a GET and nothing else', async () => {
+    const mock = installFetchMock({
+      '/api/v1/topology': () => jsonResponse(REFERENCE_PLANT_TOPOLOGY),
+    });
+
+    await fetchPlantTopology();
+
+    const calls = mock.callsTo('/api/v1/topology');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe('GET');
+    expect(calls[0].init?.body).toBeUndefined();
+  });
+
+  it('reports a refused read with the reason the platform gave', async () => {
+    installFetchMock({
+      '/api/v1/topology': () => jsonResponse({ detail: 'Permission denied.' }, 403),
+    });
+
+    const result = await fetchPlantTopology();
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(403);
+    expect(result.topology).toBeNull();
+    expect(result.error).toBe('Permission denied.');
+  });
+
+  it('reports a network failure as a failed read', async () => {
+    installFetchMock({
+      '/api/v1/topology': () => {
+        throw new Error('the connection was refused');
+      },
+    });
+
+    const result = await fetchPlantTopology();
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(0);
+    expect(result.topology).toBeNull();
+    expect(result.error).toBe('Network error connecting to the backend API.');
   });
 });
