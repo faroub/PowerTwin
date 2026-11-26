@@ -180,7 +180,7 @@ no physical system is reachable.
 | React and TypeScript HMI | **COMPLIANT** | `frontend/` (D) |
 | PostgreSQL/TimescaleDB for persistent data | **COMPLIANT** | Alembic migration `002_user_accounts`, `docker-compose.yml` service (D) |
 | Docker Compose for initial deployment | **COMPLIANT** | `docker-compose.yml` with a loopback-published API (D) |
-| pytest backend tests, Playwright frontend end-to-end tests | **COMPLIANT** | Both are used. The frontend has a Vitest component suite (152 tests) and a Playwright end-to-end suite (7 specs) that drives the built HMI against a hermetic mock platform. Recorded as findings **F-01** and **F-05**, both now resolved (D) |
+| pytest backend tests, Playwright frontend end-to-end tests | **COMPLIANT** | Both are used. The frontend has a Vitest component suite (155 tests) and a Playwright end-to-end suite (8 specs) that drives the built HMI against a hermetic mock platform. Recorded as findings **F-01** and **F-05**, both now resolved (D) |
 | Pinned dependencies, reproducible builds | **COMPLIANT** | The frontend lock file is pinned and `npm ci` is used. The **Python** runtime dependencies are pinned in `backend/requirements.lock` and installed with `--require-hashes`, so a build either reproduces the recorded artefact exactly or fails, and the container build asserts in strict mode that the image carries exactly the locked packages and nothing else. Finding **F-02** is resolved (D) |
 | Structured logging | **COMPLIANT** | `logging.getLogger(__name__)` throughout, including the safety invariants (C) |
 | Exceptions handled explicitly, never swallowed | **COMPLIANT** | The CI helper scripts convert every failure into an explicit error and a non-zero exit status (A) |
@@ -238,7 +238,7 @@ gate that cannot be met is not a gate.
 | The SBOM was not valid SPDX 2.3 and had no unique identifiers | The artefact was not a usable SBOM | A valid SPDX-2.3 document with unique `SPDXID`s, concluded and declared licenses, a unique document namespace and a `SOURCE_DATE_EPOCH`-pinned timestamp |
 | The SBOM and the dependency inventories were not shipped with the release | The release had no dependency evidence | The SBOM, the Python inventory and the full transitive npm inventory are in the archive and covered by `SHA256SUMS` |
 | `release_version` and `random_seed` were decorative inputs | An operator could trigger a release with an arbitrary string | Both are consumed: the version is validated before anything is built, and the seed drives the nightly endurance campaign |
-| The frontend declared a 75 % coverage threshold against a measured 4.15 %, and the coverage provider was not installed | The gate could not run at all | The provider is installed, `coverage.all` counts untested files, and the enforced floor is **75 %** — a threshold the suite now actually meets at 98.29 % |
+| The frontend declared a 75 % coverage threshold against a measured 4.15 %, and the coverage provider was not installed | The gate could not run at all | The provider is installed, `coverage.all` counts untested files, and the enforced floor is **75 %** — a threshold the suite now actually meets at 97.45 % |
 | `npm audit --audit-level=high` was permanently red (1 high, 3 critical) | The security job never passed | The toolchain was upgraded to vite 7 / vitest 4, which clears the esbuild → vite → vitest → tinypool advisory chain; the audit reports **0 vulnerabilities** |
 | The lint configuration was resolved from **outside** the repository | The lint result depended on the machine: a developer's run and the CI runner's run could legitimately disagree | A root `ruff.toml` pins the rule set inside the repository |
 | The pytest and the coverage configuration lived in `backend/pyproject.toml`, where neither tool ever read it | Both tools ran with their built-in defaults: `asyncio_mode = "auto"` was never applied and the coverage `source` was never applied, so the declared configuration was inert | `pytest.ini` and `.coveragerc` at the repository root, which is where the tools are actually invoked |
@@ -319,10 +319,10 @@ functions, `npm run build` produced the production bundle, and
 
 **They have since been re-executed against the frontend component suite and
 the Playwright project**: `npm run lint` clean over `src/`, `e2e/` and
-`playwright.config.ts`; `npm test` **152 passed in 11 files**;
-`npm run test:coverage` satisfied the enforced floors at **98.29 % lines,
-98.85 % functions, 98.30 % statements and 85.92 % branches**;
-`npm run test:e2e` **6 passed** against the built artefact on the loopback
+`playwright.config.ts`; `npm test` **155 passed in 11 files**;
+`npm run test:coverage` satisfied the enforced floors at **97.45 % lines,
+98.87 % functions, 97.46 % statements and 85.08 % branches**;
+`npm run test:e2e` **8 passed** against the built artefact on the loopback
 interface with a hermetic mock platform; `npm run build` produced the
 production bundle.
 
@@ -397,11 +397,11 @@ versions.
 Findings are ordered by severity. Each states the evidence, the impact and the
 recommended action.
 
-### F-01 — HIGH — RESOLVED — The frontend test suite covers 98.29 % of the HMI
+### F-01 — HIGH — RESOLVED — The frontend test suite covers 97.45 % of the HMI
 
 The HMI contains 19 SCADA view components and the React hooks. The frontend
-suite is now **152 tests in 11 files**, and the measured coverage is **98.29 %
-of lines, 98.85 % of functions, 98.30 % of statements and 85.92 % of
+suite is now **155 tests in 11 files**, and the measured coverage is **97.45 %
+of lines, 98.87 % of functions, 97.46 % of statements and 85.08 % of
 branches**. The entry point, the shared components, the login flow, the
 telemetry hook, the API client, the permission table and every SCADA view are
 covered.
@@ -422,7 +422,7 @@ label that `AGENTS.md` rule 14 requires, which the shared
 
 *Residual limitation.* The suite exercises the HMI against a mocked backend,
 so it proves the HMI's own behaviour and not the agreement with the live
-FastAPI backend. Branch coverage at 85.92 % is the weakest metric.
+FastAPI backend. Branch coverage at 85.08 % is the weakest metric.
 
 ### F-02 — HIGH — RESOLVED — The Python runtime dependencies are pinned and hash-verified
 
@@ -902,6 +902,65 @@ project metadata, the safety report and the engine state, and no control
 surface and no credential. The telemetry and control endpoints remain behind
 the bearer-token guard.
 
+### F-14 — MEDIUM — RESOLVED — The speed factor had no upper bound, and the screen could not set it
+
+Two defects sat behind the same operator-facing gap.
+
+**The bound was missing.** `docs/04_SIMULATION_ENGINE_SPECIFICATION.md`
+documents the speed factor as running from $0.1\times$ to $100\times$, with
+`0.0` reserved for maximum headless execution speed. The implementation
+enforced **neither** end: `SimulationConfiguration` accepted any float, and
+so did `SimulationRunner.set_speed_factor` and
+`SimulationRunManager.set_speed_factor`. A factor of `1e9` was accepted at
+every boundary. That is a command the platform cannot execute meaningfully —
+the pacing target becomes shorter than the time it takes to execute a tick,
+so the simulation degenerates into an unbounded CPU load while the operator
+believes the clock is being paced. `AGENTS.md` §2.8 and §2.9 require that
+out-of-range commands are refused and that safe command limits are applied at
+every relevant boundary.
+
+**The screen could not reach it.** `SET_SPEED` was implemented in the control
+endpoint and had no representation in the HMI. The Simulation Control card
+that purported to report the factor showed a hard-coded `1.0 x` that was not
+read from the engine and could not be changed from the screen.
+
+*Action.* Put the bound in one place and apply it at every boundary; wire
+the factor to the screen, and report the factor in force rather than the one
+the screen was built with.
+
+**Resolution.** The bounds live in `backend/app/simulation/config.py` as
+`MIN_SPEED_FACTOR` (0.0) and `MAX_SPEED_FACTOR` (100.0), and the single
+`validate_speed_factor()` function is the only place that decides whether a
+factor is acceptable. It is applied at all four boundaries that accept one:
+the configuration model, the engine, the runner and the control endpoint. The
+control endpoint refuses an out-of-range factor with HTTP 400 and records the
+refusal in the operator-action journal as `REJECTED` / `INVALID_SPEED_FACTOR`;
+it does not correct the factor to a different one, because a silent
+substitution would leave the operator believing the clock is paced the way
+they asked.
+
+The engine status now carries the factor **in force** — the one the clock is
+actually paced with — so the screen cannot display a value that is not in
+effect. The HMI reads it, shows it, and sets it through a **Wall-Clock
+Pacing** card: the screen refuses an out-of-range factor without sending it
+and names the requested factor in the confirmation modal.
+
+Three tests carry the change. `test_a_speed_factor_outside_the_permitted_range_is_refused`
+and `test_a_speed_factor_inside_the_permitted_range_is_accepted` pin the
+endpoint's behaviour and assert that a refused factor leaves the factor in
+force untouched;
+`test_the_engine_and_the_runner_refuse_a_factor_the_api_refuses` asserts that
+the engine, the runner and the configuration model refuse exactly what the
+endpoint refuses, so a factor cannot walk around the bound. On the frontend,
+`refuses a speed factor outside the permitted range without sending it` and
+`dispatches a speed factor the operator asks for` cover the screen, and
+`Operator path › sets the wall-clock speed factor from the screen` covers the
+built artefact.
+
+`0.0` remains a valid request and is not treated as a missing value: it is
+the documented "run as fast as the host allows" setting. The screen labels it
+`MAX (unpaced)` so that it cannot be mistaken for a stopped engine.
+
 ---
 
 ## 10. Coverage of the Platform Mission (`AGENTS.md` §1)
@@ -975,7 +1034,7 @@ files, was green across every job.
    declares exactly the index set the migrations create.
 2. ~~**Build the frontend test suite** (F-01) and the Playwright end-to-end
    path** (F-05), then raise the enforced floor.~~ **Done.** The component
-   suite measures 152 tests and 98.29 % line coverage with an enforced 75 %
+   suite measures 155 tests and 97.45 % line coverage with an enforced 75 %
    floor, the Playwright project drives the built HMI against a hermetic mock
    platform, and both run as enforced pipeline gates.
 3. **Apply the branch protection** (F-04). An administrator action, using the
@@ -1002,7 +1061,10 @@ files, was green across every job.
    environment no longer silences the application's loggers.~~ ~~F-13 is
    closed: the system info endpoint reads the engine status from the
    application-scoped runtime, the same source the Plant Overview reads, and
-   the divergent second implementation of that status is removed.~~
+   the divergent second implementation of that status is removed.~~ ~~F-14 is
+   closed: the speed factor has one documented range that every boundary
+   that accepts one enforces, and the screen reads the factor in force and
+   sets it through the `SET_SPEED` control.~~
 
 ---
 

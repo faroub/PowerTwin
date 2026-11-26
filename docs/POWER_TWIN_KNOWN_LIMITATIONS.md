@@ -111,9 +111,9 @@ through them.
 
 ### 4.1 Frontend Test Coverage
 
-The frontend test suite contains **152 tests in 11 files**, and the measured
-coverage is **98.29 % of lines, 98.85 % of functions, 98.30 % of statements
-and 85.92 % of branches**. Every SCADA view, the shared components, the login
+The frontend test suite contains **155 tests in 11 files**, and the measured
+coverage is **97.45 % of lines, 98.87 % of functions, 97.46 % of statements
+and 85.08 % of branches**. Every SCADA view, the shared components, the login
 flow, the telemetry hook, the API client and the application entry point are
 covered.
 
@@ -126,7 +126,7 @@ view that loses its tests is caught by its own directory's floor even when
 the global figure barely moves. The binding of those floors was verified by
 raising them deliberately until the gate failed.
 
-What the suite does **not** prove: the branch coverage of 85.92 % is the
+What the suite does **not** prove: the branch coverage of 85.08 % is the
 weakest metric, and the 75 % branch floor is the binding global constraint.
 The suite exercises the HMI against a mocked backend, so it proves the HMI's
 own behaviour and not the agreement between the HMI and the real FastAPI
@@ -140,7 +140,10 @@ Playwright project now exists (`frontend/playwright.config.ts`, specs in
 simulation engine behind its confirmation, observe the result, log out — is
 exercised automatically in a real browser against the built artefact, and so
 is the full engine lifecycle: the operator starts the engine, stops it, and
-each action travels with the session token.
+each action travels with the session token. The **wall-clock speed factor**
+is exercised the same way: the screen shows the factor in force, the
+operator asks for a new one, the confirmation names the requested factor,
+and the `SET_SPEED` request travels with the session token.
 
 The suite is **hermetic by construction**: there is no backend behind the
 preview server. `frontend/e2e/mockPlatform.ts` answers every `/api/v1/**`
@@ -488,20 +491,35 @@ What the repair does **not** change:
   and recorded in the operator-action journal as `REJECTED` /
   `INVALID_STEP_COUNT`. It is not corrected to a different command.
 
-### 4.13 The HMI Reaches Every Engine Lifecycle Action, but Not the Speed Factor
+### 4.13 The HMI Reaches Every Engine Lifecycle Action and the Speed Factor
 
-The simulation view now offers **Start**, **Pause**, **Stop**, **Single Step**
-and **Reset**, each behind the same confirmation modal, so the whole engine
+The simulation view offers **Start**, **Pause**, **Stop**, **Single Step** and
+**Reset**, each behind the same confirmation modal, so the whole engine
 lifecycle is reachable from the operator's screen. The start and the stop
 were missing: the engine comes up in the `STOPPED` state, and without them
 the operator could only pause a run that something else had begun.
 
-What the screen still does **not** offer is the **wall-clock speed factor**.
-The card that reports it shows a fixed `1.0 x` and is not wired to the
-`SET_SPEED` control the API implements. The speed factor is therefore
-readable and settable through the API but not through the HMI. The view's
-subtitle no longer promises "Speed Multipliers" it does not deliver; it
-names the three things the screen does offer.
+The **wall-clock speed factor** is reachable from the screen as well. The
+card that reports it now shows the factor the engine actually has in force
+rather than a fixed `1.0 x`, and a **Wall-Clock Pacing** card sets it
+through the `SET_SPEED` control the API implements. The screen refuses a
+factor outside the permitted range without sending it, and names the
+requested factor in the confirmation modal, so the operator is told what is
+about to happen before it happens.
+
+Two limitations remain and are **not** removed by this:
+
+- **The factor is set in multiples of the tick rate, not in wall-clock
+  units.** A factor of `4.0` means the simulation clock advances four times
+  faster than real time; it does not mean "four ticks per second", and it
+  does not change the resolution of the clock. The tick rate stays at
+  100 Hz regardless of the factor.
+- **A factor of `0.0` means "run as fast as the host allows", not "stop".**
+  It is a valid request and a distinct one from the paused state; the card
+  labels it `MAX (unpaced)` so that it cannot be mistaken for a stopped
+  engine. On a desktop host an unpaced run consumes the whole core it runs
+  on, which is a property of the host and not a promise the platform makes
+  about throughput.
 
 ### 4.14 The Engine Status Is Read From the Application That Owns the Plant
 
@@ -529,9 +547,11 @@ Two things about the endpoint are worth knowing and are **not** changed:
   the safety report and the engine state; it exposes no control surface and
   no credential. The telemetry and control endpoints remain behind the
   bearer-token guard.
-- The **wall-clock speed factor** is still not part of the engine status.
-  The backend implements `SET_SPEED`, and §4.13 records that the screen is
-  not wired to it.
+- The engine status carries the **wall-clock speed factor in force**, so
+  that the screen can show the factor that is actually pacing the clock
+  rather than the one it was built with. The factor is a pacing parameter
+  of the simulation clock; it does not change the safety posture the
+  endpoint reports, and it is not a control surface.
 
 The runtime docstrings claimed that start-up binds the module fall-back to
 the application. It does not, and never did — an application owns the runtime
