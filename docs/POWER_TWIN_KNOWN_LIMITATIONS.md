@@ -225,6 +225,36 @@ autogenerate rather than of the implementation:
   branch is merged. Moving the gate into the pull-request pipeline would catch
   it earlier, at the cost of a database container on every pull request.
 
+**The gate has been executed, and its negative case has been verified.** The
+release job's TimescaleDB service container and the two Alembic commands had
+never run on a GitHub runner, because publishing a release requires pushing a
+`v*` tag. The same commands were therefore rehearsed locally against the
+**same digest-pinned image** the workflow uses
+(`timescale/timescaledb@sha256:5d7a2f9d…`), with the same environment
+variables and the same throwaway credentials:
+
+```text
+alembic upgrade head  ->  001_initial_schema, then 002_user_accounts
+alembic check         ->  "No new upgrade operations detected."   (exit 0)
+```
+
+The offline graph validator of the same job, `scripts/validate_migrations.py`,
+reports a single head (`002_user_accounts`), renders 101 SQL statements and
+exits zero.
+
+The gate was then probed with an **undeclared table** added to the migrated
+schema. `alembic check` detected it —
+`Detected removed table 'rehearsal_drift_probe'` — and **failed with exit
+code 255**, so a model changed without a migration does reach a failed
+release rather than a silent pass.
+
+What remains unverified is the **rest** of the release job: the artifact
+upload, the SBOM generation, the checksum manifest and the image builds in
+that workflow have not been executed on a GitHub runner either. The
+TimescaleDB container and the two Alembic commands are now the only part of
+that job that has been run, and they have been run against the image and the
+commands the workflow itself uses.
+
 ### 4.5 Branch Protection Is Documented, Not Applied
 
 The required status checks for `main` are listed in `docs/CI_CD_GUIDE.md` §3.
