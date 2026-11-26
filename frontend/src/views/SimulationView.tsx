@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 import { ConfirmationModal } from '../components/ConfirmationModal';
 import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
@@ -26,6 +26,11 @@ export const SimulationView: React.FC = () => {
   const [engineState, setEngineState] = useState<string>('UNKNOWN');
   const [speedFactor, setSpeedFactor] = useState<number | null>(null);
   const [requestedFactor, setRequestedFactor] = useState<string>('1');
+  // A ref, not state: the engine read that seeds the field is asynchronous,
+  // and a state value captured by the closure that started the read would be
+  // the value from before the request — stale by the time the answer
+  // arrives, and liable to overwrite what the operator has typed since.
+  const factorEditedRef = useRef<boolean>(false);
   const [factorError, setFactorError] = useState<string>('');
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
@@ -41,7 +46,15 @@ export const SimulationView: React.FC = () => {
     const health = await fetchSystemHealth();
     if (health.healthy && health.data?.engine) {
       setEngineState(health.data.engine.status || 'NOT_CONNECTED');
-      setSpeedFactor(health.data.engine.speed_factor ?? null);
+      const factor = health.data.engine.speed_factor ?? null;
+      setSpeedFactor(factor);
+      // The field starts on the factor in force, so that a request the
+      // operator did not edit asks for the pacing that is already running
+      // instead of silently resetting it. A field the operator has edited
+      // is theirs: the engine's answer never overwrites what they typed.
+      if (!factorEditedRef.current && factor !== null) {
+        setRequestedFactor(String(factor));
+      }
     } else {
       setEngineState('NOT_CONNECTED');
       setSpeedFactor(null);
@@ -249,6 +262,7 @@ export const SimulationView: React.FC = () => {
             value={requestedFactor}
             onChange={(event) => {
               setRequestedFactor(event.target.value);
+              factorEditedRef.current = true;
               setFactorError('');
             }}
             style={{
