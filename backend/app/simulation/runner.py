@@ -68,6 +68,10 @@ class SimulationRunner:
         self._stop_event: threading.Event = threading.Event()
         self._action_queue: deque[dict[str, Any]] = deque()
         self._action_lock = threading.Lock()
+        # The generation of the thread that currently owns the runner. Every
+        # start increments it; a thread that finds a newer generation has
+        # been superseded and must neither tick nor clear the runner state.
+        self._generation: int = 0
 
         self._error: Exception | None = None
         self._started_at_wall: float = 0.0
@@ -110,30 +114,41 @@ class SimulationRunner:
         return self._manager
 
     def start(self) -> None:
-        """Start or resume the continuous execution loop."""
-        if self._running and not self._paused:
-            logger.warning("Simulation runner is already running.")
-            return
+        """Start or resume the continuous execution loop.
 
+        Every start begins a new **generation**. The thread of the previous
+        generation is on its way out when the next start arrives, and it must
+        not be adopted: a thread that is about to exit would stop ticking as
+        soon as it noticed the new generation, and it would clear the state
+        of the generation that replaced it. The generation counter lets every
+        thread recognise that it has been superseded, and lets only the
+        current generation clear the runner state.
+        """
         with self._action_lock:
             if self._running and not self._paused:
+                logger.warning("Simulation runner is already running.")
                 return
+
             self._running = True
             self._paused = False
             self._stop_event.clear()
+
+            self._generation += 1
+            generation = self._generation
+            thread = threading.Thread(
+                target=self._execution_loop,
+                args=(generation,),
+                name="PowerTwin-simulation-run",
+                daemon=True,
+            )
+            self._thread = thread
 
         manager = self._resolve_manager()
         if manager is not None:
             manager.start()
         self._started_at_wall = time.perf_counter()
 
-        if self._thread is None or not self._thread.is_alive():
-            self._thread = threading.Thread(
-                target=self._execution_loop,
-                name="PowerTwin-simulation-run",
-                daemon=True,
-            )
-            self._thread.start()
+        thread.start()
 
     def pause(self) -> None:
         """Pause the execution loop at the next tick boundary."""
@@ -164,12 +179,14 @@ class SimulationRunner:
     def stop_with_timeout(self, timeout_s: float = 10.0) -> bool:
         """Stop the runner and wait for the thread to finish cleanly.
 
-        The thread's local reference is captured before joining: the loop
-        clears ``self._thread`` in its finally block, so the liveness check
-        must not read the instance attribute after the join.
+        The thread that is stopped is captured before the stop is issued: the
+        loop clears ``self._thread`` in its finally block, so the liveness
+        check must not read the instance attribute after the join, and a
+        generation that was started in the meantime must not be joined
+        instead of the one that was stopped.
         """
-        self.stop()
         thread = self._thread
+        self.stop()
         if thread is not None:
             thread.join(timeout=timeout_s)
             return not thread.is_alive()
@@ -329,23 +346,33 @@ class SimulationRunner:
     # Execution loop
     # ---------------------------------------------------------------- #
 
-    def _execution_loop(self) -> None:
+    def _execution_loop(self, generation: int) -> None:
         """Loop thread: advance the engine at the configured simulation rate.
 
         Every iteration resolves the engine from the application-scoped runtime
         so an overridden engine is adopted without leaking plant state.
+
+        Args:
+            generation: The generation this thread was started for. The thread
+                stops as soon as a newer generation has taken over, and it
+                only clears the runner state while it is still the current
+                generation.
         """
         try:
             last_pace_wall = time.perf_counter()
             while True:
                 with self._action_lock:
-                    if not self._running:
+                    if not self._running or generation != self._generation:
                         break
-                    if self._paused:
-                        # Wait for the pause to be lifted or the stop to arrive.
-                        if self._stop_event.wait(timeout=0.25):
-                            break
-                        continue
+                    paused = self._paused
+
+                if paused:
+                    # Wait for the pause to be lifted or the stop to arrive.
+                    # The wait does not hold the action lock: a stop or a
+                    # resume must not be delayed by the wait of this thread.
+                    if self._stop_event.wait(timeout=0.25):
+                        break
+                    continue
 
                 # Any API enqueued action takes priority over the loop.
                 with self._action_lock:
@@ -373,10 +400,19 @@ class SimulationRunner:
                     continue
 
                 try:
-                    state = manager.state
-                    if state != SimulationState.RUNNING:
-                        manager.start()
-                    manager.step(1)
+                    with self._action_lock:
+                        # The tick and the check of the run flag are one
+                        # atomic unit. A stop that is requested while this
+                        # thread waits for the lock is therefore honoured
+                        # before the next tick starts: the loop stops at the
+                        # tick boundary and no tick is ever started behind
+                        # the back of a stop.
+                        if not self._running or generation != self._generation:
+                            break
+                        state = manager.state
+                        if state != SimulationState.RUNNING:
+                            manager.start()
+                        manager.step(1)
                 except Exception as err:  # noqa: BLE001
                     logger.exception("Runner tick failed: %s", err)
                     self._error = err
@@ -398,6 +434,11 @@ class SimulationRunner:
             logger.exception("Runner thread terminated unexpectedly: %s", err)
             self._error = err
         finally:
-            self._running = False
-            self._paused = False
-            self._thread = None
+            with self._action_lock:
+                # Only the current generation may clear the runner state. A
+                # thread that has been superseded must leave the state of the
+                # generation that replaced it untouched.
+                if generation == self._generation:
+                    self._running = False
+                    self._paused = False
+                    self._thread = None

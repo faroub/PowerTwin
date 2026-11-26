@@ -423,6 +423,47 @@ suitable for a production deployment that treats the container as a hardened
 artefact. The frontend image, which is based on `nginx:alpine`, reports **zero**
 findings at every severity.
 
+### 4.12 The Runner Repairs a Set of Lifecycle Races, and the Control Endpoint Is Still Synchronous
+
+The runner now holds three lifecycle properties that it did not hold before:
+a stop is final (no tick starts behind the back of a stop), a start always
+leaves a loop that really ticks (a superseded thread cannot clear the state
+of the generation that replaced it), and a step advances the clock by exactly
+the number of ticks it was asked for. The contract is stated in
+`docs/04_SIMULATION_ENGINE_SPECIFICATION.md` §3.1 and asserted by
+`tests/test_simulation_runner.py` and `tests/test_simulation_runtime.py`.
+
+What the repair does **not** change:
+
+- **A stop waits for the tick in flight.** The tick and the check of the run
+  flag are one atomic unit, so a stop cannot overtake a tick that has
+  already begun. The cost is that the stop of a runner whose tick blocks is
+  delayed by that tick: the `timeout_s` of `stop_with_timeout` bounds the
+  **join**, not the acquisition of the action lock, so a task that never
+  returns delays the stop indefinitely. A task that blocks forever is a bug
+  in the task, and the platform does not yet police task runtimes.
+- **The control endpoint executes a step synchronously.** `POST
+  /simulation/control` runs the tick batch on the event loop thread, so a
+  batch of 1000 ticks occupies the loop for roughly 3 s on the reference
+  plant. That is why `MAX_STEP_TICKS` is 1000 (10 s of simulated time at the
+  100 Hz tick rate); a longer fast-forward belongs to the headless runner.
+  The batch is deliberately *not* moved to a worker thread: running it
+  concurrently would let a `START` interleave with it and break the
+  guarantee that a step advances the clock by exactly the requested number
+  of ticks.
+- **The tick count is bounded, not unlimited.** A tick count of zero, a
+  negative count or a count above `MAX_STEP_TICKS` is refused with HTTP 400
+  and recorded in the operator-action journal as `REJECTED` /
+  `INVALID_STEP_COUNT`. It is not corrected to a different command.
+- **The runner still carries unreachable code.** `_enqueue_action_now`
+  returns an empty list before the `START`/`PAUSE`/`RESUME`/`STOP`/`RESET`
+  chain that follows it, and the method is never called from anywhere. The
+  chain is dead code left over from an earlier design; it was left in place
+  to keep the lifecycle repair's diff focused, and it is a cleanup item.
+- **The HMI has no STOP button.** The simulation view offers Pause, Single
+  Step and Reset. The stop path exists and is tested at the API level, but
+  an operator cannot reach it from the screen.
+
 ---
 
 ## 5. Reproducibility and Determinism Limitations

@@ -25,7 +25,7 @@ available. The companion documents are
 
 | Subsystem / Module | Status | Core Accomplishments |
 | :--- | :--- | :--- |
-| **Deterministic Simulation Engine** | `IMPLEMENTED_AND_TESTED` | 100 Hz integer nanosecond clock ($10\text{ ms}$ step), five-phase DAG scheduler (Grid → Controllers → PCS → Battery → BoP/POI), seeded RNG, full domain state serialization in `SimulationSnapshot`, pause/resume/step/reset/replay. |
+| **Deterministic Simulation Engine** | `IMPLEMENTED_AND_TESTED` | 100 Hz integer nanosecond clock ($10\text{ ms}$ step), five-phase DAG scheduler (Grid → Controllers → PCS → Battery → BoP/POI), seeded RNG, full domain state serialization in `SimulationSnapshot`, pause/resume/step/reset/replay. The continuous runner holds an explicit lifecycle contract: **a stop is final** (no tick starts behind the back of a stop), **a start always leaves a loop that really ticks** (a superseded thread cannot clear the state of the generation that replaced it), **a step advances the clock by exactly the requested number of ticks** and stops the continuous loop to do so, and **a pause never delays a stop**. The contract is stated in `docs/04_SIMULATION_ENGINE_SPECIFICATION.md` §3.1 and asserted by `tests/test_simulation_runner.py` and `tests/test_simulation_runtime.py`. |
 | **Battery & Master BMS Models** | `IMPLEMENTED_AND_TESTED` | Energy-balanced ECM battery model, usable capacity ($C_{\text{usable}}$) vs nominal capacity ($C_{\text{nom}}$), auxiliary load tracking (`unserved_aux_energy_wh`), BMS current/voltage/thermal limits, alarm deduplication, persistent fault checks, contactor interlocks. |
 | **PCS Inverter & BoP Models** | `IMPLEMENTED_AND_TESTED` | Four explicit $P/Q$ values (Requested, Accepted, Actual, Measured), $P^2 + Q^2 \le S_{\text{max, eff}}^2$ circle clamping with priority, AC terminal current limits, $P/Q$ ramp rate limiters, IGBT heatsink thermal mass, transformer and switchgear models. |
 | **3-Tier Control Hierarchy** | `IMPLEMENTED_AND_TESTED` | Layer A Equipment Controller state-machine startup with command verification and rollback; Layer B PPC POI voltage/power-factor regulation and proportional allocation; Layer C EMS multi-container feasibility aggregation, droop and scheduled-profile mode. |
@@ -193,3 +193,38 @@ component suite measures 151 tests and 98.28 % line coverage with an enforced
 floor of 75 %, the Playwright project drives the built HMI against a hermetic
 mock platform in the pipeline, and the properties of both are asserted from
 `tests/test_deployment_images.py` so that they cannot be silently removed.
+
+**A red pipeline turned out to be a concurrency defect in the simulation
+runner, and it is closed.** The `backend-ci` job on Python 3.12 failed while
+the same suite passed on 3.13 and 3.14 without coverage instrumentation. The
+difference was timing, not the code: the 3.12 job is the only one that runs
+the suite with `--cov`, which widens the window in which three lifecycle
+races of the runner could occur. A tick could start behind the back of a
+stop, which left the engine `PAUSED` after a stop that had been
+acknowledged; a start could adopt the execution thread of the previous
+generation while that thread was on its way out, which left the runner
+reporting a running loop that nothing drove (measured in 223 of 3000 rapid
+start/stop/start cycles); and a step measured its baseline against a
+concurrently advancing clock, which made the observable delta
+nondeterministic.
+
+The runner now holds an explicit lifecycle contract — a stop is final, a
+start always leaves a running loop, a step advances the clock by exactly the
+requested number of ticks — stated in
+`docs/04_SIMULATION_ENGINE_SPECIFICATION.md` §3.1 and asserted by
+`tests/test_simulation_runner.py` and `tests/test_simulation_runtime.py`.
+The interleavings that break the contract are forced with a gated step and a
+task that holds a tick open, so the tests do not depend on the timing of a
+contended machine to reach the broken ordering; the new tests fail against
+the unrepaired runner and pass against the repaired one.
+
+**The STEP control command now means what it says.** The tick count is
+accepted under the names `steps` and `ticks`, so a client that sends
+`ticks` gets the count it asked for instead of having the field ignored and
+the default applied. A count of zero, a negative count or a count above
+`MAX_STEP_TICKS` (1000, i.e. 10 s of simulated time at the 100 Hz tick
+rate) is **refused** with HTTP 400 and recorded in the operator-action
+journal as `REJECTED` / `INVALID_STEP_COUNT`; it is not corrected into a
+different command. The bound keeps a synchronous control command within a
+duration an operator can wait for, and the reasons it exists are recorded in
+`docs/POWER_TWIN_KNOWN_LIMITATIONS.md` §4.12.

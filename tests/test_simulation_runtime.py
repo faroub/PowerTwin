@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app.api import router
+from backend.app.api.v1.simulation_ctrl import MAX_STEP_TICKS
 from backend.app.core.config import settings
 from backend.app.core.rbac import Permission, UserRole, create_user_session
 from backend.app.simulation.application import close_simulation, init_simulation
@@ -147,21 +148,147 @@ def test_status_endpoint_report_true_state(client: TestClient, password: str) ->
     assert data["message"].startswith("Simulation engine is in state")
 
 
-def test_single_step_advances_exactly_one_tick(client: TestClient, password: str) -> None:
-    """STEP must advance exactly one tick and no more than one tick."""
+def _wait_for_tick_advance(client: TestClient, token: str, *, minimum: int = 1) -> int:
+    """Wait until the continuous loop has advanced the clock to ``minimum``.
+
+    Returns:
+        The tick count that was observed.
+
+    Raises:
+        AssertionError: If the clock did not reach ``minimum`` in time.
+    """
+    deadline = time.monotonic() + 5.0
+    while True:
+        tick = _status(client, token)["current_tick"]
+        if tick >= minimum:
+            return tick
+        if time.monotonic() > deadline:
+            msg = f"The simulation clock did not reach tick {minimum}."
+            raise AssertionError(msg)
+        time.sleep(0.01)
+
+
+def test_single_step_advances_exactly_the_requested_number_of_ticks(
+    client: TestClient, password: str
+) -> None:
+    """STEP must advance the clock by exactly the requested number of ticks.
+
+    The baseline is read while the continuous loop is stopped, so the only
+    ticks that can appear between the two readings are the ones the step
+    itself executed. Measuring against a running loop would attribute the
+    ticks of the loop to the step and make the assertion a race.
+    """
     token = _login(client, password)
 
     _control(client, token, action="RESET")
     data = _status(client, token)
     assert data["current_tick"] == 0
+    assert data["is_running"] is False
 
-    _control(client, token, action="START")
-    before = _status(client, token)["current_tick"]
-
+    before = data["current_tick"]
     res = _control(client, token, action="STEP", steps=6)
     assert res["status"] == "SUCCESS"
     data = _status(client, token)
     assert data["current_tick"] == before + 6, (before, data["current_tick"])
+
+
+def test_a_step_command_may_name_the_tick_count_either_way(
+    client: TestClient, password: str
+) -> None:
+    """A tick count sent as ``ticks`` is honoured, not ignored.
+
+    The two names reach the same field. A client that sent ``ticks`` used
+    to have the field dropped and the default applied, so the command that
+    was executed was not the command that was sent.
+    """
+    token = _login(client, password)
+
+    _control(client, token, action="RESET")
+    before = _status(client, token)["current_tick"]
+
+    res = _control(client, token, action="STEP", ticks=6)
+    assert res["status"] == "SUCCESS"
+    assert _status(client, token)["current_tick"] == before + 6
+
+
+def test_a_step_command_outside_the_permitted_range_is_refused(
+    client: TestClient, password: str
+) -> None:
+    """An out-of-range tick count is refused, not quietly corrected.
+
+    A command that asks for zero ticks, for a negative number of ticks or
+    for a batch that would block the control endpoint for minutes is a
+    command that must not be silently turned into a different one.
+    """
+    token = _login(client, password)
+
+    _control(client, token, action="RESET")
+    before = _status(client, token)["current_tick"]
+
+    for bad in (0, -1, MAX_STEP_TICKS + 1):
+        res = client.post(
+            "/api/v1/simulation/control",
+            json={"action": "STEP", "steps": bad},
+            headers=_header(token),
+        )
+        assert res.status_code == 400, (bad, res.text)
+        assert "steps" in res.json()["detail"]
+
+    # The refused commands advanced nothing.
+    assert _status(client, token)["current_tick"] == before
+
+
+def test_a_step_stops_the_continuous_loop_and_freezes_the_clock(
+    client: TestClient, password: str
+) -> None:
+    """A step on a running simulation freezes the clock and ends the loop.
+
+    The step stops the continuous loop before it advances the clock, so the
+    clock cannot advance on its own afterwards. The number of ticks the step
+    contributed is not asserted here: the continuous loop was advancing the
+    clock at the same time, so that number is not the step's alone.
+    """
+    token = _login(client, password)
+
+    _control(client, token, action="RESET")
+    _control(client, token, action="START")
+    _wait_for_tick_advance(client, token)
+
+    res = _control(client, token, action="STEP", steps=6)
+    assert res["status"] == "SUCCESS"
+
+    data = _status(client, token)
+    assert data["is_running"] is False
+    assert data["status"] == "PAUSED"
+    frozen = data["current_tick"]
+
+    time.sleep(0.2)
+    assert _status(client, token)["current_tick"] == frozen
+
+
+def test_a_stop_is_final_and_leaves_the_engine_stopped(client: TestClient, password: str) -> None:
+    """A stop must not be followed by another tick.
+
+    The execution loop checks its run flag in the same critical section in
+    which it advances the clock, so a stop that arrives while a tick is in
+    flight waits for that tick and no tick is started behind its back.
+    """
+    token = _login(client, password)
+
+    _control(client, token, action="RESET")
+    _control(client, token, action="START")
+    _wait_for_tick_advance(client, token)
+
+    _control(client, token, action="STOP")
+    data = _status(client, token)
+    assert data["is_running"] is False
+    assert data["status"] == "STOPPED"
+    frozen = data["current_tick"]
+
+    time.sleep(0.2)
+    after = _status(client, token)
+    assert after["current_tick"] == frozen
+    assert after["status"] == "STOPPED"
 
 
 def test_start_stop_repeatedly_home_the_thread(client: TestClient, password: str) -> None:
@@ -179,6 +306,31 @@ def test_start_stop_repeatedly_home_the_thread(client: TestClient, password: str
     assert data["current_tick"] > 0
     assert data["status"] == "STOPPED"
     assert data["is_running"] is False
+
+
+def test_a_start_after_a_stop_leaves_a_loop_that_advances_the_clock(
+    client: TestClient, password: str
+) -> None:
+    """A rapid start/stop/start must leave a loop that really ticks.
+
+    The execution thread of the previous generation is on its way out when
+    the next start arrives. It must not clear the state of the generation
+    that replaced it, and the engine must never report a running loop that
+    nothing drives.
+    """
+    token = _login(client, password)
+
+    _control(client, token, action="RESET")
+    for _ in range(5):
+        _control(client, token, action="START")
+        _control(client, token, action="STOP")
+
+    _control(client, token, action="START")
+    data = _status(client, token)
+    assert data["is_running"] is True
+    assert data["status"] == "RUNNING"
+
+    _wait_for_tick_advance(client, token)
 
 
 def test_reset_restores_initial_physical_conditions(client: TestClient, password: str) -> None:
