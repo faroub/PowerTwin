@@ -164,12 +164,12 @@ describe('Simulation Control Dispatch', () => {
       '/api/v1/simulation/control': () => jsonResponse({ status: 'SUCCESS' }),
     });
 
-    await dispatchSimulationControl('STEP', { ticks: 1 });
+    await dispatchSimulationControl('STEP', { steps: 1 });
 
     const call = mock.callsTo('/api/v1/simulation/control')[0];
     expect(call.method).toBe('POST');
     expect(bearerTokenOf(call)).toBe('dispatch-token');
-    expect(bodyOf(call)).toEqual({ action: 'STEP', ticks: 1 });
+    expect(bodyOf(call)).toEqual({ action: 'STEP', steps: 1 });
   });
 
   it('reports a disconnected engine rather than a failure when the engine is absent', async () => {

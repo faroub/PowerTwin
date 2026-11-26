@@ -600,6 +600,40 @@ class TestEveryRequiredCategoryIsRecorded:
         assert rejected[0].details["reason"] == "NOT_CONNECTED"
         journal.close()
 
+    def test_an_out_of_range_step_count_is_recorded_as_rejected(
+        self, client: TestClient, dev_test_password: str, tmp_path: Path
+    ) -> None:
+        """A refused STEP is recorded with the reason it was refused."""
+        journal = _journal(tmp_path)
+        set_operator_journal(client.app, journal)
+
+        factory = PlantTopologyFactory()
+        plant = factory.build_plant(
+            factory.load_config_from_yaml("configs/reference_10mw_20mwh.yaml")
+        )
+        get_simulation_runtime(app=client.app).attach_plant(plant)
+
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "engineer", "password": dev_test_password},
+        )
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        response = client.post(
+            "/api/v1/simulation/control",
+            json={"action": "STEP", "steps": 0},
+            headers=headers,
+        )
+        assert response.status_code == 400
+
+        rejected = [entry for entry in journal.read() if entry.action == "SIMULATION_STEP"]
+        assert len(rejected) == 1
+        assert rejected[0].outcome == "REJECTED"
+        assert rejected[0].details["reason"] == "INVALID_STEP_COUNT"
+
+        get_simulation_runtime(app=client.app).drop()
+        journal.close()
+
     def test_an_invalid_setpoint_is_recorded_as_rejected(
         self, client: TestClient, dev_test_password: str, tmp_path: Path
     ) -> None:

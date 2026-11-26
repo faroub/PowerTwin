@@ -21,7 +21,7 @@ from enum import StrEnum
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 from backend.app.core.operator_journal import (
     OperatorJournalError,
@@ -36,6 +36,14 @@ from backend.app.simulation.runtime import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Simulation Control"])
+
+#: The largest number of ticks a single STEP control command may request.
+#: 1000 ticks is 10 s of simulated time at the 100 Hz tick rate. The
+#: reference plant executes a tick in about 3 ms, so the largest permitted
+#: batch costs roughly 3 s of CPU time and keeps the control command within
+#: a duration an operator can wait for. A longer fast-forward belongs to the
+#: headless runner, not to a synchronous control command.
+MAX_STEP_TICKS = 1000
 
 
 class SimulationActionEnum(StrEnum):
@@ -57,7 +65,14 @@ class SimulationControlRequest(BaseModel):
     speed_factor: float | None = Field(
         default=None, description="Target speed factor for SET_SPEED"
     )
-    steps: int | None = Field(default=1, description="Number of ticks for STEP action")
+    steps: int | None = Field(
+        default=1,
+        # The tick count is accepted under both names. A client that sends
+        # the count as ``ticks`` gets the count it asked for instead of
+        # having the field ignored and the default applied.
+        validation_alias=AliasChoices("steps", "ticks"),
+        description="Number of ticks for STEP action",
+    )
 
 
 class SimulationControlResponse(BaseModel):
@@ -122,7 +137,28 @@ async def dispatch_simulation_control(
     elif act == SimulationActionEnum.STOP:
         runtime.stop()
     elif act == SimulationActionEnum.STEP:
-        num_steps = payload.steps if payload.steps and payload.steps > 0 else 1
+        num_steps = payload.steps if payload.steps is not None else 1
+        if num_steps < 1 or num_steps > MAX_STEP_TICKS:
+            # A tick count outside the permitted range is refused, not
+            # corrected: a command that asks for zero ticks, for a negative
+            # number of ticks or for a batch that would block the control
+            # endpoint for minutes is a command that must not be silently
+            # turned into a different one.
+            _record_operator_action(
+                request=request,
+                actor=actor,
+                action=act,
+                outcome="REJECTED",
+                reason="INVALID_STEP_COUNT",
+                details={"steps": num_steps, "maximum": MAX_STEP_TICKS},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"STEP action requires a 'steps' value between 1 and {MAX_STEP_TICKS}; "
+                    f"{num_steps} was received."
+                ),
+            )
         runtime.step(num_steps)
     elif act == SimulationActionEnum.RESET:
         runtime.reset()

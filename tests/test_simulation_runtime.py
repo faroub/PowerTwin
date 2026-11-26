@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app.api import router
+from backend.app.api.v1.simulation_ctrl import MAX_STEP_TICKS
 from backend.app.core.config import settings
 from backend.app.core.rbac import Permission, UserRole, create_user_session
 from backend.app.simulation.application import close_simulation, init_simulation
@@ -189,6 +190,52 @@ def test_single_step_advances_exactly_the_requested_number_of_ticks(
     assert res["status"] == "SUCCESS"
     data = _status(client, token)
     assert data["current_tick"] == before + 6, (before, data["current_tick"])
+
+
+def test_a_step_command_may_name_the_tick_count_either_way(
+    client: TestClient, password: str
+) -> None:
+    """A tick count sent as ``ticks`` is honoured, not ignored.
+
+    The two names reach the same field. A client that sent ``ticks`` used
+    to have the field dropped and the default applied, so the command that
+    was executed was not the command that was sent.
+    """
+    token = _login(client, password)
+
+    _control(client, token, action="RESET")
+    before = _status(client, token)["current_tick"]
+
+    res = _control(client, token, action="STEP", ticks=6)
+    assert res["status"] == "SUCCESS"
+    assert _status(client, token)["current_tick"] == before + 6
+
+
+def test_a_step_command_outside_the_permitted_range_is_refused(
+    client: TestClient, password: str
+) -> None:
+    """An out-of-range tick count is refused, not quietly corrected.
+
+    A command that asks for zero ticks, for a negative number of ticks or
+    for a batch that would block the control endpoint for minutes is a
+    command that must not be silently turned into a different one.
+    """
+    token = _login(client, password)
+
+    _control(client, token, action="RESET")
+    before = _status(client, token)["current_tick"]
+
+    for bad in (0, -1, MAX_STEP_TICKS + 1):
+        res = client.post(
+            "/api/v1/simulation/control",
+            json={"action": "STEP", "steps": bad},
+            headers=_header(token),
+        )
+        assert res.status_code == 400, (bad, res.text)
+        assert "steps" in res.json()["detail"]
+
+    # The refused commands advanced nothing.
+    assert _status(client, token)["current_tick"] == before
 
 
 def test_a_step_stops_the_continuous_loop_and_freezes_the_clock(
