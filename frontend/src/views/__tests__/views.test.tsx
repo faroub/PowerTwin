@@ -558,6 +558,45 @@ describe('System Settings View', () => {
     await waitFor(() => expect(invariants).toHaveTextContent('Hardware Integration: UNVERIFIED'));
     expect(invariants).not.toHaveTextContent('Hardware Integration: DISABLED');
   });
+
+  it('shows a safety field that is not a boolean as the platform reported it', async () => {
+    // A backend that answers with an unexpected value is shown as it came.
+    // The screen does not turn an unexpected answer into a clean "DISABLED",
+    // which would be a claim the platform never made.
+    installFetchMock({
+      '/api/v1/info': () =>
+        jsonResponse({
+          ...HEALTHY_SYSTEM_INFO,
+          safety: {
+            ...HEALTHY_SYSTEM_INFO.safety,
+            hardware_integration_enabled: 'unknown' as unknown as boolean,
+          },
+        }),
+    });
+
+    render(<SystemSettingsView />);
+
+    const invariants = screen
+      .getByText('Non-Negotiable Safety Invariants')
+      .closest('.card') as HTMLElement;
+
+    await waitFor(() => expect(invariants).toHaveTextContent('Hardware Integration: unknown'));
+    expect(invariants).not.toHaveTextContent('Hardware Integration: DISABLED');
+  });
+
+  it('does not read the platform after the screen is closed', async () => {
+    const mock = installFetchMock({
+      '/api/v1/info': () => jsonResponse(HEALTHY_SYSTEM_INFO),
+    });
+
+    const { unmount } = render(<SystemSettingsView />);
+    unmount();
+
+    // The answer may still arrive; the screen is gone and must not try to
+    // render into a component that is no longer mounted.
+    await waitFor(() => expect(mock.callsTo('/api/v1/info')).toHaveLength(1));
+    expect(screen.queryByText('Non-Negotiable Safety Invariants')).not.toBeInTheDocument();
+  });
 });
 
 describe('Historian View', () => {
@@ -647,6 +686,99 @@ describe('Historian View', () => {
       ).toBeInTheDocument(),
     );
   });
+
+  it('shows the command audit log and the alarm log the store holds', async () => {
+    installFetchMock({
+      '/api/v1/historian/telemetry': () => jsonResponse({ count: 0, records: [] }),
+      '/api/v1/historian/commands': () =>
+        jsonResponse({
+          count: 1,
+          records: [
+            {
+              command_id: 'CMD_01',
+              timestamp_ns: 2_000_000_000,
+              requestor: 'operator:engineer',
+              target_equipment_id: 'PCS_01',
+              requested_value: { active_power_w: 1_000_000 },
+              accepted_status: 'ACCEPTED',
+              rejection_reason: 'SUCCESS',
+              resulting_response: null,
+              simulation_run_id: 'RUN_01',
+            },
+          ],
+        }),
+      '/api/v1/historian/alarms': () =>
+        jsonResponse({
+          count: 1,
+          records: [
+            {
+              event_id: 'EVT_01',
+              timestamp_ns: 3_000_000_000,
+              equipment_id: 'CONTAINER_01',
+              severity: 'WARNING',
+              code: 'SOC_LOW',
+              description: 'The state of charge fell below its warning threshold.',
+              acknowledged: false,
+              cleared: false,
+              simulation_run_id: 'RUN_01',
+            },
+          ],
+        }),
+    });
+    const user = userEvent.setup();
+    render(<HistorianView />);
+
+    await user.click(screen.getByRole('button', { name: 'RUN QUERY' }));
+
+    await waitFor(() => expect(screen.getByText('operator:engineer')).toBeInTheDocument());
+    expect(screen.getByText('PCS_01')).toBeInTheDocument();
+    expect(screen.getByText('ACCEPTED')).toBeInTheDocument();
+    expect(screen.getByText('SOC_LOW')).toBeInTheDocument();
+    expect(
+      screen.getByText('The state of charge fell below its warning threshold.'),
+    ).toBeInTheDocument();
+  });
+
+  it('reports a failed command query without hiding the queries that answered', async () => {
+    installFetchMock({
+      '/api/v1/historian/telemetry': () => jsonResponse(TELEMETRY_ROWS),
+      '/api/v1/historian/commands': () =>
+        jsonResponse({ detail: 'the command audit log is unavailable' }, 503),
+      '/api/v1/historian/alarms': () => jsonResponse({ count: 0, records: [] }),
+    });
+    const user = userEvent.setup();
+    render(<HistorianView />);
+
+    await user.click(screen.getByRole('button', { name: 'RUN QUERY' }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('The query failed: the command audit log is unavailable'),
+      ).toBeInTheDocument(),
+    );
+    // The telemetry query answered, and its rows are still shown.
+    expect(screen.getByText('CONTAINER_01')).toBeInTheDocument();
+  });
+
+  it('passes the tag filter and the row limit the operator typed', async () => {
+    const mock = installFetchMock({
+      '/api/v1/historian/telemetry': () => jsonResponse(TELEMETRY_ROWS),
+      '/api/v1/historian/commands': () => jsonResponse({ count: 0, records: [] }),
+      '/api/v1/historian/alarms': () => jsonResponse({ count: 0, records: [] }),
+    });
+    const user = userEvent.setup();
+    render(<HistorianView />);
+
+    await user.type(screen.getByLabelText(/Tag ID/i), 'dc_voltage_v');
+    await user.clear(screen.getByLabelText(/Row limit/i));
+    await user.type(screen.getByLabelText(/Row limit/i), '25');
+    await user.click(screen.getByRole('button', { name: 'RUN QUERY' }));
+
+    await waitFor(() => expect(mock.callsTo('/api/v1/historian/telemetry')).toHaveLength(1));
+    const url = mock.callsTo('/api/v1/historian/telemetry')[0].url;
+    expect(url).toContain('tag_id=dc_voltage_v');
+    expect(url).toContain('limit=25');
+  });
 });
 
 describe('Warranty Metrics View', () => {
@@ -708,5 +840,22 @@ describe('Warranty Metrics View', () => {
 
     expect(screen.getByText('A container identifier is required.')).toBeInTheDocument();
     expect(mock.callsTo('/api/v1/historian/warranty')).toHaveLength(0);
+  });
+
+  it('reports a failed warranty query instead of showing nothing', async () => {
+    installFetchMock({
+      '/api/v1/historian/warranty/CONTAINER_01': () =>
+        jsonResponse({ detail: 'the historian store is unavailable' }, 503),
+    });
+    const user = userEvent.setup();
+    render(<WarrantyMetricsView />);
+
+    await user.click(screen.getByRole('button', { name: 'QUERY METRICS' }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('The query failed: the historian store is unavailable'),
+      ).toBeInTheDocument(),
+    );
   });
 });
