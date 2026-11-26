@@ -136,12 +136,22 @@ async def query_alarms(
 @router.get("/historian/warranty/{container_id}")
 async def query_warranty_metrics(
     container_id: str,
+    simulation_run_id: str | None = Query(
+        default=None,
+        description=(
+            "Report on this simulation run only. The store holds one warranty row "
+            "per container and run, so a container that has been run more than "
+            "once has one row per run."
+        ),
+    ),
     session: AsyncSession = Depends(get_db),
     _user: Any = Depends(require_permission(Permission.READ_TELEMETRY)),
 ) -> dict[str, Any]:
     """Return the warranty and degradation metrics for a battery container."""
     engine = HistorianQueryEngine(session)
-    metrics = await _run_query(lambda: engine.query_warranty_metrics(container_id))
+    metrics = await _run_query(
+        lambda: engine.query_warranty_metrics(container_id, simulation_run_id)
+    )
     if metrics is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

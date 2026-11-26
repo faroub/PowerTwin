@@ -121,7 +121,32 @@ export interface WarrantyMetrics {
   max_temperature_recorded_c: number | null;
   time_above_45c_seconds: number | null;
   current_soh_pct: number | null;
+  /**
+   * Where the container stands against its warranty band.
+   *
+   * `UNKNOWN` is a real answer: it means the platform holds no state of
+   * health for the container, and the screen has to say so rather than print
+   * a number that reads like a measurement.
+   */
+  warranty_status: WarrantyStatus;
+  /** The state of health at or below which the container is at the end of its band. */
+  warranty_threshold_pct: number | null;
+  /** The state of health expected at the end of the projection horizon. */
+  projected_soh_pct: number | null;
+  /** The horizon the projection is made over, in years. */
+  projection_horizon_years: number | null;
+  /**
+   * True while the degradation model behind the numbers is illustrative.
+   *
+   * The constants have not been validated against any manufacturer document,
+   * so the verdict and the projection are indicative and not a warranty
+   * calculation.
+   */
+  illustrative: boolean;
 }
+
+/** The warranty verdict the historian reports for a container. */
+export type WarrantyStatus = 'WITHIN_WARRANTY' | 'AT_END_OF_LIFE' | 'UNKNOWN';
 
 /** The outcome of a read-only historian query that returns rows. */
 export interface HistorianQueryResult<T> {
@@ -428,12 +453,21 @@ export async function fetchHistorianAlarms(
  * reported as "not found" rather than as an error, because the screen has to
  * be able to say that no warranty record exists — which is a different
  * statement from "the query failed".
+ *
+ * The store holds one row per container and simulation run. Naming a run
+ * pins the query to it; leaving it out answers with the newest row of any
+ * run.
  */
 export async function fetchWarrantyMetrics(
   containerId: string,
+  simulationRunId?: string,
 ): Promise<WarrantyQueryResult> {
   const encoded = encodeURIComponent(containerId);
-  const res = await getJson<WarrantyMetrics>(`${BASE_URL}/historian/warranty/${encoded}`);
+  const run = simulationRunId?.trim();
+  const query = run ? `?simulation_run_id=${encodeURIComponent(run)}` : '';
+  const res = await getJson<WarrantyMetrics>(
+    `${BASE_URL}/historian/warranty/${encoded}${query}`,
+  );
   if (res.ok && res.data !== null) {
     return { found: true, metrics: res.data, status: res.status, error: null };
   }

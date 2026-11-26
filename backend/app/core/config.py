@@ -251,6 +251,25 @@ class Settings(BaseSettings):
             "so the time above 45 degC is not undercounted"
         ),
     )
+    WARRANTY_THRESHOLD_SOH_PCT: float = Field(
+        default=70.0,
+        gt=0.0,
+        le=100.0,
+        description=(
+            "The state of health at or below which a container is reported as having "
+            "reached the end of its warranty band. ILLUSTRATIVE: the default is a "
+            "representative value, not a manufacturer's published figure"
+        ),
+    )
+    WARRANTY_PROJECTION_HORIZON_YEARS: float = Field(
+        default=10.0,
+        gt=0.0,
+        description=(
+            "The horizon the projected state of health is made over. ILLUSTRATIVE: "
+            "the default is a representative value, not a manufacturer's published "
+            "figure"
+        ),
+    )
 
     # Logging
     LOG_LEVEL: str = "INFO"

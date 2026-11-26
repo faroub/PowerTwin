@@ -235,6 +235,80 @@ def test_the_warranty_endpoint_answers_with_the_recorded_metrics(
     assert body["current_soh_pct"] == 98.4
 
 
+def test_the_warranty_endpoint_answers_with_the_verdict_and_the_projection(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    warranty_row: SimpleNamespace,
+) -> None:
+    """The endpoint adds the verdict and the projection to the stored row.
+
+    The screen has to be able to say where the container stands against its
+    warranty band, and the degradation model behind the answer is
+    illustrative, so the answer says so too.
+    """
+    _override_session(client, _StubSession([warranty_row]))
+
+    res = client.get("/api/v1/historian/warranty/CONTAINER_01", headers=auth_headers)
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["warranty_status"] == "WITHIN_WARRANTY"
+    assert body["warranty_threshold_pct"] == 70.0
+    assert body["projection_horizon_years"] == 10.0
+    assert body["projected_soh_pct"] is not None
+    assert body["illustrative"] is True
+
+
+def test_the_warranty_endpoint_can_be_pinned_to_one_run(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    warranty_row: SimpleNamespace,
+) -> None:
+    """The store holds one row per container and run."""
+    _override_session(client, _StubSession([warranty_row]))
+
+    res = client.get(
+        "/api/v1/historian/warranty/CONTAINER_01",
+        params={"simulation_run_id": "RUN_01"},
+        headers=auth_headers,
+    )
+
+    assert res.status_code == 200
+    assert res.json()["simulation_run_id"] == "RUN_01"
+
+
+def test_the_warranty_endpoint_reports_a_worn_container_as_at_the_end_of_its_life(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    warranty_row: SimpleNamespace,
+) -> None:
+    """A container below its threshold is not reported as being in warranty."""
+    warranty_row.current_soh_pct = 65.0
+    _override_session(client, _StubSession([warranty_row]))
+
+    res = client.get("/api/v1/historian/warranty/CONTAINER_01", headers=auth_headers)
+
+    assert res.status_code == 200
+    assert res.json()["warranty_status"] == "AT_END_OF_LIFE"
+
+
+def test_the_warranty_endpoint_reports_an_unknown_verdict_rather_than_a_number(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    warranty_row: SimpleNamespace,
+) -> None:
+    """A row without a state of health answers UNKNOWN, not a plausible number."""
+    warranty_row.current_soh_pct = None
+    _override_session(client, _StubSession([warranty_row]))
+
+    res = client.get("/api/v1/historian/warranty/CONTAINER_01", headers=auth_headers)
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["warranty_status"] == "UNKNOWN"
+    assert body["projected_soh_pct"] is None
+
+
 def test_a_container_without_a_warranty_record_is_reported_as_missing(
     client: TestClient,
     auth_headers: dict[str, str],

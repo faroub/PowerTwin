@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 
 import { SimulatedDataNotice } from '../components/SimulatedDataNotice';
-import { fetchWarrantyMetrics, WarrantyMetrics, WarrantyQueryResult } from '../services/api';
+import {
+  fetchWarrantyMetrics,
+  WarrantyMetrics,
+  WarrantyQueryResult,
+  WarrantyStatus,
+} from '../services/api';
 
 /**
  * The container the screen asks about until the operator names another one.
@@ -11,6 +16,38 @@ import { fetchWarrantyMetrics, WarrantyMetrics, WarrantyQueryResult } from '../s
  * platform holds metrics for it.
  */
 const DEFAULT_CONTAINER_ID = 'CONTAINER_01';
+
+/**
+ * How the warranty verdict is shown.
+ *
+ * The verdict is a statement about where the container stands against its
+ * warranty band, so it is colour-coded: green while there is room left, red
+ * once the band is reached, and grey when the platform holds no state of
+ * health to judge. `UNKNOWN` is a real answer and is never dressed up as a
+ * measurement.
+ */
+function verdictOf(status: WarrantyStatus): { label: string; colour: string; note: string } {
+  switch (status) {
+    case 'WITHIN_WARRANTY':
+      return {
+        label: 'WITHIN WARRANTY',
+        colour: '#22c55e',
+        note: 'The container is above the state of health its warranty band requires.',
+      };
+    case 'AT_END_OF_LIFE':
+      return {
+        label: 'AT END OF LIFE',
+        colour: '#ef4444',
+        note: 'The container has reached the end of its warranty band.',
+      };
+    default:
+      return {
+        label: 'UNKNOWN',
+        colour: '#94a3b8',
+        note: 'The platform holds no state of health for this container, so it cannot say where the container stands.',
+      };
+  }
+}
 
 /**
  * Render a simulation timestamp as hours, minutes, seconds and milliseconds.
@@ -42,6 +79,7 @@ function measured(value: number | null, suffix: string, digits = 2): string {
 
 export const WarrantyMetricsView: React.FC = () => {
   const [containerId, setContainerId] = useState<string>(DEFAULT_CONTAINER_ID);
+  const [runId, setRunId] = useState<string>('');
   const [result, setResult] = useState<WarrantyQueryResult | null>(null);
   const [running, setRunning] = useState<boolean>(false);
   const [formError, setFormError] = useState<string>('');
@@ -63,11 +101,12 @@ export const WarrantyMetricsView: React.FC = () => {
     }
     setFormError('');
     setRunning(true);
-    setResult(await fetchWarrantyMetrics(container));
+    setResult(await fetchWarrantyMetrics(container, runId));
     setRunning(false);
   };
 
   const metrics: WarrantyMetrics | null = result?.metrics ?? null;
+  const verdict = verdictOf(metrics?.warranty_status ?? 'UNKNOWN');
 
   return (
     <div>
@@ -88,6 +127,16 @@ export const WarrantyMetricsView: React.FC = () => {
               value={containerId}
               onChange={(event) => setContainerId(event.target.value)}
               placeholder={DEFAULT_CONTAINER_ID}
+              style={inputStyle}
+            />
+          </label>
+          <label style={{ color: '#cbd5e1', fontSize: '0.9rem' }}>
+            <div style={{ marginBottom: '4px' }}>Simulation Run ID (optional)</div>
+            <input
+              type="text"
+              value={runId}
+              onChange={(event) => setRunId(event.target.value)}
+              placeholder="latest"
               style={inputStyle}
             />
           </label>
@@ -170,6 +219,14 @@ export const WarrantyMetricsView: React.FC = () => {
               </div>
               <div className="card-note">Warranty Baseline</div>
             </div>
+
+            <div className="card">
+              <div className="card-title">Warranty Verdict</div>
+              <div className="card-value" style={{ color: verdict.colour }}>
+                {verdict.label}
+              </div>
+              <div className="card-note">Warranty Threshold {measured(metrics.warranty_threshold_pct, '%', 0)}</div>
+            </div>
           </div>
 
           <div className="card">
@@ -184,6 +241,13 @@ export const WarrantyMetricsView: React.FC = () => {
                 {measured(metrics.time_above_45c_seconds, 's', 1)}
               </div>
               <div>
+                <strong>Projected State of Health:</strong>{' '}
+                <span>{measured(metrics.projected_soh_pct, '% SOH', 1)}</span>
+                {metrics.projection_horizon_years !== null && (
+                  <span> over {metrics.projection_horizon_years} years</span>
+                )}
+              </div>
+              <div>
                 <strong>Last Updated (simulation time):</strong>{' '}
                 {formatSimulationTime(metrics.updated_at_ns)}
               </div>
@@ -191,6 +255,16 @@ export const WarrantyMetricsView: React.FC = () => {
                 <strong>Simulation Run:</strong> {metrics.simulation_run_id}
               </div>
             </div>
+            <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '10px', marginBottom: 0 }}>
+              {verdict.note}
+            </p>
+            {metrics.illustrative && (
+              <p style={{ color: '#eab308', fontSize: '0.85rem', marginTop: '8px', marginBottom: 0 }}>
+                The degradation model behind the verdict and the projection is illustrative: its
+                constants have not been validated against any manufacturer document. The figures
+                are indicative, not a warranty calculation.
+              </p>
+            )}
           </div>
         </>
       )}

@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
 from backend.app.historian import service as historian_service
+from backend.app.historian.query import HistorianQueryEngine
 from backend.app.historian.service import FlushCounts, HistorianService
 from backend.app.historian.wiring import HISTORIAN_SERVICE_KEY
 from backend.app.models.battery.system import BatterySystemConfigModel, GenericBatterySystemModel
@@ -46,6 +47,7 @@ from backend.app.warranty.degradation import (
     DegradationModel,
     DegradationParameters,
 )
+from backend.app.warranty.parameters import deployment_parameters
 from backend.app.warranty.recorder import (
     TEMPERATURE_THRESHOLD_C,
     WARRANTY_RECORDER_PHASE,
@@ -99,6 +101,47 @@ class _ExistingRow:
         self.max_temperature_recorded_c = 25.0
         self.time_above_45c_seconds = 0.0
         self.current_soh_pct = 100.0
+
+
+class _QueryResult:
+    """The result shape the query engine reads."""
+
+    def __init__(self, records: list[Any]) -> None:
+        self._records = records
+
+    def scalars(self) -> _QueryResult:
+        return self
+
+    def first(self) -> Any | None:
+        return self._records[0] if self._records else None
+
+
+class _QuerySession:
+    """A session that answers a query with a fixed row and keeps the statement."""
+
+    def __init__(self, records: list[Any]) -> None:
+        self.records = records
+        self.statements: list[Any] = []
+
+    async def execute(self, statement: Any) -> _QueryResult:
+        self.statements.append(statement)
+        return _QueryResult(self.records)
+
+
+def _warranty_row(**overrides: Any) -> SimpleNamespace:
+    """A warranty row shaped the way the historian stores one."""
+    values: dict[str, Any] = {
+        "container_id": "CONTAINER_01",
+        "simulation_run_id": "RUN_001",
+        "updated_at_ns": 3_600_000_000_000,
+        "total_energy_throughput_wh": 124_500_000.0,
+        "equivalent_full_cycles": 6.2,
+        "max_temperature_recorded_c": 41.5,
+        "time_above_45c_seconds": 12.5,
+        "current_soh_pct": 98.4,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 class _UpsertSession:
@@ -737,6 +780,104 @@ class TestTheWarrantyWritePath:
         """
         assert "warranty_overflow" not in historian_service.OVERFLOW_STREAMS
         assert "warranty_overflow" in historian_service.OVERFLOW_FILE_STEMS
+
+
+# --------------------------------------------------------------------------- #
+# The read path
+# --------------------------------------------------------------------------- #
+
+
+class TestTheWarrantyReadPath:
+    """The screen must not show a number the recorder did not write."""
+
+    def test_the_read_path_reproduces_the_recorder_projection(self) -> None:
+        """The two paths read the same columns with the same arithmetic."""
+        battery = _battery(temperature_c=40.0)
+        sink = _StubSink()
+        recorder = WarrantyRecorder(
+            plant=_StubPlant([battery]),
+            sink=sink,
+            run_id="RUN_001",
+            sample_interval_ticks=1,
+            parameters=deployment_parameters(),
+        )
+        battery.total_throughput_wh = 500_000.0
+        recorder.execute(_context(tick_ns=60_000_000_000))
+
+        published = next(
+            row["val_float"]
+            for row in sink.telemetry
+            if row["tag_id"] == "warranty.projected_soh_pct"
+        )
+        snapshot = sink.snapshots[-1]
+
+        session = _QuerySession([_warranty_row(**snapshot)])
+        engine = HistorianQueryEngine(cast("AsyncSession", session))
+        metrics = asyncio_run(engine.query_warranty_metrics("CONTAINER_01"))
+
+        assert metrics is not None
+        assert metrics["projected_soh_pct"] == pytest.approx(published)
+
+    def test_the_read_path_reports_the_verdict(self) -> None:
+        session = _QuerySession([_warranty_row(current_soh_pct=98.4)])
+        engine = HistorianQueryEngine(cast("AsyncSession", session))
+
+        metrics = asyncio_run(engine.query_warranty_metrics("CONTAINER_01"))
+
+        assert metrics is not None
+        assert metrics["warranty_status"] == WARRANTY_STATUS_WITHIN_WARRANTY
+        assert metrics["warranty_threshold_pct"] == 70.0
+        assert metrics["projection_horizon_years"] == 10.0
+        assert metrics["illustrative"] is True
+
+    def test_a_worn_container_is_reported_as_at_the_end_of_its_life(self) -> None:
+        session = _QuerySession([_warranty_row(current_soh_pct=65.0)])
+        engine = HistorianQueryEngine(cast("AsyncSession", session))
+
+        metrics = asyncio_run(engine.query_warranty_metrics("CONTAINER_01"))
+
+        assert metrics is not None
+        assert metrics["warranty_status"] == WARRANTY_STATUS_AT_END_OF_LIFE
+
+    def test_a_row_without_a_state_of_health_is_unknown(self) -> None:
+        """A missing number must not read like a measured one."""
+        session = _QuerySession([_warranty_row(current_soh_pct=None)])
+        engine = HistorianQueryEngine(cast("AsyncSession", session))
+
+        metrics = asyncio_run(engine.query_warranty_metrics("CONTAINER_01"))
+
+        assert metrics is not None
+        assert metrics["warranty_status"] == WARRANTY_STATUS_UNKNOWN
+        assert metrics["projected_soh_pct"] is None
+
+    def test_the_run_can_be_pinned(self) -> None:
+        """The table holds one row per container and run."""
+        session = _QuerySession([_warranty_row(simulation_run_id="RUN_002")])
+        engine = HistorianQueryEngine(cast("AsyncSession", session))
+
+        asyncio_run(engine.query_warranty_metrics("CONTAINER_01", "RUN_002"))
+
+        statement = str(session.statements[0].compile(compile_kwargs={"literal_binds": True}))
+        assert "simulation_run_id" in statement
+        assert "RUN_002" in statement
+
+    def test_without_a_run_the_newest_row_of_any_run_is_answered(self) -> None:
+        session = _QuerySession([_warranty_row()])
+        engine = HistorianQueryEngine(cast("AsyncSession", session))
+
+        asyncio_run(engine.query_warranty_metrics("CONTAINER_01"))
+
+        statement = str(session.statements[0])
+        assert "ORDER BY" in statement
+        assert "DESC" in statement
+
+    def test_a_container_the_store_knows_nothing_about_answers_nothing(self) -> None:
+        session = _QuerySession([])
+        engine = HistorianQueryEngine(cast("AsyncSession", session))
+
+        metrics = asyncio_run(engine.query_warranty_metrics("CONTAINER_99"))
+
+        assert metrics is None
 
 
 # --------------------------------------------------------------------------- #

@@ -795,6 +795,11 @@ describe('Warranty Metrics View', () => {
     max_temperature_recorded_c: 41.5,
     time_above_45c_seconds: 12.5,
     current_soh_pct: 98.4,
+    warranty_status: 'WITHIN_WARRANTY' as const,
+    warranty_threshold_pct: 70,
+    projected_soh_pct: 84.1,
+    projection_horizon_years: 10,
+    illustrative: true,
   };
 
   it('shows the warranty metrics the historian holds', async () => {
@@ -810,6 +815,84 @@ describe('Warranty Metrics View', () => {
     expect(screen.getByText('6.20 EFC')).toBeInTheDocument();
     expect(screen.getByText('98.4 % SOH')).toBeInTheDocument();
     expect(screen.getByText('41.5 °C')).toBeInTheDocument();
+  });
+
+  it('shows the warranty verdict and the projection', async () => {
+    installFetchMock({
+      '/api/v1/historian/warranty/CONTAINER_01': () => jsonResponse(WARRANTY_RECORD),
+    });
+    const user = userEvent.setup();
+    render(<WarrantyMetricsView />);
+
+    await user.click(screen.getByRole('button', { name: 'QUERY METRICS' }));
+
+    await waitFor(() => expect(screen.getByText('WITHIN WARRANTY')).toBeInTheDocument());
+    expect(screen.getByText('84.1 % SOH')).toBeInTheDocument();
+    expect(screen.getByText(/over 10 years/)).toBeInTheDocument();
+  });
+
+  it('says that the degradation model is illustrative', async () => {
+    installFetchMock({
+      '/api/v1/historian/warranty/CONTAINER_01': () => jsonResponse(WARRANTY_RECORD),
+    });
+    const user = userEvent.setup();
+    render(<WarrantyMetricsView />);
+
+    await user.click(screen.getByRole('button', { name: 'QUERY METRICS' }));
+
+    await waitFor(() => expect(screen.getByText(/degradation model behind the verdict/)).toBeInTheDocument());
+  });
+
+  it('reports a container that has reached the end of its warranty band', async () => {
+    installFetchMock({
+      '/api/v1/historian/warranty/CONTAINER_01': () =>
+        jsonResponse({ ...WARRANTY_RECORD, warranty_status: 'AT_END_OF_LIFE', current_soh_pct: 65 }),
+    });
+    const user = userEvent.setup();
+    render(<WarrantyMetricsView />);
+
+    await user.click(screen.getByRole('button', { name: 'QUERY METRICS' }));
+
+    await waitFor(() => expect(screen.getByText('AT END OF LIFE')).toBeInTheDocument());
+    expect(screen.queryByText('WITHIN WARRANTY')).not.toBeInTheDocument();
+  });
+
+  it('reports an unknown verdict rather than a figure it cannot stand behind', async () => {
+    installFetchMock({
+      '/api/v1/historian/warranty/CONTAINER_01': () =>
+        jsonResponse({
+          ...WARRANTY_RECORD,
+          warranty_status: 'UNKNOWN',
+          current_soh_pct: null,
+          projected_soh_pct: null,
+        }),
+    });
+    const user = userEvent.setup();
+    render(<WarrantyMetricsView />);
+
+    await user.click(screen.getByRole('button', { name: 'QUERY METRICS' }));
+
+    await waitFor(() => expect(screen.getByText('UNKNOWN')).toBeInTheDocument());
+    // Neither the state of health nor the projection is invented for a
+    // container the platform holds nothing about.
+    expect(screen.getAllByText('NOT RECORDED').length).toBeGreaterThan(0);
+    expect(screen.queryByText('84.1 % SOH')).not.toBeInTheDocument();
+  });
+
+  it('pins the query to a named simulation run', async () => {
+    const mock = installFetchMock({
+      '/api/v1/historian/warranty/CONTAINER_01?simulation_run_id=RUN_07': () =>
+        jsonResponse({ ...WARRANTY_RECORD, simulation_run_id: 'RUN_07' }),
+    });
+    const user = userEvent.setup();
+    render(<WarrantyMetricsView />);
+
+    await user.type(screen.getByLabelText(/Simulation Run ID/i), 'RUN_07');
+    await user.click(screen.getByRole('button', { name: 'QUERY METRICS' }));
+
+    await waitFor(() =>
+      expect(mock.callsTo('/api/v1/historian/warranty/CONTAINER_01?simulation_run_id=RUN_07')).toHaveLength(1),
+    );
   });
 
   it('says that no warranty record exists rather than showing a figure', async () => {

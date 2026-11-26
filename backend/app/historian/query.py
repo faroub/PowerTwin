@@ -12,6 +12,8 @@ from backend.app.historian.models import (
     CommandRecordModel,
     TelemetryDataModel,
 )
+from backend.app.warranty.assessment import assess_warranty
+from backend.app.warranty.parameters import deployment_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -140,19 +142,49 @@ class HistorianQueryEngine:
             for r in records
         ]
 
-    async def query_warranty_metrics(self, container_id: str) -> dict[str, Any] | None:
-        """Query battery container degradation and warranty metric summary."""
-        stmt = (
-            select(BatteryWarrantyMetricsModel)
-            .where(BatteryWarrantyMetricsModel.container_id == container_id)
-            .order_by(BatteryWarrantyMetricsModel.updated_at_ns.desc())
-            .limit(1)
+    async def query_warranty_metrics(
+        self,
+        container_id: str,
+        simulation_run_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Query battery container degradation and warranty metric summary.
+
+        The table holds one row per `(container_id, simulation_run_id)`, so a
+        container that has been run more than once has one row per run. The
+        newest row is returned unless the caller names the run it wants.
+
+        Args:
+            container_id: The container to report on.
+            simulation_run_id: The run to report on, or nothing for the
+                newest row of any run.
+
+        Returns:
+            The recorded metrics with the warranty verdict and the
+            projection, or nothing when the store holds no such row.
+        """
+        stmt = select(BatteryWarrantyMetricsModel).where(
+            BatteryWarrantyMetricsModel.container_id == container_id
         )
+        if simulation_run_id is not None:
+            stmt = stmt.where(BatteryWarrantyMetricsModel.simulation_run_id == simulation_run_id)
+        stmt = stmt.order_by(BatteryWarrantyMetricsModel.updated_at_ns.desc()).limit(1)
+
         result = await self.session.execute(stmt)
         record = result.scalars().first()
 
         if not record:
             return None
+
+        # The verdict and the projection are recomputed from the columns the
+        # row already holds, through the same assessment the recorder used,
+        # so the screen cannot show a number that contradicts the row.
+        assessment = assess_warranty(
+            current_soh_pct=record.current_soh_pct,
+            equivalent_full_cycles=record.equivalent_full_cycles,
+            elapsed_seconds=float(record.updated_at_ns) / 1_000_000_000.0,
+            max_temperature_recorded_c=record.max_temperature_recorded_c,
+            parameters=deployment_parameters(),
+        )
 
         return {
             "container_id": record.container_id,
@@ -163,4 +195,10 @@ class HistorianQueryEngine:
             "max_temperature_recorded_c": record.max_temperature_recorded_c,
             "time_above_45c_seconds": record.time_above_45c_seconds,
             "current_soh_pct": record.current_soh_pct,
+            "warranty_status": assessment.warranty_status,
+            "warranty_threshold_pct": assessment.warranty_threshold_pct,
+            "projected_soh_pct": assessment.projected_soh_pct,
+            "projection_horizon_years": assessment.projection_horizon_years,
+            "annual_equivalent_full_cycles": assessment.annual_equivalent_full_cycles,
+            "illustrative": assessment.illustrative,
         }

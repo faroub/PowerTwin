@@ -16,6 +16,7 @@ from typing import Any
 
 from backend.app.core.config import settings
 from backend.app.historian.wiring import HISTORIAN_SERVICE_KEY
+from backend.app.warranty.parameters import deployment_parameters
 from backend.app.warranty.recorder import WarrantyRecorder
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ def start_warranty_recorder(app: Any) -> WarrantyRecorder | None:
         sink=service,
         run_id=engine.simulation_run_id,
         sample_interval_ticks=settings.WARRANTY_SAMPLE_INTERVAL_TICKS,
+        parameters=deployment_parameters(),
     )
     engine.scheduler.register_task(recorder)
     setattr(app.state, WARRANTY_RECORDER_KEY, recorder)
