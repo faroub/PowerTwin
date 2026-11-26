@@ -12,6 +12,7 @@ verified afterwards.
 
 import logging
 import uuid
+from collections.abc import Callable
 from enum import StrEnum
 from typing import Any
 
@@ -23,6 +24,12 @@ from backend.app.core.operator_journal import (
 )
 
 logger = logging.getLogger(__name__)
+
+# A sink receives every command entry the log records. The historian
+# registers one so that a command is written to the time-series store
+# through the same single write path that writes it to the operator-action
+# journal.
+CommandSink = Callable[["CommandAuditEntry"], None]
 
 
 class CommandStatus(StrEnum):
@@ -55,6 +62,21 @@ class ControlCommandLog:
 
     def __init__(self) -> None:
         self._entries: list[CommandAuditEntry] = []
+        # Sinks receive every entry that passes through this log. The
+        # operator-action journal is written directly; a sink is how the
+        # historian receives the same entry without this log having to know
+        # that the historian exists.
+        self._sinks: list[CommandSink] = []
+
+    def add_sink(self, sink: CommandSink) -> None:
+        """Subscribe a sink to every entry this log records."""
+        if sink not in self._sinks:
+            self._sinks.append(sink)
+
+    def remove_sink(self, sink: CommandSink) -> None:
+        """Unsubscribe a sink from this log."""
+        if sink in self._sinks:
+            self._sinks.remove(sink)
 
     def log_entry(
         self,
@@ -80,7 +102,21 @@ class ControlCommandLog:
         )
         self._entries.append(entry)
         self._write_to_journal(entry)
+        self._notify_sinks(entry)
         return entry
+
+    def _notify_sinks(self, entry: CommandAuditEntry) -> None:
+        """Give every sink the entry.
+
+        A sink that fails is reported as an error and the remaining sinks
+        still receive the entry: a recording defect in one consumer must not
+        cost the others their record.
+        """
+        for sink in list(self._sinks):
+            try:
+                sink(entry)
+            except Exception as err:  # noqa: BLE001
+                logger.error("A command sink could not record an entry: %s", err, exc_info=True)
 
     def _write_to_journal(self, entry: CommandAuditEntry) -> None:
         """Write the command to the dedicated operator-action journal.
