@@ -46,6 +46,36 @@ The engine exposes standard execution control primitives:
 - `reset(config_override: Optional[dict] = None)`: Reset simulation tick `T_sim = 0`, restore initial state values, and re-seed random engines.
 - `set_speed_factor(multiplier: float)`: Adjust target wall-clock pacing ($0.1\times$ to $100\times$, or `0.0` for maximum headless execution speed).
 
+### 3.1 Lifecycle Guarantees of the Continuous Runner
+
+The continuous loop runs on a dedicated thread that the runner owns. The
+following guarantees are part of the contract and are asserted by
+`tests/test_simulation_runner.py` and `tests/test_simulation_runtime.py`:
+
+- **A stop is final.** The tick and the check of the run flag form one
+  atomic unit, so a stop that arrives while a tick is in flight waits for
+  that tick and no tick is ever started behind its back. The engine is left
+  in the stopped state, never in a state that an in-flight tick has changed
+  after the stop was acknowledged.
+- **A start always leaves a running loop.** Every start begins a new
+  *generation*. The thread of the previous generation is on its way out when
+  the next start arrives; it recognises that it has been superseded, stops
+  ticking, and is forbidden from clearing the state of the generation that
+  replaced it. The engine therefore never reports a running loop that
+  nothing drives.
+- **A step is a batch, not a race.** A step stops the continuous loop before
+  it advances the clock, so the clock advances by exactly the requested
+  number of ticks and no tick of the loop can be counted against the batch.
+  The engine is left in the paused state: a step advances the simulation, it
+  does not continue it.
+- **A pause does not delay a stop.** The loop waits for the pause to be
+  lifted without holding the runner's action lock, so a stop that arrives
+  during the wait is honoured promptly.
+
+The runner's action lock is always taken before the engine's execution lock.
+No simulation task, controller or physical model calls back into the runner,
+so the two locks cannot deadlock.
+
 ---
 
 ## 4. Determinism & Replayability
