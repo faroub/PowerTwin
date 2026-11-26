@@ -111,9 +111,9 @@ through them.
 
 ### 4.1 Frontend Test Coverage
 
-The frontend test suite contains **155 tests in 11 files**, and the measured
-coverage is **97.45 % of lines, 98.87 % of functions, 97.46 % of statements
-and 85.08 % of branches**. Every SCADA view, the shared components, the login
+The frontend test suite contains **156 tests in 11 files**, and the measured
+coverage is **97.49 % of lines, 98.87 % of functions, 97.50 % of statements
+and 85.28 % of branches**. Every SCADA view, the shared components, the login
 flow, the telemetry hook, the API client and the application entry point are
 covered.
 
@@ -126,7 +126,7 @@ view that loses its tests is caught by its own directory's floor even when
 the global figure barely moves. The binding of those floors was verified by
 raising them deliberately until the gate failed.
 
-What the suite does **not** prove: the branch coverage of 85.08 % is the
+What the suite does **not** prove: the branch coverage of 85.28 % is the
 weakest metric, and the 75 % branch floor is the binding global constraint.
 The suite exercises the HMI against a mocked backend, so it proves the HMI's
 own behaviour and not the agreement between the HMI and the real FastAPI
