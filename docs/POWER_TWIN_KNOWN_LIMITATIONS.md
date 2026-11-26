@@ -487,11 +487,6 @@ What the repair does **not** change:
   negative count or a count above `MAX_STEP_TICKS` is refused with HTTP 400
   and recorded in the operator-action journal as `REJECTED` /
   `INVALID_STEP_COUNT`. It is not corrected to a different command.
-- **The runner still carries unreachable code.** `_enqueue_action_now`
-  returns an empty list before the `START`/`PAUSE`/`RESUME`/`STOP`/`RESET`
-  chain that follows it, and the method is never called from anywhere. The
-  chain is dead code left over from an earlier design; it was left in place
-  to keep the lifecycle repair's diff focused, and it is a cleanup item.
 
 ### 4.13 The HMI Reaches Every Engine Lifecycle Action, but Not the Speed Factor
 
