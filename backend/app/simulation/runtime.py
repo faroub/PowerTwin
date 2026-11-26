@@ -149,12 +149,18 @@ class SimulationRuntime:
         runner.resume()
 
     def stop(self) -> None:
-        """Stop the execution loop at the current tick boundary."""
+        """Stop the execution loop at the current tick boundary.
+
+        The call returns only once the execution thread has finished, so the
+        clock is frozen when the caller observes it: a stop is final, and the
+        engine is left in the stopped state rather than in a state a tick that
+        was in flight has changed afterwards.
+        """
         with self._lock:
             runner = self.runner
         if runner is None:
             return
-        runner.stop()
+        runner.stop_with_timeout(timeout_s=5.0)
 
     def single_step(self) -> list[str]:
         """Execute exactly one simulation tick and return the executed tasks."""
@@ -165,18 +171,24 @@ class SimulationRuntime:
         return runner.single_step()
 
     def step(self, num_ticks: int = 1) -> list[str]:
-        """Execute num_ticks ticks immediately (non-blocking for the caller)."""
+        """Execute num_ticks ticks immediately (non-blocking for the caller).
+
+        The continuous loop is stopped before the batch is executed, so the
+        clock advances by exactly ``num_ticks`` ticks and no tick of the loop
+        can be counted against the batch. The engine is left in the paused
+        state: a step advances the simulation, it does not continue it.
+        """
         with self._lock:
             engine = self.engine
         if engine is None:
             raise SimulationError("No engine attached; a plant must be attached before step.")
-        # Pause the continuous loop thread before a direct batch so the tick
+        # Stop the continuous loop thread before a direct batch so the tick
         # boundary stays deterministic outside of the run loop.
         if self.runner is not None and self.runner.is_running:
             try:
                 self.runner.stop_with_timeout(timeout_s=5.0)
             except Exception as err:  # noqa: BLE001
-                logger.warning("Could not pause the execution loop: %s", err)
+                logger.warning("Could not stop the execution loop: %s", err)
         return engine.step(num_ticks) or []
 
     def set_speed_factor(self, multiplier: float) -> None:
