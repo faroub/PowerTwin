@@ -12,7 +12,6 @@ without ever blocking the FastAPI event loop.
 Execution order is owned by ``SimulationRunManager`` (scheduler + clock), this
 runner owns the *thread* and the *control* surface:
 
-    * a non-blocking action queue so every API call returns immediately
     * deterministic wall-clock pacing around the fixed ``tick_step_ns``
     * isolated reset, start, pause, resume, single-step, and shutdown paths
     * clean teardown on application shutdown
@@ -28,7 +27,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections import deque
 from typing import TYPE_CHECKING, Any
 
 from backend.app.simulation.exceptions import SimulationError
@@ -66,7 +64,6 @@ class SimulationRunner:
         self._running: bool = False
         self._paused: bool = False
         self._stop_event: threading.Event = threading.Event()
-        self._action_queue: deque[dict[str, Any]] = deque()
         self._action_lock = threading.Lock()
         # The generation of the thread that currently owns the runner. Every
         # start increments it; a thread that finds a newer generation has
@@ -255,94 +252,6 @@ class SimulationRunner:
         manager.restore_snapshot(snapshot)
 
     # ---------------------------------------------------------------- #
-    # Action queue
-    # ---------------------------------------------------------------- #
-
-    def _enqueue_action_now(self, action: str, **kwargs: Any) -> list[str]:
-        """Execute an action immediately (used by the API layer)."""
-        logger.debug("Simulation action '%s'", action)
-
-        # Tick commands are executed synchronously so the API never races the
-        # run loop thread or queues a tick it must actually run.
-        if action == "STEP":
-            steps = max(1, kwargs.get("steps", 1))
-            return self._execute_steps(steps)
-
-        # Control actions are queued so the running loop thread executes them.
-        with self._action_lock:
-            self._action_queue.append(
-                {
-                    "action": action,
-                    "kwargs": kwargs,
-                    "queue_time_ns": time.perf_counter_ns(),
-                }
-            )
-        return []
-        if action == "START":
-            self.start()
-        elif action == "PAUSE":
-            self.pause()
-        elif action == "RESUME":
-            self.resume()
-        elif action == "STOP":
-            self.stop()
-        elif action == "RESET":
-            self.reset()
-        elif action == "SET_SPEED":
-            speed_factor = kwargs.get("speed_factor")
-            if speed_factor is None:
-                logger.warning("SET_SPEED action received without a speed factor.")
-            else:
-                self.set_speed_factor(speed_factor)
-        return []
-
-    def _process_actions(self) -> None:
-        """Drain the API action queue under a lock."""
-        with self._action_lock:
-            if not self._action_queue:
-                return
-            actions = list(self._action_queue)
-            self._action_queue.clear()
-
-        for item in actions:
-            try:
-                self._process_actions_now(item)
-            except Exception as err:  # noqa: BLE001
-                logger.error("Simulation action %r failed: %s", item, err)
-                self._error = err
-                self._running = False
-                self._paused = False
-                self._stop_event.set()
-
-    def _process_actions_now(self, item: dict[str, Any]) -> None:
-        """Execute a single API action (legacy ITEM path)."""
-        action = item["action"]
-        kwargs = item["kwargs"]
-        try:
-            if action == "STEP":
-                self.step(max(1, kwargs.get("steps", 1)))
-            elif action == "START":
-                self.start()
-            elif action == "PAUSE":
-                self.pause()
-            elif action == "RESUME":
-                self.resume()
-            elif action == "STOP":
-                self.stop()
-            elif action == "RESET":
-                self.reset()
-            elif action == "SET_SPEED":
-                self.set_speed_factor(kwargs.get("speed_factor"))
-            else:
-                logger.warning("Unknown simulation action: %r", action)
-        except Exception as err:  # noqa: BLE001
-            logger.error("Simulation action %r failed: %s", action, err)
-            self._error = err
-            self._running = False
-            self._paused = False
-            self._stop_event.set()
-
-    # ---------------------------------------------------------------- #
     # Execution loop
     # ---------------------------------------------------------------- #
 
@@ -371,23 +280,6 @@ class SimulationRunner:
                     # The wait does not hold the action lock: a stop or a
                     # resume must not be delayed by the wait of this thread.
                     if self._stop_event.wait(timeout=0.25):
-                        break
-                    continue
-
-                # Any API enqueued action takes priority over the loop.
-                with self._action_lock:
-                    queue = list(self._action_queue)
-                if queue:
-                    for item in queue:
-                        try:
-                            self._process_actions_now(item)
-                        except Exception as err:  # noqa: BLE001
-                            logger.error("Simulation action %r failed: %s", item, err)
-                            self._error = err
-                            self._running = False
-                            self._paused = False
-                            self._stop_event.set()
-                    if not self._running:
                         break
                     continue
 
