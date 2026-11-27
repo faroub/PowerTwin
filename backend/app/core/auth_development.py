@@ -24,6 +24,7 @@ from passlib.hash import pbkdf2_sha256
 from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
+_generated_dev_password: str | None = None
 
 
 def _dev_usernames() -> list[str]:
@@ -36,20 +37,24 @@ def _dev_password() -> str:
 
     A test/developer may override the value with the `POWERTWIN_DEV_PASSWORD`
     environment variable; without it a process-scoped random secret is generated
-    and logged once per startup.
+    and logged once.
     """
+    global _generated_dev_password
+
     shared = os.environ.get("POWERTWIN_DEV_PASSWORD")
     if shared:
         return shared
 
     password = os.environ.get("POWERTWIN_DEFAULT_DEV_PASSWORD", "")
     if not password:
-        password = os.urandom(16).hex()
-        logger.warning(
-            "No POWERTWIN_DEV_PASSWORD override; using a random default "
-            "development password for every local account: %s",
-            password,
-        )
+        if _generated_dev_password is None:
+            _generated_dev_password = os.urandom(16).hex()
+            logger.warning(
+                "No POWERTWIN_DEV_PASSWORD override; using a random default "
+                "development password for every local account: %s",
+                _generated_dev_password,
+            )
+        password = _generated_dev_password
     return password
 
 

@@ -16,6 +16,7 @@ import jwt
 import pytest
 from passlib.hash import pbkdf2_sha256
 
+from backend.app.core import auth_development
 from backend.app.core.audit import audit_log
 from backend.app.core.authentication import (
     AuthenticationResult,
@@ -52,6 +53,29 @@ def _dev_password() -> str:
         password = "powertwin_test_dev_password_override"
         os.environ["POWERTWIN_DEV_PASSWORD"] = password
     return password
+
+
+@pytest.mark.asyncio
+async def test_random_development_password_is_stable_for_process(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A generated local password stays usable across account lookups."""
+    monkeypatch.delenv("POWERTWIN_DEV_PASSWORD", raising=False)
+    monkeypatch.delenv("POWERTWIN_DEFAULT_DEV_PASSWORD", raising=False)
+    monkeypatch.setattr(auth_development, "_generated_dev_password", None)
+
+    passwords = auth_development.dev_user_passwords()
+    accounts = auth_development.dev_user_accounts()
+
+    assert len(set(passwords.values())) == 1
+    assert all(
+        pbkdf2_sha256.verify(passwords["admin"], account["hashed_password"])
+        for account in accounts.values()
+    )
+    result = await AuthenticationService().login("admin", passwords["admin"], session=None)
+
+    assert result.success is True
+    assert caplog.text.count("using a random default development password") == 1
 
 
 @pytest.mark.asyncio
