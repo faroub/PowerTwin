@@ -33,8 +33,8 @@ resistance into a plant.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 __all__ = [
     "LinearSolveResult",
@@ -184,11 +184,11 @@ def solve_least_squares(
         coefficients[column] = scaled_solution[position] / scales[column]
 
     residuals: list[float] = []
-    for row in range(row_count):
+    for row_index in range(row_count):
         predicted = 0.0
-        for column in range(column_count):
-            predicted += float(design[row][column]) * coefficients[column]
-        residuals.append(float(target[row]) - predicted)
+        for column_index in range(column_count):
+            predicted += float(design[row_index][column_index]) * coefficients[column_index]
+        residuals.append(float(target[row_index]) - predicted)
 
     rmse = math.sqrt(sum(value * value for value in residuals) / row_count)
     max_abs_residual = max((abs(value) for value in residuals), default=0.0)
@@ -302,7 +302,9 @@ def _pivoted_qr(
         diagonal.append(matrix[step][step])
         for column in range(step + 1, column_count):
             norms[column] = math.sqrt(
-                sum(matrix[step + 1 + offset][column] ** 2 for offset in range(row_count - step - 1))
+                sum(
+                    matrix[step + 1 + offset][column] ** 2 for offset in range(row_count - step - 1)
+                )
             )
         norms[step] = 0.0
 

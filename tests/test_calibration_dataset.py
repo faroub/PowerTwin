@@ -12,15 +12,12 @@ Two properties are pinned down above all:
 
 from __future__ import annotations
 
-import hashlib
 import math
 from pathlib import Path
 
 import pytest
 
 from backend.app.calibration.dataset import (
-    REJECTION_REASONS,
-    dataset_summary,
     load_observations_csv,
     validate_observations,
 )
@@ -72,9 +69,7 @@ class TestExactTimestampParsing:
 
 
 class TestPerContainerOrdering:
-    def test_simultaneous_samples_from_different_containers_are_valid(
-        self, tmp_path: Path
-    ) -> None:
+    def test_simultaneous_samples_from_different_containers_are_valid(self, tmp_path: Path) -> None:
         rows = [(1_000, "A"), (1_000, "B"), (2_000, "A"), (2_000, "B"), (3_000, "A")]
         text = HEADER_WITH_CONTAINER + "\n" + "\n".join(_row(ts, c) for ts, c in rows) + "\n"
 
@@ -87,14 +82,16 @@ class TestPerContainerOrdering:
         assert [o.timestamp_ns for o in grouped["A"]] == [1_000, 2_000, 3_000]
         assert [o.timestamp_ns for o in grouped["B"]] == [1_000, 2_000]
 
-    def test_a_duplicate_timestamp_within_one_container_is_rejected(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_duplicate_timestamp_within_one_container_is_rejected(self, tmp_path: Path) -> None:
         text = (
-            HEADER_WITH_CONTAINER + "\n"
-            + _row(1_000, "A") + "\n"
-            + _row(1_000, "A") + "\n"
-            + _row(2_000, "B") + "\n"
+            HEADER_WITH_CONTAINER
+            + "\n"
+            + _row(1_000, "A")
+            + "\n"
+            + _row(1_000, "A")
+            + "\n"
+            + _row(2_000, "B")
+            + "\n"
         )
 
         dataset = load_observations_csv(_write(tmp_path, text))
@@ -103,9 +100,7 @@ class TestPerContainerOrdering:
         assert dataset.rejection_counts == {"TIMESTAMP_NOT_INCREASING": 1}
         assert "container 'A'" in dataset.rejected[0].detail
 
-    def test_a_reversed_timestamp_within_one_container_is_rejected(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_reversed_timestamp_within_one_container_is_rejected(self, tmp_path: Path) -> None:
         text = HEADER_WITH_CONTAINER + "\n" + _row(2_000, "A") + "\n" + _row(1_000, "A") + "\n"
 
         dataset = load_observations_csv(_write(tmp_path, text))
@@ -117,10 +112,14 @@ class TestPerContainerOrdering:
         self, tmp_path: Path
     ) -> None:
         text = (
-            HEADER_WITH_CONTAINER + "\n"
-            + _row(1_000, "A") + "\n"
-            + _row(2_000, "B") + "\n"
-            + _row(1_000, "A") + "\n"
+            HEADER_WITH_CONTAINER
+            + "\n"
+            + _row(1_000, "A")
+            + "\n"
+            + _row(2_000, "B")
+            + "\n"
+            + _row(1_000, "A")
+            + "\n"
         )
 
         dataset = load_observations_csv(_write(tmp_path, text))

@@ -30,9 +30,10 @@ import csv
 import hashlib
 import math
 import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 __all__ = [
     "CalibrationDataset",
