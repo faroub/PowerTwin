@@ -17,6 +17,39 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # An explicit, one-shot migration run. The application never starts it:
+  # applying the schema is an operator action, not a startup step, and it has
+  # to run exactly once before the first worker starts. Running it from inside
+  # the application would execute it once per worker instance, and every
+  # worker would then do the same thing on every restart of the deployment.
+  #
+  # The command reads the database URL from the same environment values the
+  # backend reads, so a replace of the credentials is one change rather than
+  # two. The migration stub ships no version pin of its own to prove the
+  # migration it applies matches the release.
+  migrate:
+    image: powertwin-backend:latest
+    container_name: powertwin_migrate
+    environment:
+      POSTGRES_SERVER: timescaledb
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-powertwin}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set - export a strong secret of at least 20 characters}"
+      POSTGRES_DB: ${POSTGRES_DB:-powertwin_db}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: "True"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ../backend:/app/backend
+      - ../plugins:/app/plugins
+      - ../configs:/app/configs
+      - ../tests:/app/tests
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: "no"
+    command: ["python", "-m", "alembic", "-c", "backend/alembic.ini", "upgrade", "head"]
+
   backend:
     build:
       context: ..
@@ -43,6 +76,11 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
+      migrate:
+        # The schema is migrated by the one-shot `migrate` service, which the
+        # operator starts deliberately. A worker must never start against a
+        # database that the migration has not been run against.
+        condition: service_completed_successfully
     healthcheck:
       # The probe uses the Python standard library, so the backend image ships
       # no HTTP client of its own and the runtime layer stays minimal.

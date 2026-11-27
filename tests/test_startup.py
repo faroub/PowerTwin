@@ -25,11 +25,19 @@ def test_liveness_endpoint(client: TestClient) -> None:
 
 
 def test_readiness_endpoint(client: TestClient) -> None:
-    """Test /health/readiness endpoint."""
+    """Test /health/readiness endpoint.
+
+    The local test run has no database to reach, so the probe answers
+    ``unreachable`` and a 503 status rather than pretending the historian
+    store is ready: a probe that answers 200 when the store is missing cannot
+    be trusted, and this test is the proof of that claim.
+    """
     response = client.get("/health/readiness")
-    assert response.status_code == 200
+    assert response.status_code == 503
     data = response.json()
-    assert data["status"] == "ready"
+    assert data["status"] == "not_ready"
+    assert data["database"] == "unreachable"
+    assert data["reason"] == "DATABASE_UNREACHABLE"
     assert data["safety"]["simulation_only"] is True
 
 

@@ -45,7 +45,46 @@ pg_restore -h localhost -U powertwin -d powertwin_db -v powertwin_backup_2025010
 
 ---
 
-## 5. Non-Certification & Safety Disclaimer
+## 5. Database Migration Policy
+
+The database of a deployment holds the schema of the release that shaped it.
+`Migrate` is an explicit operator action, not a startup step: the
+`migrate` service of the deployment runs it once, waits for `timescaledb` to be
+`service_healthy` and exits when the last migration is applied. The backend
+never starts a migration, so no worker applies the schema and every worker does
+not repeat it.
+
+The migration reads the same credentials as the service it precedes, so the
+deployment of the database and the deployment of the application stay one
+change. A release that is deployed without the migration of that release reads
+a readiness failure, not a database:
+
+```bash
+docker compose up -d --build
+```
+
+A database that is older than the release of the migration is repaired when the
+migration is run again:
+
+```bash
+docker compose up -d migrate
+```
+
+The deployment of the readiness probe at `/health/readiness` answers one of
+three reasons:
+
+- `unconfigured` — the application resolved no database URL.
+- `unreachable` — the database answers the URL but not the connection.
+- `schema_missing` — the database is reachable and has a schema that the
+  migrations of the release have not applied, so the probe names the tables
+  that are missing.
+
+A readiness answer of `schema_missing` tells the operator to run the migration
+and nothing else.
+
+---
+
+## 6. Non-Certification & Safety Disclaimer
 
 > [!CAUTION]
 > **DISCLAIMER OF LIVE CONTROL SUITABILITY**:

@@ -157,16 +157,29 @@ jobs:
           echo "The running container ships no package installer."
           python3 - <<'PY'
           import json
+          import urllib.error
           import urllib.request
 
-          with urllib.request.urlopen("http://127.0.0.1:8000/health/readiness", timeout=5) as response:
-              body = json.load(response)
+          url = "http://127.0.0.1:8000/health/readiness"
+          try:
+              with urllib.request.urlopen(url, timeout=5) as response:
+                  body = json.load(response)
+          except urllib.error.HTTPError as exc:
+              # The probe is strict by design: it rejects a deployment whose
+              # database is not reachable and whose schema has not been
+              # migrated. A smoke test that runs the deployed image without
+              # starting a database has to accept that answer as long as the
+              # response still carries the safety report.
+              if exc.code != 503:
+                  raise
+              body = json.loads(exc.read())
+
           safety = body["safety"]
           if safety.get("simulation_only") is not True:
               raise SystemExit(f"the running container does not report SIMULATION_ONLY: {safety}")
           if safety.get("hardware_integration_enabled") is not False:
               raise SystemExit(f"the running container reports hardware integration enabled: {safety}")
-          print("The running container upholds the safety invariants:", safety.get("safety_status"))
+          print("The running container upholds the safety invariants:", safety.get("safety_status"), "|", body["status"])
           PY
           docker rm -f "$container" >/dev/null
 

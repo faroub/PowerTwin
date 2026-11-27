@@ -131,6 +131,23 @@ count, file count, and byte size per stream.
 - The historian does not currently downsample on ingest. The `sampling_step_ns`
   down-sampling is applied at query time only.
 
+### 5.6 Migration Policy
+
+The history tables are created by the Alembic migrations of `backend/migrations/`.
+A release ships the migration that produces the schema the historian expects, and
+the deployment applies that migration before any backend worker starts: the
+`migrate` service of `docker-compose.yml` runs `alembic upgrade head` once,
+waits for `timescaledb` to be `service_healthy` and exits 0 when the last
+migration is applied.
+
+The application never migrates the database. A worker applies no migration and
+the deployment runs the migration exactly once, so a database that never ran
+the migration of the release reports `schema_missing` from
+`/health/readiness` rather than a generic connection failure. The migration is
+an explicit operator action, started with `docker compose up -d migrate`, and
+the same command is the one the release job runs against an ephemeral
+TimescaleDB.
+
 ---
 
 ## 6. Implemented Historian Query API

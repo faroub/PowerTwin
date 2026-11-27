@@ -855,6 +855,59 @@ python scripts/verify_locked_environment.py --lock backend/requirements.lock
 PYTHONPATH=. python scripts/endurance_campaign.py --ticks 36000 --seed 42 --repeats 2
 ```
 
+### 9.1 Local Migration & Startup
+
+The application never runs a migration itself: doing so would execute one per
+worker instance, and a migration is therefore scheduled as a deliberate operator
+action, started exactly once with the `migrate` service of the deployment.
+
+`docker compose up -d --build` is the exact command of a regular local run. The
+services start in dependency order: `timescaledb` becomes healthy, `migrate`
+runs `alembic upgrade head` against the same credentials the backend reads and
+exits 0 — `restart: "no"` stops it after the last migration — and only then
+does `backend` start. The deployment is therefore started and migrated by a
+single command.
+
+```bash
+# 1. Start the platform with the migration applied to the database.
+docker compose up -d --build
+
+# 2. Wait until the operator action and the backend are running.
+docker compose ps
+# migrate    Exit 0
+
+# 3. Verify the application started safely.
+curl -s http://127.0.0.1:8000/health/readiness | python3 -m json.tool
+# {"status": "ready", "database": "complete", ...}
+# A database that is configured but unreachable or unmigrated answers 503
+# with "unreachable" or "schema_missing" plus the missing tables.
+```
+
+An explicit rerun of the migration restores the state of a database that
+previously ran a version of an older release:
+
+```bash
+docker compose up -d migrate
+```
+
+A migration of a release is the same migration the deployment runs, and the
+exact same command runs whenever a manual migration is needed:
+
+```bash
+# The values match the compose file for timescaledb only.
+POSTGRES_USER=powertwin
+POSTGRES_PASSWORD=<the secret set in .env>
+POSTGRES_SERVER=127.0.0.1
+POSTGRES_PORT=5432
+POSTGRES_DB=powertwin_db
+
+python -m alembic -c backend/alembic.ini upgrade head
+```
+
+A database whose schema is older than the release — verified by the readiness
+probe answering `schema_missing` — stays unreachable to the application until
+the operator runs the migration, because a migration is never part of startup.
+
 ---
 
 ## 10. Security and Hardware Isolation Policy
