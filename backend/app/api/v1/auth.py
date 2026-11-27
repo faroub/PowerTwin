@@ -3,13 +3,14 @@
 import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from backend.app.core.audit import audit_log
 from backend.app.core.auth_development import validate_dev_environment
 from backend.app.core.authentication import AuthenticationService
 from backend.app.core.config import settings
+from backend.app.core.identity import resolve_client_id
 from backend.app.core.rbac import Permission, UserSession, require_permission
 from backend.app.historian.db import AsyncSessionLocal
 
@@ -42,15 +43,21 @@ class LogoutResponse(BaseModel):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest) -> TokenResponse:
+async def login(payload: LoginRequest, request: Request) -> TokenResponse:
     """Authenticate user credentials and issue JWT session token.
 
     The environment decides which store supplies the identity. Development
     accounts are only accepted while the platform runs in development or
     testing mode; in every other mode `validate_dev_environment` advertises
     that provisioning is ignored before the service resolves the candidate.
+
+    The rate limiter measures one identity per login attempt: the client
+    identity of the request combined with the username it attempts. A
+    client identity is the request peer address unless the peer is a trusted
+    proxy, in which case the application trusts the address the proxy claims.
     """
     username = payload.username.lower()
+    client_id = resolve_client_id(request)
 
     # The identity source is chosen by the environment, never by the caller.
     # Allowing a production process down through the development store is a
@@ -59,9 +66,13 @@ async def login(payload: LoginRequest) -> TokenResponse:
 
     if settings.ENVIRONMENT == "production":
         async with AsyncSessionLocal() as session:
-            result = await _auth_service.login(username, payload.password, session=session)
+            result = await _auth_service.login(
+                username, payload.password, session=session, client_id=client_id
+            )
     else:
-        result = await _auth_service.login(username, payload.password, session=None)
+        result = await _auth_service.login(
+            username, payload.password, session=None, client_id=client_id
+        )
 
     if not result.success:
         raise HTTPException(

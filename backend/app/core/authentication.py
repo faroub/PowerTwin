@@ -160,10 +160,16 @@ class AuthenticationService:
                 candidate = self.dev_accounts.get(username)
 
             if candidate is None:
+                # Record the failure exactly like a wrong password, so an
+                # attempt against a name that exists in no row never sits
+                # outside the throttle and never decides the outcome: the
+                # result names the credentials, not the account.
+                audit_log.record_failure(FAILURE_EVENT, username, LOGIN_TOPIC)
+                self.rate_limiter.record_attempt(topic)
                 raise AuthenticationError("Account not found")
             if not candidate.is_active or candidate.is_locked():
                 audit_log.record_failure(ACCOUNT_LOCK_EVENT, username, LOGIN_TOPIC)
-                self.rate_limiter.record_attempt(LOGIN_TOPIC)
+                self.rate_limiter.record_attempt(topic)
                 return AuthenticationResult(
                     success=False, status=AuthenticationResult.STATUS_ACCOUNT_LOCKED
                 )
@@ -172,7 +178,7 @@ class AuthenticationService:
                 plain_password, candidate.hashed_password
             ):
                 audit_log.record_failure(FAILURE_EVENT, username, LOGIN_TOPIC)
-                self.rate_limiter.record_attempt(LOGIN_TOPIC)
+                self.rate_limiter.record_attempt(topic)
                 raise AuthenticationError("Invalid credentials")
 
             if session is not None:
@@ -180,7 +186,7 @@ class AuthenticationService:
 
             token = create_access_token(username, candidate.role)
             audit_log.record(SUCCESS_EVENT, username, LOGIN_TOPIC)
-            self.rate_limiter.reset(LOGIN_TOPIC)
+            self.rate_limiter.reset(topic)
             return AuthenticationResult(
                 success=True,
                 status=AuthenticationResult.STATUS_SUCCESS,
@@ -195,7 +201,7 @@ class AuthenticationService:
             )
         except Exception as err:
             logger.error("Unexpected login failure for '%s': %s", username, err)
-            self.rate_limiter.record_attempt(LOGIN_TOPIC)
+            self.rate_limiter.record_attempt(topic)
             return AuthenticationResult(
                 success=False, status=AuthenticationResult.STATUS_UNAVAILABLE
             )

@@ -26,17 +26,23 @@ def _is_in_network(candidate: Any, network: ipaddress.IPv4Network | ipaddress.IP
 def _parse_cidr(proxy: str) -> ipaddress.IPv4Network | ipaddress.IPv6Network | None:
     """Parse a CIDR block or plain address into a network; ``None`` on failure."""
     proxy = proxy.strip()
-    if "/" in proxy:
-        return ipaddress.ip_network(proxy, strict=False)
-    return ipaddress.ip_network(proxy + "/32", strict=False)
+    if not proxy:
+        return None
+    try:
+        if "/" in proxy:
+            return ipaddress.ip_network(proxy, strict=False)
+        return ipaddress.ip_network(proxy + "/32", strict=False)
+    except ValueError:
+        return None
 
 
 def _is_trusted_proxy(peer: str) -> bool:
     """Return whether the peer is declared as one of ``settings.TRUSTED_PROXIES``.
 
     A peer that is not declared in ``settings.TRUSTED_PROXIES`` is unknown to
-    the application, and its headers carry no authority, so the peer address
-    is trusted when the application never declares any proxy at all.
+    the application, and its headers carry no authority. An unidentified or
+    non-IP peer is never awarded headers, so the peer address stays the
+    identity the deployment actually sees.
     """
     if not peer or not settings.TRUSTED_PROXIES:
         return False
@@ -44,24 +50,27 @@ def _is_trusted_proxy(peer: str) -> bool:
         candidate = ipaddress.ip_address(peer)
     except ValueError:
         return False
-    return any(
-        _is_in_network(candidate, _parse_cidr(proxy)) for proxy in settings.TRUSTED_PROXIES
-    )
+    for proxy in settings.TRUSTED_PROXIES:
+        network = _parse_cidr(proxy)
+        if network is not None and _is_in_network(candidate, network):
+            return True
+    return False
 
 
 def _forwarded_candidates(request: Request) -> list[str]:
-    """Return the addresses found in the forwarded headers of a request."""
-    forwarded = ""
-    # X-Forwarded-For is a comma-separated chain of proxies; X-Real-IP is a
-    # single address. Prefer X-Forwarded-For because it is the more common
-    # front-end chain.
+    """Return the addresses found in the forwarded headers of a request.
+
+    ``X-Forwarded-For`` is a comma-separated chain of proxies, and the first
+    address of that chain is the client the chain started from. ``X-Real-IP`` is
+    a single address claimed by the last hop, so it is awarded only while the
+    chain is absent, never while the chain claims a broader path.
+    """
     for header in ("X-Forwarded-For", "X-Real-IP"):
         value = request.headers.get(header, "")
-        if value:
-            forwarded = value
-    if not forwarded:
-        return []
-    return [address.strip() for address in forwarded.split(",") if address.strip()]
+        if not value:
+            continue
+        return [address.strip() for address in value.split(",") if address.strip()]
+    return []
 
 
 def resolve_client_id(request: Request) -> str:

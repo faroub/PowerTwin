@@ -7,15 +7,21 @@ These tests cover:
     * Backend role boundaries against the mirroring frontend role table.
     * Production startup rejection of missing secret configuration.
     * Audit logging of every accepted and rejected authentication action.
+    * Trust boundaries of the client identity used by the rate limiter.
+    * Per-identity throttling for unknown users, cross-user isolation and
+      lockout expiry.
 """
 
 import datetime
 import logging
 import os
+from typing import Any
 from unittest import mock
 
 import jwt
 import pytest
+from fastapi import Request
+from fastapi.testclient import TestClient
 from passlib.hash import pbkdf2_sha256
 
 from backend.app.core import auth_development, authentication
@@ -25,6 +31,7 @@ from backend.app.core.authentication import (
     AuthenticationService,
 )
 from backend.app.core.config import settings
+from backend.app.core.identity import resolve_client_id
 from backend.app.core.limits import AuthenticationRateLimiter
 from backend.app.core.rbac import (
     ROLE_PERMISSIONS,
@@ -42,10 +49,17 @@ from backend.app.core.users import UserAccount
 
 
 async def _login(
-    service: AuthenticationService, username: str, password: str
+    service: AuthenticationService, username: str, password: str, client_id: str | None = None
 ) -> AuthenticationResult:
     """Execute one login attempt through the service."""
-    return await service.login(username, password, session=None)
+    return await service.login(username, password, session=None, client_id=client_id)
+
+
+def _identity_topic(
+    service: AuthenticationService, username: str, client_id: str | None = None
+) -> str:
+    """Return the topic key of one user from one client identity."""
+    return service.rate_limiter.topic(username, client_id)
 
 
 def _dev_password() -> str:
@@ -84,18 +98,19 @@ async def test_random_development_password_is_stable_for_process(
 async def test_login_rate_limiting_blocks_repeated_attempts() -> None:
     """Test that repeated login attempts are blocked by the sliding window limiter."""
     service = AuthenticationService(AuthenticationRateLimiter(max_attempts=3, lockout_seconds=30))
+    topic = _identity_topic(service, "observer")
 
     for _ in range(3):
         result = await _login(service, "observer", "wrong_password")
         assert result.success is False
         assert result.status == AuthenticationResult.STATUS_INVALID_CREDENTIALS
 
-    assert service.rate_limiter.is_blocked("powertwin-login") is True
+    assert service.rate_limiter.is_blocked(topic) is True
     result = await _login(service, "observer", "wrong_password")
     assert result.success is False
     assert result.status == AuthenticationResult.STATUS_RATE_LIMITED
 
-    service.rate_limiter.reset("powertwin-login")
+    service.rate_limiter.reset(topic)
     result = await _login(service, "observer", "wrong_password")
     assert result.success is False
     assert result.status == AuthenticationResult.STATUS_INVALID_CREDENTIALS
@@ -105,19 +120,20 @@ async def test_login_rate_limiting_blocks_repeated_attempts() -> None:
 async def test_login_rate_limit_resets_after_success() -> None:
     """Test the rate limiter clears after a successful login."""
     service = AuthenticationService(AuthenticationRateLimiter(max_attempts=3, lockout_seconds=60))
+    topic = _identity_topic(service, "observer")
 
     for _ in range(3):
         result = await _login(service, "observer", "wrong_password")
         assert result.success is False
 
-    assert service.rate_limiter.is_blocked("powertwin-login") is True
-    service.rate_limiter.reset("powertwin-login")
+    assert service.rate_limiter.is_blocked(topic) is True
+    service.rate_limiter.reset(topic)
 
     password = _dev_password()
     result = await _login(service, "observer", password)
     assert result.success is True
 
-    assert service.rate_limiter.is_blocked("powertwin-login") is False
+    assert service.rate_limiter.is_blocked(topic) is False
 
 
 @pytest.mark.asyncio
@@ -386,3 +402,230 @@ async def test_non_production_login_still_accepts_local_accounts(
 
     assert result.success is True
     assert result.status == AuthenticationResult.STATUS_SUCCESS
+
+
+# Client identity resolution for the rate limiter -------------------------------------------------
+
+
+def _client_request(
+    peer: str,
+    headers: dict[str, str],
+    link: dict[str, Any] | None = None,
+) -> Request:
+    """Construct one request whose peer is ``peer`` and whose headers carry ``headers``."""
+    scope = {
+        "type": "http",
+        "client": (peer, 0),
+        "headers": [
+            (name.lower().encode(), value.encode()) for name, value in (headers or {}).items()
+        ],
+    }
+    scope.update(link or {})
+    return Request(scope)
+
+
+@pytest.mark.parametrize(
+    ("peer", "header_name", "header_value", "trusted_proxy", "expected"),
+    [
+        # No proxy is declared to the application, so its headers carry no authority.
+        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8", None, "10.0.0.1"),
+        ("10.0.0.1", "X-Real-IP", "8.8.8.8", None, "10.0.0.1"),
+        ("10.0.0.1", None, None, None, "10.0.0.1"),
+        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8, 7.7.7.7", None, "10.0.0.1"),
+        ("10.0.0.1", "X-Forwarded-For", "not-an-ip", None, "10.0.0.1"),
+        # An unidentified peer can never be declared as a proxy.
+        ("testclient", "X-Forwarded-For", "8.8.8.8", None, "testclient"),
+        ("testclient", "X-Forwarded-For", "8.8.8.8", "10.0.0.1", "testclient"),
+        # A declared proxy is awarded the chain head, the neighboring hop's tender.
+        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8", "10.0.0.1", "8.8.8.8"),
+        ("10.0.0.1", "X-Real-IP", "8.8.8.8", "10.0.0.1", "8.8.8.8"),
+        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8, 7.7.7.7", "10.0.0.1", "8.8.8.8"),
+        # A declared CIDR block awards the peer's position inside the block.
+        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8", "10.0.0.0/8", "8.8.8.8"),
+        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8, not-an-ip", "10.0.0.1", "8.8.8.8"),
+        ("10.0.0.1", "X-Forwarded-For", "not-an-ip", "10.0.0.1", "10.0.0.1"),
+        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8", "192.168.1.0/24", "10.0.0.1"),
+        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8", "not-an-ip", "10.0.0.1"),
+    ],
+)
+def test_client_identity_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+    peer: str,
+    header_name: str | None,
+    header_value: str | None,
+    trusted_proxy: str | None,
+    expected: str,
+) -> None:
+    """Resolve one client identity per request, trusted only by declaration.
+
+    The peer carries the identity by default. The forwarded headers are trusted
+    only when the peer is declared in `settings.TRUSTED_PROXIES`, and a header
+    chain that contains an unparsable address falls back to the peer.
+    """
+    monkeypatch.setattr(settings, "TRUSTED_PROXIES", [trusted_proxy] if trusted_proxy else [])
+    headers = {header_name: header_value} if header_name else {}
+
+    request = _client_request(peer, headers)
+    assert resolve_client_id(request) == expected
+
+
+@pytest.mark.asyncio
+async def test_identity_is_per_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Login from separate clients is throttled separately, never by the account name.
+
+    An attempt against an unknown username from one client blocks only that
+    client's view of the account, leaving every other client free to attempt
+    the throttle before the account is known at all.
+    """
+    monkeypatch.setattr(settings, "ENVIRONMENT", "testing")
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT", 2)
+    monkeypatch.setattr(settings, "LOGIN_LOCKOUT_SECONDS", 60)
+
+    service = AuthenticationService(AuthenticationRateLimiter(max_attempts=2, lockout_seconds=60))
+    client_a, client_b = "192.168.1.1", "192.168.1.2"
+
+    try:
+        for client_id in client_a, client_b:
+            for _ in range(2):
+                result = await _login(service, "observer", "wrong_password", client_id=client_id)
+                assert result.success is False
+                assert result.status == AuthenticationResult.STATUS_INVALID_CREDENTIALS
+
+        # Both clients have counted their two attempts against the same account.
+        assert (
+            service.rate_limiter.is_blocked(service.rate_limiter.topic("observer", client_a))
+            is True
+        )
+        assert (
+            service.rate_limiter.is_blocked(service.rate_limiter.topic("observer", client_b))
+            is True
+        )
+
+        # An unknown name counts the same way as a known one: the first attempt
+        # is recorded and the second attempt is throttled.
+        result = await _login(service, "unknown_user", "wrong_password", client_id=client_a)
+        assert result.status == AuthenticationResult.STATUS_INVALID_CREDENTIALS
+        result = await _login(service, "unknown_user", "wrong_password", client_id=client_a)
+        assert result.status == AuthenticationResult.STATUS_INVALID_CREDENTIALS
+        result = await _login(service, "unknown_user", "wrong_password", client_id=client_a)
+        assert result.status == AuthenticationResult.STATUS_RATE_LIMITED
+
+        # A successful login from a fresh client resets only its own view.
+        password = _dev_password()
+        result = await _login(service, "observer", password, client_id="192.168.1.3")
+        assert result.success is True
+        assert (
+            service.rate_limiter.is_blocked(service.rate_limiter.topic("observer", client_a))
+            is True
+        )
+        assert (
+            service.rate_limiter.is_blocked(service.rate_limiter.topic("observer", client_b))
+            is True
+        )
+    finally:
+        service.rate_limiter.reset_all()
+
+
+@pytest.mark.asyncio
+async def test_login_endpoint_wires_client_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    """The login endpoint throttles the identity of the request, not the account.
+
+    A request from an undeclared peer is throttled on the peer address even when
+    it forwards `X-Forwarded-For`, and the endpoint's own limiter table carries
+    the resulting topic while a different client keeps the throttle from the
+    caller's view.
+    """
+    monkeypatch.setattr(settings, "ENVIRONMENT", "testing")
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT", 2)
+    monkeypatch.setattr(settings, "LOGIN_LOCKOUT_SECONDS", 60)
+
+    from backend.app.api.v1 import auth as auth_api
+
+    endpoint_service = auth_api._auth_service
+    original_limiter = endpoint_service.rate_limiter
+    endpoint_service.rate_limiter = AuthenticationRateLimiter(max_attempts=2, lockout_seconds=60)
+    try:
+        endpoint_service.rate_limiter.reset_all()
+
+        for _ in range(3):
+            response = client.post(
+                "/api/v1/auth/login",
+                json={"username": "observer", "password": "wrong_password"},
+                headers={"X-Forwarded-For": "8.8.8.8", "X-Real-IP": "9.9.9.9"},
+            )
+            assert response.status_code == 401
+
+        # A request from an undeclared peer ignores the forwarded headers.
+        assert (
+            endpoint_service.rate_limiter.is_blocked(
+                endpoint_service.rate_limiter.topic("observer", "testclient")
+            )
+            is True
+        )
+
+        # A different account from the same peer carries its own throttle.
+        for _ in range(3):
+            response = client.post(
+                "/api/v1/auth/login",
+                json={"username": "engineer", "password": "wrong_password"},
+            )
+            assert response.status_code == 401
+        assert (
+            endpoint_service.rate_limiter.is_blocked(
+                endpoint_service.rate_limiter.topic("engineer", "testclient")
+            )
+            is True
+        )
+
+        # An unknown account name from the same peer counts towards the throttle.
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "nobody_example", "password": "wrong_password"},
+        )
+        assert response.status_code == 401
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "nobody_example", "password": "wrong_password"},
+        )
+        assert response.status_code == 401
+        assert endpoint_service.rate_limiter.is_blocked("nobody_example:testclient") is True
+    finally:
+        endpoint_service.rate_limiter = original_limiter
+        original_limiter.reset_all()
+
+
+@pytest.mark.asyncio
+async def test_unknown_user_does_not_lock_the_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed attempt against a name in no row polls the same limiter topics.
+
+    The rejection message never names the account existence, and the throttle
+    never leaves the username uncounted, so an unknown user can never drift
+    outside the tracker.
+    """
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.delenv("POWERTWIN_DEV_PASSWORD", raising=False)
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT", 3)
+    monkeypatch.setattr(settings, "LOGIN_LOCKOUT_SECONDS", 60)
+
+    service = AuthenticationService()
+    for _ in range(3):
+        result = await _login(service, "never_existed_user_example", "wrong_password")
+        assert result.success is False
+        assert result.status == AuthenticationResult.STATUS_INVALID_CREDENTIALS
+
+    assert (
+        service.rate_limiter.is_blocked(
+            service.rate_limiter.topic("never_existed_user_example", None)
+        )
+        is True
+    )
+    await _login(service, "never_existed_user_example", "wrong_password")
+    assert (
+        service.rate_limiter.remaining_attempts(
+            service.rate_limiter.topic("never_existed_user_example", None)
+        )
+        == 0
+    )

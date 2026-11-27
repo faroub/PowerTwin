@@ -47,6 +47,26 @@ To enforce Safety Rule **SR-003** and **SR-012**:
 - In development mode, a process-scoped random password is generated per run. The developer password is not written to any configuration file, to `.env`, or to the frontend build output.
 - Authentication is rate-limited and rejects empty, malformed, or expired tokens. Every successful and failed login attempt is appended to the audit trail.
 
+The throttle measures one identity per login attempt: the client identity of
+the request (the request peer address by default, or the address the peer
+declares in `X-Forwarded-For`/`X-Real-IP` when the peer is declared in the
+`TRUSTED_PROXIES` setting) combined with the username the request tries. Every
+tracked topic is one username coming from one client identity, so a single user
+that repeatedly fails credentials can never exhaust the throttle of every other
+user, and a single client can never exhaust the throttle of every account. The
+documented capacity of the table is one hundred thousand topics: the least
+recently used identities are evicted and every window that carries no active
+attempt expires, so the table never grows without limit.
+
+A failed login against a username that exists in no row of the production
+database is recorded and throttled the same way as a failed login against a
+wrong password, so the rejection message "Incorrect username or password."
+never names whether the account exists. The development accounts are only ever
+allowed while the platform runs in development or testing mode; the limiter
+never tracks them while production is running. The limiter fails with a
+`ValueError` at startup instead of silently disabling the throttle when the
+`LOGIN_RATE_LIMIT` and `LOGIN_LOCKOUT_SECONDS` configuration is unusable.
+
 ### 3.2 Audit Trail Cryptographic Integrity
 
 Every command, setpoint change, configuration change, fault and operator
