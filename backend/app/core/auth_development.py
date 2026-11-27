@@ -3,9 +3,9 @@
 These accounts are only ever created, accompanied or accepted while the
 application runs in the **development** or **testing** environment. No static,
 weak credentials are embedded in the package: a shared default password is
-generated once per process startup (or overridden via the environment) and
-reported in the console log, so the values are never written to product source
-and never survive a process restart.
+generated once per process startup (or overridden via the environment); the
+password value itself is never reported in the console log, so the values are
+never written to product source and never survive a process restart.
 
 Production deployments provision their own identities through the migration
 seeding script (`scripts/seed_users.py`).
@@ -36,8 +36,9 @@ def _dev_password() -> str:
     """Resolve the shared development password for this process.
 
     A test/developer may override the value with the `POWERTWIN_DEV_PASSWORD`
-    environment variable; without it a process-scoped random secret is generated
-    and logged once.
+    environment variable; without it a process-scoped random secret is generated.
+    The secret is never reported in the console log: the log line may state that
+    a random default is in use, but it never carries the value itself.
     """
     global _generated_dev_password
 
@@ -51,8 +52,7 @@ def _dev_password() -> str:
             _generated_dev_password = os.urandom(16).hex()
             logger.warning(
                 "No POWERTWIN_DEV_PASSWORD override; using a random default "
-                "development password for every local account: %s",
-                _generated_dev_password,
+                "development password for every local account: <redacted>"
             )
         password = _generated_dev_password
     return password

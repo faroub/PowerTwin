@@ -7,6 +7,9 @@ The service implements a single canonical login endpoint flow:
     3. Rate-limit repeating attempts with a sliding window per topic.
     4. Verify credentials against a persistent user store (production) or an
        in-process development store, never exposing which column failed.
+       Production authentication is source-bound: accounts are accepted only
+       from the production user database, and development accounts are never
+       consulted in production.
     5. Issue a JWT binding the resolved role to the session.
 
 No other code path may issue or verify session tokens; the service is the
@@ -79,7 +82,6 @@ class AuthenticationService:
             max_attempts=settings.LOGIN_RATE_LIMIT,
             lockout_seconds=settings.LOGIN_LOCKOUT_SECONDS,
         )
-        self._dev_accounts: dict[str, UserAccount] | None = None
 
     @property
     def dev_accounts(self) -> dict[str, UserAccount]:
@@ -88,7 +90,15 @@ class AuthenticationService:
         Password hashes are recomputed on each access so that an explicit
         environment override is always honoured without relying on a value
         captured by a previous import.
+
+        Development accounts are never consulted in a production environment:
+        the property returns an empty mapping there so that a login attempt can
+        only ever be resolved against the production user database, and
+        `dev_user_accounts()` is never invoked by the service in production.
         """
+        if settings.ENVIRONMENT == "production":
+            return {}
+
         accounts: dict[str, UserAccount] = {}
         for username, user_data in dev_user_accounts().items():
             accounts[username] = UserAccount(
@@ -130,7 +140,10 @@ class AuthenticationService:
                 if candidate is not None:
                     candidate = UserAccount(**candidate.model_dump())
 
-            if candidate is None:
+            if candidate is None and settings.ENVIRONMENT != "production":
+                # Development accounts only ever substitute for a missing row
+                # in a non-production environment: production identities must
+                # always be resolved through the production user database.
                 candidate = self.dev_accounts.get(username)
 
             if candidate is None:

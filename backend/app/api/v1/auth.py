@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from backend.app.core.audit import audit_log
+from backend.app.core.auth_development import validate_dev_environment
 from backend.app.core.authentication import AuthenticationService
 from backend.app.core.config import settings
 from backend.app.core.rbac import Permission, UserSession, require_permission
@@ -42,8 +43,19 @@ class LogoutResponse(BaseModel):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest) -> TokenResponse:
-    """Authenticate user credentials and issue JWT session token."""
+    """Authenticate user credentials and issue JWT session token.
+
+    The environment decides which store supplies the identity. Development
+    accounts are only accepted while the platform runs in development or
+    testing mode; in every other mode `validate_dev_environment` advertises
+    that provisioning is ignored before the service resolves the candidate.
+    """
     username = payload.username.lower()
+
+    # The identity source is chosen by the environment, never by the caller.
+    # Allowing a production process down through the development store is a
+    # security violation, so the environment is checked at login-marshal time.
+    validate_dev_environment()
 
     if settings.ENVIRONMENT == "production":
         async with AsyncSessionLocal() as session:

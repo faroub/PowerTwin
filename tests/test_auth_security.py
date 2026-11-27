@@ -10,13 +10,15 @@ These tests cover:
 """
 
 import datetime
+import logging
 import os
+from unittest import mock
 
 import jwt
 import pytest
 from passlib.hash import pbkdf2_sha256
 
-from backend.app.core import auth_development
+from backend.app.core import auth_development, authentication
 from backend.app.core.audit import audit_log
 from backend.app.core.authentication import (
     AuthenticationResult,
@@ -275,3 +277,112 @@ async def test_invalid_token_rejected() -> None:
         decode_access_token(token)
 
     assert "credentials" in str(exc_info.value).lower()
+
+
+# Production isolation of the identity source -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_production_login_rejects_missing_db_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A user that exists in no row of the production database is rejected.
+
+    A production login never falls back to a local account, even when the
+    user lookup returns no row at all.
+    """
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.delenv("POWERTWIN_DEV_PASSWORD", raising=False)
+
+    service = AuthenticationService()
+
+    for username in ("admin", "observer", "unknown_user"):
+        result = await _login(service, username, "wrong_password")
+        assert result.success is False
+        assert result.status == AuthenticationResult.STATUS_INVALID_CREDENTIALS
+
+
+@pytest.mark.asyncio
+async def test_production_missing_user_matches_wrong_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing production user reports the same status as a wrong password."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.delenv("POWERTWIN_DEV_PASSWORD", raising=False)
+
+    service = AuthenticationService()
+
+    missing = await _login(service, "admin", "correct_password")
+    mismatch = await _login(service, "admin", "wrong_password")
+
+    assert missing.success is False
+    assert mismatch.success is False
+    assert missing.status == mismatch.status == AuthenticationResult.STATUS_INVALID_CREDENTIALS
+
+
+@pytest.mark.asyncio
+async def test_development_provider_is_not_called_in_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A production login must never invoke the development account provider."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.delenv("POWERTWIN_DEV_PASSWORD", raising=False)
+
+    with mock.patch.object(authentication, "dev_user_accounts") as provider:
+        service = AuthenticationService()
+        result = await _login(service, "admin", "wrong_password")
+
+    provider.assert_not_called()
+    assert result.success is False
+    assert result.status == AuthenticationResult.STATUS_INVALID_CREDENTIALS
+
+
+@pytest.mark.asyncio
+async def test_production_login_logs_no_development_password(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A production login must not log the development password or its source."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.delenv("POWERTWIN_DEV_PASSWORD", raising=False)
+
+    password = _dev_password()
+
+    service = AuthenticationService()
+    result = await _login(service, "admin", password)
+
+    assert result.success is False
+    assert result.status == AuthenticationResult.STATUS_INVALID_CREDENTIALS
+    assert password not in caplog.text
+    assert "development password" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_dev_password_value_is_never_logged(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A random default password is never reported in any log output."""
+    monkeypatch.delenv("POWERTWIN_DEV_PASSWORD", raising=False)
+    monkeypatch.delenv("POWERTWIN_DEFAULT_DEV_PASSWORD", raising=False)
+    monkeypatch.setattr(auth_development, "_generated_dev_password", None)
+    caplog.set_level(logging.DEBUG)
+
+    password = auth_development._dev_password()
+
+    assert password is not None
+    assert password not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_non_production_login_still_accepts_local_accounts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Development and testing environments must still resolve local accounts."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "testing")
+
+    password = _dev_password()
+    monkeypatch.setenv("POWERTWIN_DEV_PASSWORD", password)
+
+    service = AuthenticationService()
+    result = await _login(service, "observer", password)
+
+    assert result.success is True
+    assert result.status == AuthenticationResult.STATUS_SUCCESS
