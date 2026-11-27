@@ -116,7 +116,8 @@ def solve_least_squares(
 
     Raises:
         ValueError: When the design and the target do not have the same number of
-            rows, when the design has no columns, or when the rows are ragged.
+            rows, when the design has no columns, when the rows are ragged, or when
+            the design or the target holds a value that is not a finite number.
     """
     row_count = len(target)
     if len(design) != row_count:
@@ -135,6 +136,18 @@ def solve_least_squares(
             raise ValueError(
                 f"Row {index} of the design has {len(row)} column(s) and the first row "
                 f"has {column_count}; every row must have the same length."
+            )
+        for column, value in enumerate(row):
+            if not math.isfinite(float(value)):
+                raise ValueError(
+                    f"The design holds a non-finite value ({value!r}) at row {index}, "
+                    f"column {column}; a fit over NaN or infinity is meaningless."
+                )
+    for index, value in enumerate(target):
+        if not math.isfinite(float(value)):
+            raise ValueError(
+                f"The target holds a non-finite value ({value!r}) at row {index}; "
+                "a fit over NaN or infinity is meaningless."
             )
 
     scales = _column_scales(design, column_count)
@@ -166,7 +179,9 @@ def solve_least_squares(
     coefficients = [0.0] * column_count
     for position in range(rank):
         column = permutation[position]
-        coefficients[column] = scaled_solution[position] * scales[column]
+        # The matrix was built as design / scale, so the coefficient of the
+        # original column is the scaled coefficient divided by the scale.
+        coefficients[column] = scaled_solution[position] / scales[column]
 
     residuals: list[float] = []
     for row in range(row_count):
@@ -221,8 +236,11 @@ def _pivoted_qr(
 ) -> tuple[list[int], list[float]]:
     """Factorise the scaled design in place and return the pivot order and diagonal.
 
-    The right-hand side is transformed alongside the matrix, so the caller can
-    back-substitute without ever forming ``Q``.
+    Column pivoting permutes the columns of the matrix and the pivot order, and
+    nothing else. The right-hand side is indexed by observation and is only ever
+    touched by the Householder reflectors, which act on rows — so the caller can
+    back-substitute without ever forming ``Q`` and without any observation being
+    paired with another observation's target.
     """
     permutation = list(range(column_count))
     norms = [
@@ -239,9 +257,12 @@ def _pivoted_qr(
                 best = norms[column]
                 pivot = column
         if pivot != step:
+            # Only the columns of the matrix move. The right-hand side is indexed
+            # by row — by observation — and must stay exactly where it is: swapping
+            # two of its entries here would pair the wrong target with the wrong
+            # observation and silently corrupt the fit.
             for row in range(row_count):
                 matrix[row][step], matrix[row][pivot] = matrix[row][pivot], matrix[row][step]
-            rhs[step], rhs[pivot] = rhs[pivot], rhs[step]
             norms[step], norms[pivot] = norms[pivot], norms[step]
             permutation[step], permutation[pivot] = permutation[pivot], permutation[step]
 

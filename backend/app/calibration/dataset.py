@@ -13,7 +13,7 @@ the ordering of the rows:
 
 - a value that is not a number, or is not finite;
 - a state of charge outside 0-100 %;
-- a timestamp that does not move forward;
+- a timestamp that does not move forward within its container;
 - a power and a current that disagree in sign;
 - a power, a voltage and a current that do not satisfy ``p = v * i``;
 - a voltage outside a declared physical band.
@@ -29,6 +29,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -53,9 +54,24 @@ REQUIRED_COLUMNS: tuple[str, ...] = (
     "temperature_c",
 )
 
+#: The columns that hold a measured quantity and are therefore parsed as floats.
+#: The timestamp is not one of them: it is parsed as an exact integer, because a
+#: nanosecond timestamp near 10**18 cannot survive a round trip through a float.
+MEASURED_COLUMNS: tuple[str, ...] = (
+    "soc_pct",
+    "voltage_v",
+    "current_a",
+    "active_power_w",
+    "temperature_c",
+)
+
 #: The column that names the container a row belongs to. It is optional: a file
 #: that carries no container column describes a single container.
 CONTAINER_COLUMN: str = "container_id"
+
+#: An exact nanosecond timestamp: an optional sign and ASCII digits only. Anything
+#: else — ``1e18``, ``1000000000000000000.5``, ``0x10`` — is not a timestamp.
+_TIMESTAMP_PATTERN: re.Pattern[str] = re.compile(r"[+-]?[0-9]+")
 
 #: The reasons a row can be rejected. Every one of them is a plain statement about
 #: what was wrong with the row.
@@ -189,8 +205,14 @@ def load_observations_csv(
 
     Raises:
         FileNotFoundError: When the file does not exist.
-        ValueError: When the file has no header, or is missing a required column.
+        ValueError: When the voltage band arguments are invalid, when the file has
+            no header, or when it is missing a required column.
     """
+    # Validate the band arguments before touching the file, so an invalid
+    # configuration is reported even when the file is missing. The band itself
+    # is recomputed inside validate_observations, which is where it is applied.
+    _voltage_band(nominal_voltage_v, voltage_band_min_ratio, voltage_band_max_ratio)
+
     source = Path(path)
     if not source.is_file():
         raise FileNotFoundError(f"No observation file at '{source}'.")
@@ -264,17 +286,24 @@ def validate_observations(
 
     Returns:
         The dataset, with every rejected row and its reason.
+
+    Raises:
+        ValueError: When the voltage band arguments are invalid.
     """
+    voltage_min, voltage_max = _voltage_band(
+        nominal_voltage_v, voltage_band_min_ratio, voltage_band_max_ratio
+    )
+
     index_of = {name: position for position, name in enumerate(header)}
     has_container = CONTAINER_COLUMN in index_of
-
-    voltage_min = nominal_voltage_v * voltage_band_min_ratio
-    voltage_max = nominal_voltage_v * voltage_band_max_ratio
 
     accepted: list[Observation] = []
     rejected: list[RejectedObservation] = []
     counts: dict[str, int] = {}
-    last_timestamp: int | None = None
+    # The timestamp ordering is tracked **per container**: two containers sampled
+    # at the same instant are two valid observations, not a repeated timestamp.
+    # A row whose container column is absent is tracked under the empty key.
+    last_timestamp: dict[str, int] = {}
 
     for row_number, cells in rows:
         raw = ",".join(cells)
@@ -290,10 +319,43 @@ def validate_observations(
             )
             continue
 
-        values: dict[str, float] = {}
         container_id: str | None = None
+        if has_container:
+            container_id = cells[index_of[CONTAINER_COLUMN]].strip() or None
+
+        # The timestamp is parsed first, as an exact integer from its token and
+        # never through a float: a timestamp near 10**18 ns carries more
+        # significant digits than a float holds, and rounding it would silently
+        # move the observation in time.
+        timestamp_cell = cells[index_of["timestamp_ns"]].strip()
+        if timestamp_cell == "":
+            _record(
+                rejected,
+                counts,
+                row_number,
+                "MISSING_VALUE",
+                "The column 'timestamp_ns' is empty.",
+                raw,
+            )
+            continue
+        if _TIMESTAMP_PATTERN.fullmatch(timestamp_cell) is None:
+            _record(
+                rejected,
+                counts,
+                row_number,
+                "MALFORMED_ROW",
+                (
+                    f"The column 'timestamp_ns' holds '{timestamp_cell}', which is not a "
+                    "whole number of nanoseconds."
+                ),
+                raw,
+            )
+            continue
+        timestamp_ns = int(timestamp_cell)
+
+        values: dict[str, float] = {}
         malformed = False
-        for name in REQUIRED_COLUMNS:
+        for name in MEASURED_COLUMNS:
             cell = cells[index_of[name]].strip()
             if cell == "":
                 _record(
@@ -321,9 +383,6 @@ def validate_observations(
                 break
         if malformed:
             continue
-
-        if has_container:
-            container_id = cells[index_of[CONTAINER_COLUMN]].strip() or None
 
         if not all(math.isfinite(value) for value in values.values()):
             _record(
@@ -406,33 +465,26 @@ def validate_observations(
             )
             continue
 
-        timestamp_ns = int(values["timestamp_ns"])
-        if timestamp_ns != values["timestamp_ns"]:
-            _record(
-                rejected,
-                counts,
-                row_number,
-                "MALFORMED_ROW",
-                "The timestamp is not a whole number of nanoseconds.",
-                raw,
-            )
-            continue
-
-        if last_timestamp is not None and timestamp_ns <= last_timestamp:
+        # The ordering gate runs per container: two containers sampled at the
+        # same instant are two valid observations, not a repeated timestamp.
+        # A row whose container column is absent is tracked under the empty key.
+        key = container_id or ""
+        previous = last_timestamp.get(key)
+        if previous is not None and timestamp_ns <= previous:
+            owner = f"container '{container_id}'" if container_id is not None else "the dataset"
             _record(
                 rejected,
                 counts,
                 row_number,
                 "TIMESTAMP_NOT_INCREASING",
                 (
-                    f"The timestamp {timestamp_ns} ns does not follow the previous accepted "
-                    f"timestamp {last_timestamp} ns."
+                    f"The timestamp {timestamp_ns} ns of {owner} does not follow the "
+                    f"previous accepted timestamp {previous} ns."
                 ),
                 raw,
             )
             continue
-
-        last_timestamp = timestamp_ns
+        last_timestamp[key] = timestamp_ns
         accepted.append(
             Observation(
                 timestamp_ns=timestamp_ns,
@@ -452,6 +504,44 @@ def validate_observations(
         source=source,
         ignored_columns=tuple(ignored_columns),
         rejection_counts=counts,
+    )
+
+
+def _voltage_band(
+    nominal_voltage_v: float,
+    voltage_band_min_ratio: float,
+    voltage_band_max_ratio: float,
+) -> tuple[float, float]:
+    """Return the admissible terminal-voltage band in volts.
+
+    Raises:
+        ValueError: When the nominal voltage is not a finite, positive number,
+            when the minimum ratio is not a finite, positive number, or when the
+            maximum ratio is not finite or does not exceed the minimum ratio.
+    """
+    if not math.isfinite(nominal_voltage_v) or nominal_voltage_v <= 0.0:
+        raise ValueError(
+            "The nominal voltage must be a finite, positive number of volts, "
+            f"got {nominal_voltage_v!r}."
+        )
+    if not math.isfinite(voltage_band_min_ratio) or voltage_band_min_ratio <= 0.0:
+        raise ValueError(
+            "The minimum voltage-band ratio must be a finite, positive number, "
+            f"got {voltage_band_min_ratio!r}."
+        )
+    if not math.isfinite(voltage_band_max_ratio):
+        raise ValueError(
+            "The maximum voltage-band ratio must be a finite number, "
+            f"got {voltage_band_max_ratio!r}."
+        )
+    if voltage_band_max_ratio <= voltage_band_min_ratio:
+        raise ValueError(
+            "The maximum voltage-band ratio must exceed the minimum ratio "
+            f"{voltage_band_min_ratio!r}, got {voltage_band_max_ratio!r}."
+        )
+    return (
+        nominal_voltage_v * voltage_band_min_ratio,
+        nominal_voltage_v * voltage_band_max_ratio,
     )
 
 
