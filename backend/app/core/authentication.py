@@ -10,7 +10,11 @@ The service implements a single canonical login endpoint flow:
        Production authentication is source-bound: accounts are accepted only
        from the production user database, and development accounts are never
        consulted in production.
-    5. Issue a JWT binding the resolved role to the session.
+    5. Measure the login throttle per user and per client identity: every
+       attempt is keyed on the combination of both, so no single client can
+       exhaust the throttle of every user and no single user can exhaust the
+       throttle of every client.
+    6. Issue a JWT binding the resolved role to the session.
 
 No other code path may issue or verify session tokens; the service is the
 single authority.
@@ -118,15 +122,24 @@ class AuthenticationService:
         username: str,
         plain_password: str,
         session: Any | None = None,
+        client_id: str | None = None,
     ) -> AuthenticationResult:
-        """Login with credentials subject to rate limiting and audit recording."""
+        """Login with credentials subject to rate limiting and audit recording.
+
+        The rate limit is measured on a topic of one username from one client
+        identity, so no single client exhausts the throttle of every user and
+        no single user exhausts the throttle of every client. An attempt
+        against an unknown username is counted the same way as one against a
+        known one, without revealing which of the two was missing.
+        """
         username = username.lower().strip()
         if not username or not plain_password:
             return AuthenticationResult(
                 success=False, status=AuthenticationResult.STATUS_INVALID_CREDENTIALS
             )
 
-        if self.rate_limiter.is_blocked(LOGIN_TOPIC):
+        topic = self.rate_limiter.topic(username, client_id)
+        if self.rate_limiter.is_blocked(topic):
             audit_log.record_failure(RATE_LIMIT_EVENT, username, LOGIN_TOPIC)
             return AuthenticationResult(
                 success=False, status=AuthenticationResult.STATUS_RATE_LIMITED

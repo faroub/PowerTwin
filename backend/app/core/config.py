@@ -106,6 +106,22 @@ class Settings(BaseSettings):
         default=60, description="Duration of a single authentication lockout window."
     )
 
+    # Authentication client identity
+    #
+    # The rate limiter measures one identity per login attempt: the client
+    # identity of the request combined with the username it attempts. The
+    # client identity is the request peer address by default, and is only
+    # ever rewritten by `X-Forwarded-For` or `X-Real-IP` when the peer is
+    # declared in `TRUSTED_PROXIES`.
+    TRUSTED_PROXIES: list[str] = Field(
+        default=[],
+        description=(
+            "Peer addresses declared as trusted to rewrite X-Forwarded-For or "
+            "X-Real-IP headers, as plain addresses or CIDR blocks. Empty by "
+            "default: the request peer address is trusted then."
+        ),
+    )
+
     # Server Configuration
     # The default is the loopback interface so that a deployment that does not
     # explicitly opt into a trusted external network never binds a writable
