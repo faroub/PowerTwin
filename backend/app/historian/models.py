@@ -150,6 +150,38 @@ class UserAccountModel(Base):
     __table_args__ = (Index("idx_users_username", "username"),)
 
 
+class RevokedTokenModel(Base):
+    """Token of a session token the platform has revoked.
+
+    A session token is a stateless JWT that carries the identity of the
+    account that holds it, not the identity of the token itself. The table
+    therefore records the token's ``jti`` (JWT ID) claim — the value the
+    token carries explicitly — and brands it as refused from the moment it
+    was revoked until it expired by itself.
+
+    The platform writes a row when a session-ending operation refuses to let
+    the same token run again: a logout, a user deactivation or an
+    administrative revocation. The ``expires_at`` column is the token's
+    ``exp``, so the rows that never expire again can be purged and the table
+    does not grow without limit.
+
+    Every other token is answered only by its signature and its expiry: the
+    table makes one statement, and the absence of a row is not one of them.
+    """
+
+    __tablename__ = "revoked_tokens"
+
+    jti: Mapped[str] = mapped_column(String(36), primary_key=True, nullable=False)
+    sub: Mapped[str] = mapped_column(String(64), nullable=False)
+    revoked_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+    expires_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str] = mapped_column(String(32), nullable=False, default="LOGOUT")
+
+    __table_args__ = (Index("idx_revoked_tokens_sub", "sub"),)
+
+
 class BatteryWarrantyMetricsModel(Base):
     """Battery container operational degradation and warranty metrics."""
 

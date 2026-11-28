@@ -11,7 +11,12 @@ from backend.app.core.auth_development import validate_dev_environment
 from backend.app.core.authentication import AuthenticationService
 from backend.app.core.config import settings
 from backend.app.core.identity import resolve_client_id
-from backend.app.core.rbac import Permission, UserSession, require_permission
+from backend.app.core.rbac import (
+    Permission,
+    UserSession,
+    get_current_user,
+    require_permission,
+)
 from backend.app.historian.db import AsyncSessionLocal
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -106,9 +111,24 @@ async def login(payload: LoginRequest, request: Request) -> TokenResponse:
 
 @router.post("/logout", response_model=LogoutResponse)
 async def logout(
-    current_user: UserSession = Depends(require_permission(Permission.MODIFY_SIMULATION)),
+    current_user: UserSession = Depends(get_current_user),
 ) -> LogoutResponse:
-    """Invalidate the caller session token (logout)."""
+    """Terminate the caller's own platform session (logout).
+
+    Logout terminates the caller's session in the platform: the frontend
+    session is discarded and the audit trail records the event. It is a
+    self-service action, so any authenticated user — including an observer —
+    can end it.
+
+    Logout does not invalidate or revoke the issued access token. The
+    platform issues stateless JWTs without per-token identity, so a token that
+    was issued before logout is accepted until its expiry. This also covers a
+    token copied by the caller: the platform has no record of that copy to
+    reject it with. The lifecycle from login to expiry is therefore the only
+    lifecycle the platform can enforce, and users who need to make a copy
+    unusable must revoke it with a server-side token list (a capability this
+    platform does not provide).
+    """
     audit_log.record("LOGOUT", current_user.username, "SESSION")
     return LogoutResponse(message="Session terminated.")
 

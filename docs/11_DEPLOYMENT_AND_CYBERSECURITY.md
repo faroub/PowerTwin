@@ -67,6 +67,35 @@ never tracks them while production is running. The limiter fails with a
 `ValueError` at startup instead of silently disabling the throttle when the
 `LOGIN_RATE_LIMIT` and `LOGIN_LOCKOUT_SECONDS` configuration is unusable.
 
+### 3.1.1 Session Lifecycle and Logout
+
+A caller makes a session by POSTing to `/api/v1/auth/login`; the response
+carries the JWT the frontend stores in memory. Every page thereafter sends that
+token as `Authorization: Bearer <token>`, and `get_current_user()` checks its
+signature and expiry before any view body runs. Logout is the only operation that
+ends a session from the client's side: the frontend drops the in-memory token,
+the API records a `LOGOUT` audit entry, and the session object it held is
+discarded.
+
+The API refuses to promise more than it can enforce. The access token is a
+stateless JWT that carries only `sub`, `role` and `exp`; it has no `jti`
+property and there is no token blacklist anywhere in the platform. A token that
+was issued before a logout is therefore accepted by the API until its `exp`
+elapses, whether the caller is the original session, a copy handed to another
+viewer, or a session running after the assigning user has been deactivated.
+Deactivation blocks any *new* login for that account, but it does not expire
+the tokens already issued to it. The only stateful device the platform uses to
+reject an issued token is its expiry.
+
+**Limit: logout, a curator shutdown and a deactivation never invalidate an
+issued token.** If a token must be made unusable — for example after a support
+person copies it or after a user account is deleted — a server-side token
+identity is required: issuing a `jti` claim, storing it in a shared store
+(operational database or cache) and refusing it on every request, plus a
+revocation API. That is the domain of a future option that requires a schema or
+storage change and the explicit approval of the architect before any of it is
+written.
+
 ### 3.2 Audit Trail Cryptographic Integrity
 
 Every command, setpoint change, configuration change, fault and operator
