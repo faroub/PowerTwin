@@ -134,7 +134,8 @@ def test_port_binding_constraint_in_config_safety_invariants() -> None:
 def test_alembic_migrations_edge_resource_allocated() -> None:
     """Test the migration graph resolves through the head migration."""
     output = _run_alembic_history()
-    assert "001_initial_schema -> 002_user_accounts (head)" in output
+    assert "002_user_accounts -> 003_revoked_tokens (head)" in output
+    assert "001_initial_schema -> 002_user_accounts" in output
 
 
 def test_alembic_config_has_qualname_logger_definitions() -> None:

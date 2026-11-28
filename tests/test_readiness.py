@@ -304,6 +304,7 @@ def test_expected_tables_holds_every_model_and_the_migration_version() -> None:
         "command_records",
         "equipment_inventory",
         "plant_configurations",
+        "revoked_tokens",
         "simulation_runs",
         "telemetry_data",
         "users",
@@ -529,7 +530,9 @@ async def test_alembic_upgrade_restores_readiness(container) -> None:
         _alembic_env(port),
     )
     tables = _list_tables(port)
-    assert tables == sorted(t for t in historian_db.get_expected_tables() if t != "users")
+    assert tables == sorted(
+        t for t in historian_db.get_expected_tables() if t not in ("users", "revoked_tokens")
+    )
 
     # The readiness probe fails again until the next revision is applied: the
     # database moved one revision but still carries a missing table.
@@ -537,13 +540,27 @@ async def test_alembic_upgrade_restores_readiness(container) -> None:
     assert readiness.ready is False
     assert readiness.status == historian_db.DatabaseReadiness.STATUS_SCHEMA_MISSING
     assert readiness.reason == "DATABASE_SCHEMA_MISSING"
-    assert readiness.missing_tables == ["users"]
+    assert readiness.missing_tables == ["revoked_tokens", "users"]
 
     output = _run_command_with_retries(
         ALEMBIC_COMMAND + ["upgrade", "002_user_accounts"],
         _alembic_env(port),
     )
     assert "Running upgrade 001_initial_schema -> 002_user_accounts" in output
+
+    # The identity table is there now, but the table the revocation store
+    # writes into is not: the deployment is still incomplete, and the probe
+    # names what is missing.
+    readiness = await _probe_ready(port)
+    assert readiness.ready is False
+    assert readiness.status == historian_db.DatabaseReadiness.STATUS_SCHEMA_MISSING
+    assert readiness.missing_tables == ["revoked_tokens"]
+
+    output = _run_command_with_retries(
+        ALEMBIC_COMMAND + ["upgrade", "003_revoked_tokens"],
+        _alembic_env(port),
+    )
+    assert "Running upgrade 002_user_accounts -> 003_revoked_tokens" in output
 
     readiness = await _probe_ready(port)
 
