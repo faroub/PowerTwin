@@ -96,6 +96,9 @@ describe('Login View', () => {
   });
 
   it('ends the session when the operator disassociates', async () => {
+    const mock = installFetchMock({
+      '/api/v1/auth/logout': () => jsonResponse({ message: 'Session terminated.' }),
+    });
     platformSession.setAuthenticated(
       { username: 'engineer', role: 'ENGINEER', permissions: new Set() },
       'a-token',
@@ -106,6 +109,9 @@ describe('Login View', () => {
 
     expect(platformSession.isAuthenticated).toBe(false);
     expect(onLoginSuccess).toHaveBeenCalledTimes(1);
+    // The token is revoked on the platform as well, not only dropped here.
+    await waitFor(() => expect(mock.callsTo('/api/v1/auth/logout')).toHaveLength(1));
+    expect(mock.callsTo('/api/v1/auth/logout')[0].method).toBe('POST');
   });
 
   it('keeps the password out of any client-side storage', async () => {

@@ -320,17 +320,65 @@ describe('Session Details', () => {
 });
 
 describe('Logout', () => {
-  it('clears the in-memory session', () => {
+  it('clears the in-memory session and revokes the token on the platform', async () => {
+    const mock = installFetchMock({
+      '/api/v1/auth/logout': () => jsonResponse({ message: 'Session terminated.' }),
+    });
     platformSession.setAuthenticated(
       { username: 'engineer', role: 'ENGINEER', permissions: new Set() },
       'a-token',
     );
 
-    logout();
+    const revoked = await logout();
 
+    expect(revoked).toBe(true);
     expect(platformSession.isAuthenticated).toBe(false);
     expect(platformSession.token).toBe(null);
     expect(platformSession.user).toBe(null);
+
+    const call = mock.callsTo('/api/v1/auth/logout')[0];
+    expect(call.method).toBe('POST');
+    expect(bearerTokenOf(call)).toBe('a-token');
+  });
+
+  it('ends the browser session even when the platform cannot be reached', async () => {
+    installFetchMock({
+      '/api/v1/auth/logout': () => {
+        throw new Error('the connection was refused');
+      },
+    });
+    platformSession.setAuthenticated(
+      { username: 'engineer', role: 'ENGINEER', permissions: new Set() },
+      'a-token',
+    );
+
+    const revoked = await logout();
+
+    // The browser session ends whatever the platform answers; the token
+    // itself stays valid until it expires.
+    expect(revoked).toBe(false);
+    expect(platformSession.isAuthenticated).toBe(false);
+    expect(platformSession.token).toBe(null);
+  });
+
+  it('reports that the revocation was refused by the platform', async () => {
+    installFetchMock({
+      '/api/v1/auth/logout': () => jsonResponse({ detail: 'not authorised' }, 403),
+    });
+    platformSession.setAuthenticated(
+      { username: 'engineer', role: 'ENGINEER', permissions: new Set() },
+      'a-token',
+    );
+
+    expect(await logout()).toBe(false);
+    expect(platformSession.isAuthenticated).toBe(false);
+  });
+
+  it('asks the platform for nothing when there is no session to end', async () => {
+    const mock = installFetchMock({});
+
+    expect(await logout()).toBe(true);
+    expect(mock.calls).toHaveLength(0);
   });
 });
 

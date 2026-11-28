@@ -72,29 +72,59 @@ never tracks them while production is running. The limiter fails with a
 A caller makes a session by POSTing to `/api/v1/auth/login`; the response
 carries the JWT the frontend stores in memory. Every page thereafter sends that
 token as `Authorization: Bearer <token>`, and `get_current_user()` checks its
-signature and expiry before any view body runs. Logout is the only operation that
-ends a session from the client's side: the frontend drops the in-memory token,
-the API records a `LOGOUT` audit entry, and the session object it held is
-discarded.
+signature and expiry before any view body runs.
 
-The API refuses to promise more than it can enforce. The access token is a
-stateless JWT that carries only `sub`, `role` and `exp`; it has no `jti`
-property and there is no token blacklist anywhere in the platform. A token that
-was issued before a logout is therefore accepted by the API until its `exp`
-elapses, whether the caller is the original session, a copy handed to another
-viewer, or a session running after the assigning user has been deactivated.
-Deactivation blocks any *new* login for that account, but it does not expire
-the tokens already issued to it. The only stateful device the platform uses to
-reject an issued token is its expiry.
+**The access token carries a unique identity.** Every token the platform
+issues carries a `jti` claim (a UUIDv4), and that claim is what the platform
+names when it has to refuse the token. The identity is created at issue time
+and cannot be chosen by the caller.
 
-**Limit: logout, a curator shutdown and a deactivation never invalidate an
-issued token.** If a token must be made unusable — for example after a support
-person copies it or after a user account is deleted — a server-side token
-identity is required: issuing a `jti` claim, storing it in a shared store
-(operational database or cache) and refusing it on every request, plus a
-revocation API. That is the domain of a future option that requires a schema or
-storage change and the explicit approval of the architect before any of it is
-written.
+**Logout revokes the token on the server.** `POST /api/v1/auth/logout` records
+the `jti` of the caller's token in the revocation store and answers
+`Session terminated and the access token revoked.` From that moment on the
+token — and every copy of it, whether it was made before or after the logout —
+is refused at every protected route with `401` and `Session token has been
+revoked.` The other sessions of the same account are unaffected: they keep
+working until they expire or are ended in turn.
+
+The revocation store is chosen by the environment, never by the caller:
+
+| Environment | Store | Lifetime |
+| --- | --- | --- |
+| `production` | the `revoked_tokens` table (migration `003_revoked_tokens`, ORM `RevokedTokenModel`) | until the token expires |
+| `development`, `testing` | the process itself (`InMemoryRevocationStore`) | until the process restarts |
+
+Neither store ever falls back to the other. A store that cannot answer says
+so, and the platform **fails closed**: in production a protected route answers
+`503 Service Unavailable` — a token it could not check is a token it does not
+accept — and a logout that could not record the revocation answers `503` as
+well, because the session was not terminated and the platform says so instead
+of answering as if it had been. In development the same failure refuses the
+request with `401`.
+
+The rows of the table are bounded: a revocation carries the expiry of the token
+it names, and the revocations whose token has expired are purged after a
+logout.
+
+**The limits the platform states rather than hides:**
+
+- A token issued **before** the platform issued token identities carries no
+  `jti`. The platform cannot name it, so it accepts it until it expires and
+  says so in the log; a logout of such a token answers `Session terminated;
+  the access token cannot be revoked.` Such tokens are gone at the next
+  deployment, because every token issued from now on carries an identity.
+- **Deactivation of an account does not retroactively revoke its tokens.**
+  Deactivation blocks any *new* login for that account; a session that was
+  already started runs until it is ended, and its token is then revoked like
+  any other. The platform has no user-deactivation operation of its own yet,
+  so no revocation is recorded on its behalf.
+- Every protected route performs **one indexed lookup** of the `jti` in the
+  revocation store. The cost of refusing a revoked token is therefore one
+  primary-key read per request in production.
+- The frontend ends the browser session first and asks the platform to revoke
+  the token afterwards. When the platform cannot be reached, the browser
+  session still ends and the HMI says that the token could not be revoked and
+  stays valid until it expires.
 
 ### 3.2 Audit Trail Cryptographic Integrity
 

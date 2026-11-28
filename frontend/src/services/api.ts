@@ -585,6 +585,33 @@ export async function fetchUserDetails(token: string): Promise<UserSession | nul
   }
 }
 
-export function logout(): void {
+/**
+ * End the platform session of this browser.
+ *
+ * The browser session ends first: the token is dropped from the process
+ * memory, so the HMI is no longer authenticated whatever the platform
+ * answers. The token is then revoked on the platform itself
+ * (`POST /auth/logout`), which refuses that token — and every copy of it —
+ * at every protected route from that moment on.
+ *
+ * Returns whether the platform confirmed the revocation. A `false` means the
+ * platform could not be reached or could not record the revocation: the
+ * browser session is ended all the same, and the token stays valid until it
+ * expires.
+ */
+export async function logout(): Promise<boolean> {
+  const token = platformSession.token;
   platformSession.clear();
+  if (!token) {
+    return true;
+  }
+  try {
+    const res = await fetch(`${BASE_URL}/auth/logout`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

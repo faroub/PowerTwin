@@ -1,6 +1,7 @@
 """Authentication API Endpoints for Token Generation and User Verification."""
 
 import datetime
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -17,7 +18,15 @@ from backend.app.core.rbac import (
     get_current_user,
     require_permission,
 )
+from backend.app.core.revocation import (
+    REVOCATION_REASON_LOGOUT,
+    RevocationStoreUnavailableError,
+    purge_expired_revocations,
+    revoke_token,
+)
 from backend.app.historian.db import AsyncSessionLocal
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -115,22 +124,56 @@ async def logout(
 ) -> LogoutResponse:
     """Terminate the caller's own platform session (logout).
 
-    Logout terminates the caller's session in the platform: the frontend
-    session is discarded and the audit trail records the event. It is a
-    self-service action, so any authenticated user — including an observer —
-    can end it.
+    Logout revokes the caller's access token server-side. Every token the
+    platform issues carries a unique identity (``jti``), and the revocation is
+    recorded in the platform's revocation store: the ``revoked_tokens`` table
+    in production, the in-process store in development. A token that was
+    issued before the logout is refused from that moment on — including a copy
+    of it that was made before the logout. The other tokens of the same
+    account keep working until they expire or are revoked in turn.
 
-    Logout does not invalidate or revoke the issued access token. The
-    platform issues stateless JWTs without per-token identity, so a token that
-    was issued before logout is accepted until its expiry. This also covers a
-    token copied by the caller: the platform has no record of that copy to
-    reject it with. The lifecycle from login to expiry is therefore the only
-    lifecycle the platform can enforce, and users who need to make a copy
-    unusable must revoke it with a server-side token list (a capability this
-    platform does not provide).
+    Logout is a self-service action, so any authenticated user — including an
+    observer — can end it.
+
+    A revocation that could not be recorded is reported as a failure: the
+    session was not terminated, and the endpoint says so instead of answering
+    as if it had been.
     """
     audit_log.record("LOGOUT", current_user.username, "SESSION")
-    return LogoutResponse(message="Session terminated.")
+
+    if not current_user.token_id:
+        # A token issued before the platform issued token identities cannot be
+        # revoked. It is refused by its expiry, which is the limit the platform
+        # can enforce for it.
+        logger.warning(
+            "The session token of '%s' carries no token identity; it cannot be revoked.",
+            current_user.username,
+        )
+        return LogoutResponse(message="Session terminated; the access token cannot be revoked.")
+
+    expires_at = current_user.expires_at or (
+        datetime.datetime.now(datetime.UTC)
+        + datetime.timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    try:
+        await revoke_token(
+            current_user.token_id,
+            current_user.username,
+            expires_at,
+            REVOCATION_REASON_LOGOUT,
+        )
+    except RevocationStoreUnavailableError as err:
+        logger.error("The session of '%s' could not be revoked: %s", current_user.username, err)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The session could not be terminated. Please try again.",
+        ) from err
+
+    # The revocations of tokens that have expired by themselves are forgotten.
+    # A purge that fails is a maintenance failure, not a session failure.
+    await purge_expired_revocations()
+
+    return LogoutResponse(message="Session terminated and the access token revoked.")
 
 
 @router.get("/me", response_model=dict[str, Any])

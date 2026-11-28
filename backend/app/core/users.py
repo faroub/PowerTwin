@@ -27,7 +27,7 @@ class UserAccount:
     def __init__(
         self,
         username: str,
-        role: UserRole,
+        role: UserRole | str,
         hashed_password: str,
         is_active: bool = True,
         last_login_at: datetime.datetime | None = None,
@@ -36,7 +36,13 @@ class UserAccount:
         **kwargs: Any,
     ) -> None:
         self.username = username
-        self.role = role
+        # A row carries the role as the string the database stores, while the
+        # platform carries it as the enumeration every permission table is
+        # written against. The role is resolved here, once, so that a row
+        # read from the database and an account built in the process are the
+        # same kind of object. A role the platform does not know is refused
+        # here rather than carried further.
+        self.role = UserRole(role)
         self.hashed_password = hashed_password
         self.is_active = is_active
         self.last_login_at = last_login_at

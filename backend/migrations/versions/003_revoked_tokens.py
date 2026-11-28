@@ -30,7 +30,9 @@ def upgrade() -> None:
         "revoked_tokens",
         sa.Column("jti", sa.String(36), nullable=False),
         sa.Column("sub", sa.String(64), nullable=False),
-        sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "revoked_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("reason", sa.String(32), nullable=False, server_default="LOGOUT"),
         sa.PrimaryKeyConstraint("jti"),

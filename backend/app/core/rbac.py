@@ -1,6 +1,8 @@
 """Role-Based Access Control (RBAC) and Security Permission Management."""
 
 import datetime
+import logging
+import uuid
 from collections.abc import Callable
 from enum import StrEnum
 from typing import Any
@@ -12,6 +14,12 @@ from passlib.hash import pbkdf2_sha256
 from pydantic import BaseModel, Field
 
 from backend.app.core.config import settings
+from backend.app.core.revocation import (
+    RevocationStoreUnavailableError,
+    is_token_revoked,
+)
+
+logger = logging.getLogger(__name__)
 
 security_bearer = HTTPBearer(auto_error=False)
 
@@ -61,21 +69,46 @@ ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
 
 
 class UserSession(BaseModel):
-    """Authenticated user session token model."""
+    """Authenticated user session token model.
+
+    Attributes:
+        username: The account the token was issued to.
+        role: The role the token carries.
+        permissions: The permissions the role grants.
+        token_id: The ``jti`` claim of the token — the identity the platform
+            can name when it has to refuse the token. A token issued before
+            the platform issued token identities carries none, and such a
+            token cannot be revoked.
+        expires_at: The expiry the token carries.
+    """
 
     username: str
     role: UserRole
     permissions: set[Permission] = Field(default_factory=set)
+    token_id: str = ""
+    expires_at: datetime.datetime | None = None
 
     def has_permission(self, permission: Permission) -> bool:
         """Check if current user session possesses required permission."""
         return permission in self.permissions
 
 
-def create_user_session(username: str, role: UserRole) -> UserSession:
+def create_user_session(
+    username: str,
+    role: UserRole,
+    *,
+    token_id: str = "",
+    expires_at: datetime.datetime | None = None,
+) -> UserSession:
     """Create a UserSession instance populated with role permissions."""
     permissions = ROLE_PERMISSIONS.get(role, set())
-    return UserSession(username=username, role=role, permissions=permissions)
+    return UserSession(
+        username=username,
+        role=role,
+        permissions=permissions,
+        token_id=token_id,
+        expires_at=expires_at,
+    )
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -83,8 +116,15 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bool(pbkdf2_sha256.verify(plain_password, hashed_password))
 
 
-def create_access_token(username: str, role: UserRole) -> str:
-    """Generate JWT access token for authenticated user."""
+def create_access_token(username: str, role: UserRole, token_id: str | None = None) -> str:
+    """Generate JWT access token for authenticated user.
+
+    Every token carries a unique ``jti`` claim. The claim is the identity the
+    platform can name when it has to refuse the token — the value recorded in
+    the ``revoked_tokens`` table when the session ends — so a token that was
+    issued before this claim existed, and therefore carries none, can only be
+    refused by its expiry.
+    """
     expire = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
     )
@@ -92,6 +132,7 @@ def create_access_token(username: str, role: UserRole) -> str:
         "sub": username,
         "role": role.value,
         "exp": expire,
+        "jti": token_id or str(uuid.uuid4()),
     }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
@@ -109,7 +150,17 @@ def decode_access_token(token: str) -> UserSession:
                 headers={"WWW-Authenticate": "Bearer"},
             )
         role = UserRole(role_str)
-        return create_user_session(username, role)
+        expires_at: datetime.datetime | None = None
+        expiry = payload.get("exp")
+        if isinstance(expiry, int | float):
+            expires_at = datetime.datetime.fromtimestamp(expiry, tz=datetime.UTC)
+        token_id = payload.get("jti", "")
+        return create_user_session(
+            username,
+            role,
+            token_id=str(token_id),
+            expires_at=expires_at,
+        )
     except jwt.ExpiredSignatureError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -124,6 +175,57 @@ def decode_access_token(token: str) -> UserSession:
         ) from err
 
 
+async def reject_revoked_token(session: UserSession) -> None:
+    """Refuse a token the platform has revoked.
+
+    A token that carries no identity cannot be revoked and is accepted until
+    it expires; that is stated in the log, because it is the one case in which
+    the platform cannot refuse a token it has been handed.
+
+    Raises:
+        HTTPException: 401 when the token was revoked, and 503 when the
+            production revocation store could not be read. The platform fails
+            closed there: a token it could not check is a token it does not
+            accept.
+    """
+    if not session.token_id:
+        logger.warning(
+            "The session token of '%s' carries no token identity; it cannot be "
+            "revoked and is accepted until it expires.",
+            session.username,
+        )
+        return
+
+    try:
+        revoked = await is_token_revoked(session.token_id)
+    except RevocationStoreUnavailableError as err:
+        if settings.ENVIRONMENT == "production":
+            logger.error(
+                "The revocation store could not be read; the token of '%s' is refused.",
+                session.username,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Session validation is temporarily unavailable. Please try again.",
+            ) from err
+        logger.warning(
+            "The revocation store could not be read; the token of '%s' is refused.",
+            session.username,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials.",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from err
+
+    if revoked:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session token has been revoked. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 async def get_current_user(
     auth: HTTPAuthorizationCredentials | None = Depends(security_bearer),
 ) -> UserSession:
@@ -134,7 +236,9 @@ async def get_current_user(
             detail="Authentication required. Please provide a valid Bearer token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return decode_access_token(auth.credentials)
+    session = decode_access_token(auth.credentials)
+    await reject_revoked_token(session)
+    return session
 
 
 def require_permission(required_permission: Permission) -> Callable[..., Any]:

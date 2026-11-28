@@ -151,6 +151,15 @@ function replyTo(
     };
   }
 
+  if (method === 'POST' && path === '/api/v1/auth/logout') {
+    // The platform revokes the token the caller presents and answers that
+    // the session is terminated.
+    return {
+      status: 200,
+      body: { message: 'Session terminated and the access token revoked.' },
+    };
+  }
+
   if (method === 'GET' && path === '/api/v1/info') {
     return { status: 200, body: systemInfo(state.engineState, state.speedFactor) };
   }

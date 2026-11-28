@@ -28,15 +28,27 @@ import { UserSession } from './services/auth';
 export const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewId>('overview');
   const [user, setUser] = useState<UserSession | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const handleLoginSuccess = () => {
+    setNotice(null);
     setUser(platformSession.user);
   };
 
   const handleLogout = () => {
-    logout();
+    // The browser session ends at once; the revocation of the token on the
+    // platform is reported afterwards, because the operator must not be held
+    // on a control screen while the platform is asked.
+    const revocation = logout();
     setUser(null);
     setCurrentView('overview');
+    void revocation.then((revoked) => {
+      setNotice(
+        revoked
+          ? null
+          : 'The session ended in this browser, but the platform could not revoke the access token. It stays valid until it expires.',
+      );
+    });
   };
 
   const renderView = () => {
@@ -89,7 +101,7 @@ export const App: React.FC = () => {
   return (
     <>
       {!user ? (
-        <LoginView onLoginSuccess={handleLoginSuccess} />
+        <LoginView onLoginSuccess={handleLoginSuccess} notice={notice} />
       ) : (
         <Layout currentView={currentView} onSelectView={setCurrentView} user={user} onLogout={handleLogout}>
           {renderView()}

@@ -656,6 +656,33 @@ A screenshot of the Historian screen therefore now distinguishes *"the store
 holds no rows"* (the run has not been recorded, or the database is
 unreachable) from *"the store holds rows"* (the run has been recorded).
 
+### 4.17 The Session Is Revoked Server-Side, With Three Named Limits
+
+Logout revokes the caller's access token on the platform: every issued token
+carries a unique `jti`, the logout records it in the revocation store of the
+environment, and a revoked token is refused at every protected route — a copy
+taken before the logout included (§3.1.1 of
+`docs/11_DEPLOYMENT_AND_CYBERSECURITY.md`). Three limits are named here
+rather than left to be discovered:
+
+- **A token issued before the platform issued token identities cannot be
+  revoked.** It carries no `jti`, so the platform cannot name it. It is
+  accepted until it expires, the platform logs that fact, and the answer of
+  the logout says *"the access token cannot be revoked"*. Every token issued
+  from the deployment of this change onwards carries an identity, so the class
+  of token shrinks to nothing on its own.
+- **The deactivation of an account does not retroactively revoke its tokens.**
+  Deactivation blocks the next login; a session that was already started runs
+  until it is ended, and its token is then revoked like any other. The
+  platform has no user-deactivation operation of its own yet, so no revocation
+  is recorded on its behalf.
+- **The refusal of a revoked token costs one database read per request.** In
+  production, every protected route looks the token identity up in the
+  `revoked_tokens` table (one indexed primary-key read). The platform fails
+  closed: when the store cannot be read, the route answers `503` rather than
+  accepting a token it could not check. In development the store is the
+  process itself, so a restart ends every revocation.
+
 ---
 
 ## 5. Reproducibility and Determinism Limitations
