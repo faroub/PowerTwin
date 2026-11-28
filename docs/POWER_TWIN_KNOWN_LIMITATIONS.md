@@ -683,6 +683,42 @@ rather than left to be discovered:
   accepting a token it could not check. In development the store is the
   process itself, so a restart ends every revocation.
 
+### 4.18 The Identity of a Request Behind a Proxy Depends on the Proxy
+
+`TRUSTED_PROXIES` is empty by default, so the identity the rate limiter
+throttles on is the request peer address, and the headers of the request carry
+no authority. A deployment that declares a proxy hands that proxy the power to
+name the identity of every request that arrives through it, and the platform
+protects that power only as far as the declaration and the header allow
+(§3.1.2 of `docs/11_DEPLOYMENT_AND_CYBERSECURITY.md`):
+
+- **The platform walks the chain from the peer**, traversing a hop only while
+  that hop is declared. A client that writes a `X-Forwarded-For` of its own
+  therefore cannot name itself, because the value it wrote sits to the left of
+  the address the proxy appended.
+- **A proxy that forwards a client-written chain unchanged defeats that.** The
+  platform then reads the client's claim as the identity, and a client can
+  spread its throttle over several buckets by writing a new chain per attempt.
+  The platform cannot detect this: it has no way to tell a claim a proxy wrote
+  from one it forwarded. The requirement is therefore a requirement on the
+  deployment, and the deployment has to meet it.
+- **A declared range trusts every address in it.** An address of a client that
+  happens to lie inside a declared proxy range is read as a proxy, so the walk
+  continues past it. Declare the smallest range that covers the proxies.
+- **The identity is the address, not the account.** A proxy that pools many
+  clients behind one address (a NAT, a load balancer that does not append)
+  yields one identity for all of them, so their attempts share one throttle.
+
+### 4.19 The Chain Is Read As One Line-Ordered Sequence
+
+A request may carry `X-Forwarded-For` more than once. The platform reads every
+line as one chain, in the order the lines arrived, as RFC 7230 requires of a
+list-based header field. A proxy that appends its observation to the first
+line it holds rather than to the combined chain puts the address it observed
+*before* a client-supplied value, and the platform would read that value as
+the client. The requirement is again a requirement on the proxy: it has to
+combine the lines it received and append its observation to the end.
+
 ---
 
 ## 5. Reproducibility and Determinism Limitations

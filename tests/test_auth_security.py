@@ -15,12 +15,10 @@ These tests cover:
 import datetime
 import logging
 import os
-from typing import Any
 from unittest import mock
 
 import jwt
 import pytest
-from fastapi import Request
 from fastapi.testclient import TestClient
 from passlib.hash import pbkdf2_sha256
 
@@ -31,7 +29,6 @@ from backend.app.core.authentication import (
     AuthenticationService,
 )
 from backend.app.core.config import settings
-from backend.app.core.identity import resolve_client_id
 from backend.app.core.limits import AuthenticationRateLimiter
 from backend.app.core.rbac import (
     ROLE_PERMISSIONS,
@@ -405,68 +402,9 @@ async def test_non_production_login_still_accepts_local_accounts(
 
 
 # Client identity resolution for the rate limiter -------------------------------------------------
-
-
-def _client_request(
-    peer: str,
-    headers: dict[str, str],
-    link: dict[str, Any] | None = None,
-) -> Request:
-    """Construct one request whose peer is ``peer`` and whose headers carry ``headers``."""
-    scope = {
-        "type": "http",
-        "client": (peer, 0),
-        "headers": [
-            (name.lower().encode(), value.encode()) for name, value in (headers or {}).items()
-        ],
-    }
-    scope.update(link or {})
-    return Request(scope)
-
-
-@pytest.mark.parametrize(
-    ("peer", "header_name", "header_value", "trusted_proxy", "expected"),
-    [
-        # No proxy is declared to the application, so its headers carry no authority.
-        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8", None, "10.0.0.1"),
-        ("10.0.0.1", "X-Real-IP", "8.8.8.8", None, "10.0.0.1"),
-        ("10.0.0.1", None, None, None, "10.0.0.1"),
-        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8, 7.7.7.7", None, "10.0.0.1"),
-        ("10.0.0.1", "X-Forwarded-For", "not-an-ip", None, "10.0.0.1"),
-        # An unidentified peer can never be declared as a proxy.
-        ("testclient", "X-Forwarded-For", "8.8.8.8", None, "testclient"),
-        ("testclient", "X-Forwarded-For", "8.8.8.8", "10.0.0.1", "testclient"),
-        # A declared proxy is awarded the chain head, the neighboring hop's tender.
-        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8", "10.0.0.1", "8.8.8.8"),
-        ("10.0.0.1", "X-Real-IP", "8.8.8.8", "10.0.0.1", "8.8.8.8"),
-        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8, 7.7.7.7", "10.0.0.1", "8.8.8.8"),
-        # A declared CIDR block awards the peer's position inside the block.
-        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8", "10.0.0.0/8", "8.8.8.8"),
-        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8, not-an-ip", "10.0.0.1", "8.8.8.8"),
-        ("10.0.0.1", "X-Forwarded-For", "not-an-ip", "10.0.0.1", "10.0.0.1"),
-        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8", "192.168.1.0/24", "10.0.0.1"),
-        ("10.0.0.1", "X-Forwarded-For", "8.8.8.8", "not-an-ip", "10.0.0.1"),
-    ],
-)
-def test_client_identity_resolver(
-    monkeypatch: pytest.MonkeyPatch,
-    peer: str,
-    header_name: str | None,
-    header_value: str | None,
-    trusted_proxy: str | None,
-    expected: str,
-) -> None:
-    """Resolve one client identity per request, trusted only by declaration.
-
-    The peer carries the identity by default. The forwarded headers are trusted
-    only when the peer is declared in `settings.TRUSTED_PROXIES`, and a header
-    chain that contains an unparsable address falls back to the peer.
-    """
-    monkeypatch.setattr(settings, "TRUSTED_PROXIES", [trusted_proxy] if trusted_proxy else [])
-    headers = {header_name: header_value} if header_name else {}
-
-    request = _client_request(peer, headers)
-    assert resolve_client_id(request) == expected
+#
+# The contract of the resolver itself is covered by `tests/test_client_identity.py`;
+# what is checked here is what the login path does with the identity it returns.
 
 
 @pytest.mark.asyncio

@@ -58,6 +58,9 @@ documented capacity of the table is one hundred thousand topics: the least
 recently used identities are evicted and every window that carries no active
 attempt expires, so the table never grows without limit.
 
+The identity is normalized, so two spellings of one address are one identity
+and cannot be used to spread a throttle over several buckets.
+
 A failed login against a username that exists in no row of the production
 database is recorded and throttled the same way as a failed login against a
 wrong password, so the rejection message "Incorrect username or password."
@@ -125,6 +128,68 @@ logout.
   the token afterwards. When the platform cannot be reached, the browser
   session still ends and the HMI says that the token could not be revoked and
   stays valid until it expires.
+
+### 3.1.2 What a Trusted Proxy Has to Do
+
+`TRUSTED_PROXIES` is **empty by default**: the request peer address is the
+identity, and the headers of the request carry no authority at all. A
+deployment that runs the platform behind a reverse proxy declares that proxy
+here, and the declaration is a plain address or a CIDR block:
+
+| Declaration | Covers |
+| --- | --- |
+| `10.0.0.7` | that one IPv4 address (a `/32`) |
+| `2001:db8::7` | that one IPv6 address (a `/128`) |
+| `10.0.0.0/8` | every IPv4 address of the block |
+| `2001:db8::/32` | every IPv6 address of the block |
+
+A plain IPv6 address is **not** read as an IPv4-sized block: `2001:db8::7`
+declares one host, not a whole IPv6 prefix. A declaration that names no
+network at all — a malformed address, a block with an impossible prefix
+length — trusts nothing rather than something guessed.
+
+**The chain is walked from the peer, never from the left.** `X-Forwarded-For`
+is a chain, not an address: every proxy appends the address it observed to the
+end of it, so the rightmost entry is the hop closest to the application and the
+leftmost entry is the oldest claim in the chain — a claim the client itself
+may have written. The platform walks the chain from the immediate peer towards
+the client and traverses a hop only while that hop is declared in
+`TRUSTED_PROXIES`. The first hop that is not declared is the client; what lies
+to its left is not attributed to anybody. A client that writes a
+`X-Forwarded-For` of its own therefore cannot name itself: the value it wrote
+sits to the left of the address the trusted proxy appended, and the walk stops
+at that address.
+
+A request that arrives from a peer that is **not** declared is never awarded a
+forwarded address, whatever its headers claim. A hop the platform cannot read
+— a malformed address — ends the chain, and the peer address is used. A chain
+of declared proxies and nothing else names no client, and the peer address is
+used there as well.
+
+Every `X-Forwarded-For` line of a request is read as one chain, in the order
+the lines arrived. `X-Real-IP` carries a single address rather than a chain,
+so it is read only while no `X-Forwarded-For` is present.
+
+A declared proxy therefore has to satisfy three requirements, and a deployment
+that does not meet them is trusting the wrong address:
+
+1. **The immediate peer is the declared proxy.** The platform awards a
+   forwarded address to a request only when the peer it arrived from is
+   declared here.
+2. **The proxy appends the address it observed to the end of the chain.** The
+   platform reads the chain from the right, so the observation of the closest
+   proxy is the entry that ends the walk.
+3. **The proxy does not forward a client-supplied chain unchanged.** A proxy
+   that passes the header of the client through has no observation of its own
+   to append, and the platform would read the client's claim. A proxy that
+   combines the received header lines into one chain and appends its own
+   observation to that chain satisfies this.
+
+The consequence for the deployment is worth stating plainly: behind a proxy
+that appends its observation correctly, a client cannot choose the identity it
+is throttled on. Behind a proxy that forwards a client-written chain
+unchanged, it can — and the throttle of that identity can be spread over
+several buckets by writing a new chain per attempt.
 
 ### 3.2 Audit Trail Cryptographic Integrity
 

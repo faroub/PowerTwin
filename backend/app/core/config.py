@@ -113,12 +113,24 @@ class Settings(BaseSettings):
     # client identity is the request peer address by default, and is only
     # ever rewritten by `X-Forwarded-For` or `X-Real-IP` when the peer is
     # declared in `TRUSTED_PROXIES`.
+    #
+    # A declaration is a plain address or a CIDR block. A plain address
+    # declares that one address alone: an IPv4 address is a `/32` and an IPv6
+    # address is a `/128`. A declaration that names no network at all trusts
+    # nothing.
+    #
+    # A declared proxy must append the address it observed to the end of the
+    # `X-Forwarded-For` chain, and must not forward a chain the client wrote
+    # unchanged: the platform walks the chain from the peer towards the
+    # client, and traverses a hop only while that hop is declared here.
     TRUSTED_PROXIES: list[str] = Field(
         default=[],
         description=(
             "Peer addresses declared as trusted to rewrite X-Forwarded-For or "
-            "X-Real-IP headers, as plain addresses or CIDR blocks. Empty by "
-            "default: the request peer address is trusted then."
+            "X-Real-IP headers, as plain addresses (one IPv4 address is a /32, "
+            "one IPv6 address is a /128) or CIDR blocks. Empty by default: the "
+            "request peer address is the identity then, and the headers of the "
+            "request carry no authority."
         ),
     )
 
