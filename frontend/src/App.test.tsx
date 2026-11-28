@@ -12,7 +12,7 @@ import {
   TOKEN_RESPONSE,
   USER_DETAILS,
 } from './test/fixtures';
-import { installFetchMock, jsonResponse } from './test/fetchMock';
+import { installFetchMock, jsonResponse, bearerTokenOf } from './test/fetchMock';
 
 const USERNAME_FIELD = 'Username (observer, engineer, admin)';
 
@@ -20,6 +20,7 @@ function installPlatformMock() {
   return installFetchMock({
     '/api/v1/auth/login': () => jsonResponse(TOKEN_RESPONSE),
     '/api/v1/auth/me': () => jsonResponse(USER_DETAILS),
+    '/api/v1/auth/logout': () => jsonResponse({ message: 'Session terminated.' }),
     '/api/v1/info': () => jsonResponse(HEALTHY_SYSTEM_INFO),
     '/api/v1/overview': () => jsonResponse(CONNECTED_TELEMETRY),
     '/api/v1/topology': () => jsonResponse(REFERENCE_PLANT_TOPOLOGY),
@@ -133,5 +134,20 @@ describe('HMI Application', () => {
     expect(window.localStorage.length).toBe(0);
     expect(window.sessionStorage.length).toBe(0);
     expect(document.cookie).toBe('');
+  });
+
+  it('revokes the access token on the platform when the operator logs out', async () => {
+    const mock = installPlatformMock();
+    const user = userEvent.setup();
+    render(<App />);
+    await logIn(user);
+
+    await user.click(screen.getByText('LOGOUT'));
+
+    await waitFor(() => expect(mock.callsTo('/api/v1/auth/logout')).toHaveLength(1));
+    const call = mock.callsTo('/api/v1/auth/logout')[0];
+    expect(call.method).toBe('POST');
+    expect(bearerTokenOf(call)).toBe('test-access-token');
+    expect(platformSession.isAuthenticated).toBe(false);
   });
 });

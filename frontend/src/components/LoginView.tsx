@@ -13,12 +13,14 @@ import { fetchUserDetails, login, logout, platformSession } from '../services/ap
 interface LoginViewProps {
   /** Called once the platform session holds the authenticated user snapshot. */
   onLoginSuccess: () => void;
+  /** Optional notice rendered above the login form, e.g. the outcome of a logout. */
+  notice?: string | null;
   /** Optional extra content rendered inside the login panel. */
   children?: React.ReactNode;
 }
 
 export const LoginView: React.FC<LoginViewProps> = (props) => {
-  const { onLoginSuccess, children } = props;
+  const { onLoginSuccess, notice, children } = props;
   const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +53,9 @@ export const LoginView: React.FC<LoginViewProps> = (props) => {
 
   const handleDisassociate = () => {
     if (platformSession.token) {
-      logout();
+      // The revocation of the token on the platform is best effort here: the
+      // browser session ends in any case, and the token expires on its own.
+      void logout();
     }
     onLoginSuccess();
   };
@@ -70,6 +74,15 @@ export const LoginView: React.FC<LoginViewProps> = (props) => {
     >
       <h1 style={{ color: '#38bdf8', fontSize: '1.75rem' }}>PowerTwin BESS Platform</h1>
       <div style={{ color: '#94a3b8', marginBottom: '8px' }}>Log in to the HMI session</div>
+
+      {notice && (
+        <div
+          role="status"
+          style={{ color: '#fbbf24', fontSize: '0.85rem', maxWidth: '320px', textAlign: 'center' }}
+        >
+          {notice}
+        </div>
+      )}
 
       <form
         onSubmit={handleSubmit}
