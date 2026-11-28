@@ -12,12 +12,15 @@ Two properties are pinned down above all:
 
 from __future__ import annotations
 
+import hashlib
 import math
 from pathlib import Path
 
 import pytest
 
 from backend.app.calibration.dataset import (
+    REJECTION_REASONS,
+    dataset_summary,
     load_observations_csv,
     validate_observations,
 )
@@ -213,3 +216,192 @@ class TestVoltageBandArguments:
 
         assert dataset.observations == ()
         assert dataset.rejection_counts == {"VOLTAGE_OUT_OF_BAND": 1}
+
+
+class TestRowGates:
+    """Every gate rejects what it should, with a stated reason."""
+
+    @pytest.mark.parametrize("cell", ["nan", "inf", "-inf"])
+    def test_a_non_finite_measured_value_is_rejected(self, tmp_path: Path, cell: str) -> None:
+        text = HEADER + "\n" + f"1000,50.0,{cell},10.0,10000.0,25.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert dataset.observations == ()
+        assert dataset.rejection_counts == {"NON_FINITE": 1}
+
+    @pytest.mark.parametrize("soc", ["-0.1", "100.1", "101"])
+    def test_a_soc_outside_0_100_is_rejected(self, tmp_path: Path, soc: str) -> None:
+        text = HEADER + "\n" + f"1000,{soc},1000.0,10.0,10000.0,25.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert dataset.observations == ()
+        assert dataset.rejection_counts == {"SOC_OUT_OF_RANGE": 1}
+
+    @pytest.mark.parametrize("voltage,power", [("50.0", "500.0"), ("2001.0", "20010.0")])
+    def test_a_voltage_outside_the_declared_band_is_rejected(
+        self, tmp_path: Path, voltage: str, power: str
+    ) -> None:
+        text = HEADER + "\n" + f"1000,50.0,{voltage},10.0,{power},25.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert dataset.observations == ()
+        assert dataset.rejection_counts == {"VOLTAGE_OUT_OF_BAND": 1}
+
+    def test_a_power_and_current_that_disagree_in_sign_are_rejected(self, tmp_path: Path) -> None:
+        text = HEADER + "\n" + "1000,50.0,1000.0,-10.0,10000.0,25.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert dataset.observations == ()
+        assert dataset.rejection_counts == {"POWER_CURRENT_SIGN_MISMATCH": 1}
+
+    def test_a_power_that_contradicts_voltage_times_current_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        text = HEADER + "\n" + "1000,50.0,1000.0,10.0,10100.0,25.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert dataset.observations == ()
+        assert dataset.rejection_counts == {"POWER_CURRENT_INCONSISTENT": 1}
+
+    def test_a_power_within_tolerance_of_voltage_times_current_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        text = HEADER + "\n" + "1000,50.0,1000.0,10.0,10005.0,25.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert len(dataset.observations) == 1
+        assert dataset.rejected == ()
+
+    def test_the_sign_gate_is_not_applied_below_the_power_floor(self, tmp_path: Path) -> None:
+        # 0.5 W is below the 1 W floor of the sign gate, so the sign of the
+        # current is not compared; the consistency gate still holds the row to
+        # v * i.
+        text = HEADER + "\n" + "1000,50.0,1000.0,0.0005,-0.5,25.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert len(dataset.observations) == 1
+        assert dataset.rejected == ()
+
+    def test_an_empty_cell_is_a_missing_value(self, tmp_path: Path) -> None:
+        text = HEADER + "\n" + "1000,50.0,,10.0,10000.0,25.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert dataset.observations == ()
+        assert dataset.rejection_counts == {"MISSING_VALUE": 1}
+        assert "voltage_v" in dataset.rejected[0].detail
+
+    def test_a_non_numeric_cell_is_malformed(self, tmp_path: Path) -> None:
+        text = HEADER + "\n" + "1000,50.0,abc,10.0,10000.0,25.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert dataset.observations == ()
+        assert dataset.rejection_counts == {"MALFORMED_ROW": 1}
+
+    def test_a_row_with_the_wrong_number_of_fields_is_malformed(self, tmp_path: Path) -> None:
+        text = HEADER + "\n" + "1000,50.0,1000.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert dataset.observations == ()
+        assert dataset.rejection_counts == {"MALFORMED_ROW": 1}
+
+    def test_every_declared_rejection_reason_can_occur(self, tmp_path: Path) -> None:
+        rows = [
+            "not-a-number,50.0,1000.0,10.0,10000.0,25.0",
+            "1000,50.0,1000.0,10.0,10000.0",
+            "2000,,1000.0,10.0,10000.0,25.0",
+            "3000,nan,1000.0,10.0,10000.0,25.0",
+            "4000,120.0,1000.0,10.0,10000.0,25.0",
+            "5000,50.0,1000.0,-10.0,10000.0,25.0",
+            "6000,50.0,1000.0,10.0,20000.0,25.0",
+            "7000,50.0,5.0,10.0,50.0,25.0",
+            "8000,50.0,1000.0,10.0,10000.0,25.0",
+            "8000,50.0,1000.0,10.0,10000.0,25.0",
+        ]
+        text = HEADER + "\n" + "\n".join(rows) + "\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert set(dataset.rejection_counts) == set(REJECTION_REASONS)
+        assert [o.timestamp_ns for o in dataset.observations] == [8_000]
+
+
+class TestTheLoader:
+    def test_the_sha256_names_the_exact_file(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, HEADER + "\n" + _row(1_000) + "\n")
+
+        dataset = load_observations_csv(path)
+
+        assert dataset.sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+        assert dataset.source == str(path)
+
+    def test_a_missing_file_raises_file_not_found(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError, match="No observation file"):
+            load_observations_csv(tmp_path / "does-not-exist.csv")
+
+    def test_an_empty_file_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="empty"):
+            load_observations_csv(_write(tmp_path, ""))
+
+    def test_a_missing_required_column_raises(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "timestamp_ns,soc_pct\n1000,50.0\n")
+
+        with pytest.raises(ValueError, match="missing the required column"):
+            load_observations_csv(path)
+
+    def test_undeclared_columns_are_ignored_but_named(self, tmp_path: Path) -> None:
+        text = HEADER + ",operator_note\n" + _row(1_000) + ",hello\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert dataset.ignored_columns == ("operator_note",)
+        assert len(dataset.observations) == 1
+
+    def test_blank_lines_are_skipped(self, tmp_path: Path) -> None:
+        text = HEADER + "\n\n" + _row(1_000) + "\n   \n" + _row(2_000) + "\n\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert len(dataset.observations) == 2
+        assert dataset.rejected == ()
+
+    def test_rows_total_counts_accepted_and_rejected(self, tmp_path: Path) -> None:
+        text = HEADER + "\n" + _row(1_000) + "\n" + "2000,150.0,1000.0,10.0,10000.0,25.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        assert dataset.rows_total == 2
+        assert len(dataset.observations) == 1
+        assert len(dataset.rejected) == 1
+
+    def test_rows_without_a_container_group_under_the_empty_string(self, tmp_path: Path) -> None:
+        text = HEADER + "\n" + _row(1_000) + "\n" + _row(2_000) + "\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+
+        grouped = dataset.by_container()
+        assert set(grouped) == {""}
+        assert len(grouped[""]) == 2
+
+    def test_the_summary_reports_every_count(self, tmp_path: Path) -> None:
+        text = HEADER + "\n" + _row(1_000) + "\n" + "2000,150.0,1000.0,10.0,10000.0,25.0\n"
+
+        dataset = load_observations_csv(_write(tmp_path, text))
+        summary = dataset_summary(dataset)
+
+        assert summary["rows_total"] == 2
+        assert summary["rows_accepted"] == 1
+        assert summary["rows_rejected"] == 1
+        assert summary["rejection_reasons"] == {"SOC_OUT_OF_RANGE": 1}
+        assert summary["sha256"] == dataset.sha256
+        assert summary["source"] == dataset.source
+        assert summary["ignored_columns"] == []
