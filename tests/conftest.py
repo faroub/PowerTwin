@@ -10,6 +10,7 @@ from backend.app.core.operator_journal import (
     OperatorActionJournal,
     set_operator_journal,
 )
+from backend.app.core.revocation import reset_development_store
 from backend.app.main import app
 
 
@@ -17,6 +18,18 @@ from backend.app.main import app
 def client() -> TestClient:
     """Provide TestClient for FastAPI endpoint testing."""
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def clean_revocation_store() -> Iterator[None]:
+    """Start every test with an empty development revocation store.
+
+    The store of a development environment lives in the process, so without
+    this the revocations of one test would still be there for the next one.
+    """
+    reset_development_store()
+    yield
+    reset_development_store()
 
 
 @pytest.fixture(autouse=True)
